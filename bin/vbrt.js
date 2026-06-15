@@ -152,16 +152,12 @@ async function cmdAdd(args = []) {
 
   if (push) {
     try {
-      const { url, dashboardUrl, newToken } = await pushBundle(bundle);
+      const { url, dashboardUrl, newToken, tokenPath } = await pushBundle(bundle);
       console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" — view & share at:`));
       console.log(`  ${C.cyan(url)}`);
       console.log(C.dim(`  Your projects: ${dashboardUrl}`));
       if (newToken) {
-        console.log(
-          C.dim(
-            '  (saved an access token to ~/.viberate/credentials.json — keep it to manage your projects)',
-          ),
-        );
+        console.log(C.dim(`  (saved an access token to ${tokenPath} — keep it to manage your projects)`));
       }
       console.log('');
     } catch (err) {

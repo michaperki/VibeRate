@@ -66,5 +66,5 @@ export async function pushBundle(bundle, { apiUrl = apiBase(), token = loadToken
     saveToken(apiUrl, out.token);
     newToken = true;
   }
-  return { ...out, token: out.token || token || null, newToken, dashboardUrl: `${apiUrl}/app` };
+  return { ...out, token: out.token || token || null, newToken, dashboardUrl: `${apiUrl}/app`, tokenPath: credsPath() };
 }

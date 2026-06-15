@@ -18,6 +18,9 @@ const HOSTED = process.env.VBRT_HOSTED === '1';
 
 export function startServer(port = 4317) {
   const app = express();
+  // Behind Fly's (or any) TLS-terminating proxy, honor X-Forwarded-Proto so
+  // req.protocol is 'https' — otherwise minted share links come out as http://.
+  app.set('trust proxy', true);
   app.use(express.json({ limit: '50mb' })); // bundles carry full conversations
 
   // Liveness probe for the host's health checks. Cheap, no I/O.
