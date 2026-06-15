@@ -6,6 +6,8 @@ import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
 import { newToken, hashToken, bearer } from './auth.js';
+import { mountAuth, currentUser } from './oauth.js';
+import { linkOwner } from './accounts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -16,15 +18,26 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 // your workspace home and the list shows every project on the machine.
 const HOSTED = process.env.VBRT_HOSTED === '1';
 
+// The owner hashes a request can act as: a signed-in account's linked tokens, or
+// a single machine token via Bearer. null = unauthenticated (hosted), or local
+// (unrestricted). [] = signed in but nothing linked yet.
+function currentOwners(req) {
+  if (!HOSTED) return null;
+  const user = currentUser(req);
+  if (user) return user.ownerHashes || [];
+  const token = bearer(req);
+  return token ? [hashToken(token)] : null;
+}
+
 // A project's reads (its page + APIs) are allowed when: we're local (single-user),
-// the project is published public, or the requester holds the owner token. Private
-// projects are invisible to everyone but their owner — push ≠ publish.
+// the project is published public, or the requester owns it (session or token).
+// Private projects are invisible to everyone but their owner — push ≠ publish.
 function canRead(project, req) {
   if (!HOSTED) return true;
   if (!project) return false;
   if (project.visibility === 'public') return true;
-  const token = bearer(req);
-  return !!token && hashToken(token) === project.owner;
+  const owners = currentOwners(req);
+  return !!owners && owners.includes(project.owner);
 }
 
 export function startServer(port = 4317) {
@@ -34,18 +47,30 @@ export function startServer(port = 4317) {
   app.set('trust proxy', true);
   app.use(express.json({ limit: '50mb' })); // bundles carry full conversations
 
+  if (HOSTED) mountAuth(app); // /auth/* sign-in, /api/me, /api/auth/providers
+
   // Liveness probe for the host's health checks. Cheap, no I/O.
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true, hosted: HOSTED, schema: BUNDLE_SCHEMA });
   });
 
-  // Project list. Hosted: requires an owner token and returns only that owner's
-  // projects (no anonymous enumeration). Local: returns everything.
+  // Project list. Hosted: scoped to the caller's owners (session account or token);
+  // no anonymous enumeration. Local: returns everything.
   app.get('/api/projects', (req, res) => {
     if (!HOSTED) return res.json(listProjects());
-    const token = bearer(req);
-    if (!token) return res.status(401).json({ error: 'auth required' });
-    res.json(listProjects(hashToken(token)));
+    const owners = currentOwners(req);
+    if (!owners) return res.status(401).json({ error: 'auth required' });
+    res.json(listProjects(owners));
+  });
+
+  // Claim flow: bind a machine token's projects to the signed-in account.
+  app.post('/api/link', (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ error: 'sign in first' });
+    const token = req.body && req.body.token;
+    if (!token) return res.status(400).json({ error: 'missing token' });
+    const updated = linkOwner(user.id, hashToken(String(token)));
+    res.json({ ok: true, projectCount: updated ? updated.ownerHashes.length : 0 });
   });
 
   // Cold-start context: the global instruction files on the *local* machine.
@@ -58,9 +83,9 @@ export function startServer(port = 4317) {
   // projects (built from pushed data only). Hosted is token-scoped; local spans all.
   app.get('/api/workspace', (req, res) => {
     if (!HOSTED) return res.json(getWorkspaceRollup());
-    const token = bearer(req);
-    if (!token) return res.status(401).json({ error: 'auth required' });
-    res.json(getWorkspaceRollup(hashToken(token)));
+    const owners = currentOwners(req);
+    if (!owners) return res.status(401).json({ error: 'auth required' });
+    res.json(getWorkspaceRollup(owners));
   });
 
   // Ingest: accept a pushed bundle, store it under a fresh unlisted id, and
@@ -170,7 +195,7 @@ export function startServer(port = 4317) {
   // at /app (token-scoped to your projects). Local: `/` is the SPA workspace home.
   if (HOSTED) {
     app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'landing.html')));
-    app.get(['/app', '/app/*'], sendApp);
+    app.get(['/app', '/app/*', '/link'], sendApp);
   } else {
     app.get('/', sendApp);
   }

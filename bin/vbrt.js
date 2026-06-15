@@ -153,7 +153,7 @@ async function cmdAdd(args = []) {
   if (push) {
     try {
       const isPublic = args.includes('--public');
-      const { url, dashboardUrl, newToken, tokenPath, visibility } = await pushBundle(bundle, { isPublic });
+      const { url, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
       if (visibility === 'public') {
         console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (public) — view & share at:`));
         console.log(`  ${C.cyan(url)}`);
@@ -164,7 +164,8 @@ async function cmdAdd(args = []) {
         console.log(C.dim('  Publish it from your dashboard, or push with --public to share a link.'));
       }
       if (newToken) {
-        console.log(C.dim(`  (saved an access token to ${tokenPath} — keep it to manage your projects)`));
+        console.log(C.dim(`  (saved an access token to ${tokenPath})`));
+        if (linkUrl) console.log(C.dim(`  Link these to your account: ${linkUrl}`));
       }
       console.log('');
     } catch (err) {

@@ -110,10 +110,11 @@ export function saveSessions(cwd, sessions, opts = {}) {
   return { slug, added, skipped, total: manifest.sessions.length };
 }
 
-// List captured projects. With `owner` (a hashed token) set, return only that
-// owner's projects — used by the hosted dashboard so one pusher can't enumerate
-// another's. Local `vbrt serve` calls it with no owner and sees everything.
+// List captured projects. With `owner` set (a hashed token, or an array of them
+// for a multi-token account) return only those owners' projects — so one pusher
+// can't enumerate another's. Local `vbrt serve` passes nothing and sees everything.
 export function listProjects(owner = null) {
+  const owners = owner == null ? null : Array.isArray(owner) ? owner : [owner];
   let slugs;
   try {
     slugs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true });
@@ -125,7 +126,7 @@ export function listProjects(owner = null) {
     if (!e.isDirectory()) continue;
     const manifest = readJson(path.join(PROJECTS_DIR, e.name, 'project.json'), null);
     if (!manifest) continue;
-    if (owner && manifest.owner !== owner) continue;
+    if (owners && !owners.includes(manifest.owner)) continue;
     projects.push(manifest);
   }
   projects.sort((a, b) =>

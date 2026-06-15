@@ -1453,58 +1453,102 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Token gate for the hosted dashboard (/app). The owner token is printed by
-// `vbrt push`; we accept it via /app#<token> (one-click from the CLI) or a paste
-// form, then keep it in localStorage and send it as a Bearer on API calls.
-function renderTokenPrompt(msg) {
+// The signed-in account (session cookie), or null. Doesn't throw.
+async function getMe() {
+  try {
+    const r = await fetch('/api/me');
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+// Sign-in screen: social providers (from /api/auth/providers) + a machine-token
+// fallback (paste the token from `vbrt push`).
+async function renderSignIn(msg) {
   showHome();
+  let providers = [];
+  try {
+    providers = ((await (await fetch('/api/auth/providers')).json()).providers) || [];
+  } catch {
+    /* providers endpoint missing (local/old server) */
+  }
+  const label = { github: 'Continue with GitHub', google: 'Continue with Google' };
+  const btns = providers
+    .map((p) => `<a class="signin-btn ${esc(p)}" href="/auth/${esc(p)}/start">${esc(label[p] || 'Continue with ' + p)}</a>`)
+    .join('');
   el('#home').innerHTML = `
     <div class="home-wrap">
-      <header class="home-head"><h1>Your projects</h1>
-        <p class="dim-note">Paste the access token VibeRate saved when you first ran
-          <code>vbrt push</code> — it's in <code>~/.viberate/credentials.json</code>.</p></header>
+      <header class="home-head"><h1>Sign in to VibeRate</h1>
+        <p class="dim-note">Your private dashboard and the projects you've published.</p></header>
       ${msg ? `<div class="empty">${esc(msg)}</div>` : ''}
-      <div class="token-form">
-        <input id="token-input" type="password" placeholder="vbrt access token" autocomplete="off" />
-        <button id="token-go">View my projects</button>
-      </div>
-    </div>`;
+      <div class="signin">${btns || '<div class="dim-note">No sign-in providers configured yet.</div>'}</div>
+      <details class="signin-token">
+        <summary>Use an access token instead</summary>
+        <p class="dim-note">Paste the token from <code>vbrt push</code> (in <code>~/.viberate/credentials.json</code>).</p>
+        <div class="token-form">
+          <input id="token-input" type="password" placeholder="vbrt access token" autocomplete="off" />
+          <button id="token-go">View my projects</button>
+        </div>
+      </details>`;
   const go = () => {
     const v = el('#token-input').value.trim();
     if (!v) return;
     localStorage.setItem('vbrt_token', v);
     location.href = '/app';
   };
-  el('#token-go').onclick = go;
-  el('#token-input').addEventListener('keydown', (e) => e.key === 'Enter' && go());
+  const gb = el('#token-go');
+  if (gb) gb.onclick = go;
+  const ti = el('#token-input');
+  if (ti) ti.addEventListener('keydown', (e) => e.key === 'Enter' && go());
 }
 
 async function bootDashboard() {
   document.body.classList.add('dashboard');
-  // Accept a token handed off via the URL hash, then scrub it from the address bar.
+  // Accept a machine token handed off via /app#<token>, then scrub the address bar.
   const hash = location.hash.replace(/^#/, '').trim();
   if (hash) {
     localStorage.setItem('vbrt_token', hash);
     history.replaceState(null, '', '/app');
   }
-  const token = localStorage.getItem('vbrt_token');
-  if (!token) return renderTokenPrompt();
-  state.token = token;
+  state.token = localStorage.getItem('vbrt_token') || null;
+
+  const me = await getMe();
+  // If signed in and a claim is pending from /link, bind that machine token now.
+  if (me) {
+    const pending = localStorage.getItem('vbrt_pending_link');
+    if (pending) {
+      try {
+        await apiPost('/api/link', { token: pending });
+      } catch {
+        /* ignore; user can retry the link */
+      }
+      localStorage.removeItem('vbrt_pending_link');
+    }
+  }
+
+  if (!me && !state.token) return renderSignIn();
 
   showHome();
+  const who = me ? esc(me.name || me.email || 'your account') : 'token access';
   el('#home').innerHTML = `
     <div class="home-wrap">
       <header class="home-head"><h1>Your workspace</h1>
-        <p class="dim-note">Everything you've pushed to VibeRate.
-          <button class="linkbtn" id="signout">sign out</button></p></header>
+        <p class="dim-note">Signed in as ${who}. <button class="linkbtn" id="signout">sign out</button></p></header>
       <div id="ws-overview"></div>
     </div>`;
-  el('#signout').onclick = () => {
+  el('#signout').onclick = async () => {
+    try {
+      await fetch('/auth/logout', { method: 'POST' });
+    } catch {
+      /* ignore */
+    }
     localStorage.removeItem('vbrt_token');
-    location.href = '/app';
+    state.token = null;
+    location.href = me ? '/' : '/app';
   };
   try {
-    await loadProjects(); // sidebar; throws '401' if the token is bad
+    await loadProjects(); // sidebar; throws '401' if not authorized
     const ws = await api('/api/workspace');
     const node = el('#ws-overview');
     if (node) node.innerHTML = renderWorkspaceSection(ws);
@@ -1512,7 +1556,7 @@ async function bootDashboard() {
     if (String(e.message) === '401') {
       localStorage.removeItem('vbrt_token');
       state.token = null;
-      renderTokenPrompt('That token wasn’t recognized — paste a valid one.');
+      renderSignIn(me ? undefined : 'That access token wasn’t recognized.');
     } else {
       throw e;
     }
@@ -1580,6 +1624,15 @@ async function boot() {
       el('#conversation').innerHTML =
         '<div class="empty">This project is private or the link is invalid.<br>If it’s yours, open your <a href="/app">dashboard</a> to view or publish it.</div>';
     }
+    return;
+  }
+
+  // Claim handoff: /link#<token> stashes the machine token, then sends you to
+  // /app to sign in (if needed) and bind it to your account.
+  if (location.pathname.startsWith('/link')) {
+    const t = location.hash.replace(/^#/, '').trim();
+    if (t) localStorage.setItem('vbrt_pending_link', t);
+    location.replace('/app');
     return;
   }
 
