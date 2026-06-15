@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getMemory, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
-import { extractPromptUnits, buildFeed } from './prompts.js';
+import { extractPromptUnits, buildFeed, parseCardId } from './prompts.js';
+import { getRatingSummary, getUserVote, voteCard } from './ratings.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
 import { newToken, hashToken, bearer } from './auth.js';
 import { mountAuth, currentUser } from './oauth.js';
@@ -207,8 +208,44 @@ export function startServer(port = 4317) {
 
   // Discover feed: substantive prompt cards across published projects. Public —
   // it's the "see how others prompt" surface. Local serve shows everything.
-  app.get('/api/feed', (_req, res) => {
-    res.json(buildFeed(60, { publicOnly: HOSTED }));
+  app.get('/api/feed', (req, res) => {
+    const user = HOSTED ? currentUser(req) : null;
+    res.json(buildFeed(60, { publicOnly: HOSTED, userId: user ? user.id : null }));
+  });
+
+  // A single prompt card (permalink target): the unit + its rating + your vote.
+  // Readable only if the card's project is readable (public or yours).
+  app.get('/api/cards/:id', (req, res) => {
+    const { slug, sessionId, index } = parseCardId(req.params.id);
+    const project = getProject(slug);
+    if (!project || !canRead(project, req)) return res.status(404).json({ error: 'not found' });
+    const session = getSession(slug, sessionId);
+    if (!session) return res.status(404).json({ error: 'not found' });
+    const unit = extractPromptUnits(session, sessionId, slug).find((u) => u.index === index);
+    if (!unit) return res.status(404).json({ error: 'not found' });
+    const summary = (project.sessions || []).find((s) => s.id === sessionId) || {};
+    const user = currentUser(req);
+    res.json({
+      ...unit,
+      project: { slug: project.slug, name: project.name || project.slug },
+      source: summary.source,
+      sessionId,
+      sessionTitle: summary.title,
+      rating: getRatingSummary(req.params.id),
+      myVote: user ? getUserVote(req.params.id, user.id) : 0,
+    });
+  });
+
+  // Vote on a card (+1 / -1 / 0 to clear). Sign-in required; you must be able to
+  // see the card's project to vote on it.
+  app.post('/api/cards/:id/vote', (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ error: 'sign in to rate' });
+    const { slug } = parseCardId(req.params.id);
+    const project = getProject(slug);
+    if (!project || !canRead(project, req)) return res.status(404).json({ error: 'not found' });
+    const summary = voteCard(req.params.id, user.id, Number((req.body && req.body.value) || 0));
+    res.json({ ...summary, myVote: getUserVote(req.params.id, user.id) });
   });
 
   const sendApp = (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
@@ -220,6 +257,9 @@ export function startServer(port = 4317) {
 
   // Public discover feed of prompt cards.
   app.get('/explore', sendApp);
+
+  // Public permalink for a single prompt card.
+  app.get('/c/:id', sendApp);
 
   // Front door. Hosted: `/` is the public landing page; the SPA dashboard lives
   // at /app (token-scoped to your projects). Local: `/` is the SPA workspace home.

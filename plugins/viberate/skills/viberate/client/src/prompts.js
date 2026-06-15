@@ -1,4 +1,15 @@
 import { listProjects, getSession } from './storage.js';
+import { getRatingSummary, getUserVote } from './ratings.js';
+
+// A globally-addressable card id: project ~ session ~ turn index. '~' is URL-safe
+// and absent from slugs/session ids, so it round-trips cleanly in /c/<id>.
+export const makeCardId = (slug, sessionId, index) => `${slug}~${sessionId}~${index}`;
+export function parseCardId(id) {
+  const parts = String(id).split('~');
+  const index = Number(parts.pop());
+  const sessionId = parts.pop();
+  return { slug: parts.join('~'), sessionId, index };
+}
 
 // The "prompt unit" — VibeRate's atom. A session is a chain of these. Each unit:
 //   before  — the minimal context the prompt replies to (prior agent ask ± prior
@@ -94,7 +105,7 @@ function summarizeAfter(items, cap = 6) {
   return { steps: steps.slice(0, cap), stepCount: steps.length, verdict: verdict ? clip(verdict, 400) : null };
 }
 
-export function extractPromptUnits(session, sessionId) {
+export function extractPromptUnits(session, sessionId, slug = null) {
   const turns = buildTurns(session.messages);
   const out = [];
   for (let i = 0; i < turns.length; i++) {
@@ -110,6 +121,7 @@ export function extractPromptUnits(session, sessionId) {
     }
     out.push({
       id: `${sessionId}#${i}`,
+      cardId: slug ? makeCardId(slug, sessionId, i) : null,
       index: i,
       prompt,
       ts: t.user.ts || null,
@@ -126,19 +138,28 @@ export function extractPromptUnits(session, sessionId) {
 
 // The discover feed: substantive (non-ack) prompt units across published projects,
 // newest first. `publicOnly` is off locally (everything is yours) and on when hosted.
-export function buildFeed(limit = 60, { publicOnly = true } = {}) {
+export function buildFeed(limit = 60, { publicOnly = true, userId = null } = {}) {
   const projects = listProjects().filter((p) => !publicOnly || p.visibility === 'public');
   const cards = [];
   for (const p of projects) {
     for (const s of p.sessions || []) {
       const sess = getSession(p.slug, s.id);
       if (!sess) continue;
-      for (const u of extractPromptUnits(sess, s.id)) {
+      for (const u of extractPromptUnits(sess, s.id, p.slug)) {
         if (u.isAck || u.isNoise || u.chars < 20) continue;
-        cards.push({ ...u, project: { slug: p.slug, name: p.name || p.slug }, source: s.source, sessionId: s.id, sessionTitle: s.title });
+        cards.push({
+          ...u,
+          project: { slug: p.slug, name: p.name || p.slug },
+          source: s.source,
+          sessionId: s.id,
+          sessionTitle: s.title,
+          rating: getRatingSummary(u.cardId),
+          myVote: userId ? getUserVote(u.cardId, userId) : 0,
+        });
       }
     }
   }
+  // newest first for now; top-rated / most-discussed sorts come with the feed work
   cards.sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0));
   return cards.slice(0, limit);
 }

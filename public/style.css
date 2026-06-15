@@ -387,8 +387,15 @@ pre.code {
 .pc-act { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #8fa0bd; background: #0c0e13; border-radius: 5px; padding: 3px 7px; margin: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-more { font-size: 11px; color: var(--muted); padding: 2px 4px; }
 .pc-verdict { font-size: 13px; color: #cdd2de; margin: 8px 0 0; padding-left: 8px; border-left: 2px solid var(--codex); }
-.pc-bar { display: flex; align-items: center; gap: 14px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; }
-.pc-rate { color: var(--muted); }
+.pc-bar { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; }
+.pc-vote { display: inline-flex; align-items: center; gap: 7px; }
+.pc-vote button { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 13px; padding: 0 2px; line-height: 1; }
+.pc-vote button:hover { color: var(--text); }
+.pc-vote .v-up.on { color: var(--codex); }
+.pc-vote .v-dn.on { color: #f85149; }
+.pc-vote .v-score { min-width: 14px; text-align: center; color: var(--text); font-weight: 600; }
+.pc-link { color: var(--muted); text-decoration: none; }
+.pc-link:hover { color: var(--accent); }
 .pc-open { margin-left: auto; color: var(--accent); text-decoration: none; }
 
 /* dashboard: Connect CLI box */

@@ -1654,13 +1654,65 @@ function renderPromptCard(c) {
     : '';
   const when = c.ts ? `<span class="pc-when">${fmtAgo(Date.parse(c.ts))}</span>` : '';
   const open = c.project ? `<a class="pc-open" href="/p/${esc(c.project.slug)}">open session →</a>` : '';
+  const cid = c.cardId;
+  const score = c.rating ? c.rating.score : 0;
+  const mv = c.myVote || 0;
+  const vote = cid
+    ? `<span class="pc-vote" data-card="${esc(cid)}"><button class="v-up${mv > 0 ? ' on' : ''}" data-v="1" aria-label="upvote">▲</button><span class="v-score">${score}</span><button class="v-dn${mv < 0 ? ' on' : ''}" data-v="-1" aria-label="downvote">▼</button></span>`
+    : '';
+  const link = cid ? `<a class="pc-link" href="/c/${esc(cid)}" title="permalink">🔗</a>` : '';
   return `<article class="pcard">
     <div class="pc-head">${proj}${docs}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(c.prompt)}</div>
     ${played}
-    <div class="pc-bar"><span class="pc-rate" title="ratings coming soon">▲ rate ▼</span>${open}</div>
+    <div class="pc-bar">${vote}${link}${open}</div>
   </article>`;
+}
+
+// One delegated handler for every vote button (cards re-render constantly).
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.pc-vote button');
+  if (!btn) return;
+  const wrap = btn.closest('.pc-vote');
+  const card = wrap.dataset.card;
+  const already = btn.classList.contains('on');
+  const value = already ? 0 : Number(btn.dataset.v);
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(card)}/vote`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(state.token ? { authorization: `Bearer ${state.token}` } : {}) },
+      body: JSON.stringify({ value }),
+    });
+    if (res.status === 401) {
+      location.href = '/app'; // sign in to rate
+      return;
+    }
+    if (!res.ok) return;
+    const d = await res.json();
+    wrap.querySelector('.v-score').textContent = d.score;
+    wrap.querySelector('.v-up').classList.toggle('on', d.myVote > 0);
+    wrap.querySelector('.v-dn').classList.toggle('on', d.myVote < 0);
+  } catch {
+    /* ignore */
+  }
+});
+
+// /c/<id> — a single prompt card's permalink page.
+async function bootCard(id) {
+  document.body.classList.add('cardview');
+  showHome();
+  el('#home').innerHTML = `
+    <div class="home-wrap">
+      <header class="home-head"><h1>Prompt</h1><p class="dim-note"><a href="/explore">← explore</a></p></header>
+      <div id="cardwrap"><div class="empty">Loading…</div></div>
+    </div>`;
+  try {
+    const c = await api(`/api/cards/${encodeURIComponent(id)}`);
+    el('#cardwrap').innerHTML = renderPromptCard(c);
+  } catch {
+    el('#cardwrap').innerHTML = '<div class="empty">This prompt is private, or the link is invalid.</div>';
+  }
 }
 
 // /explore — the public discover feed of prompt cards.
@@ -1712,6 +1764,14 @@ async function boot() {
     const brandEl = el('#brand');
     if (brandEl) brandEl.onclick = () => (location.href = '/explore');
     await bootFeed();
+    return;
+  }
+
+  const cm = location.pathname.match(/^\/c\/(.+)$/);
+  if (cm) {
+    const brandEl = el('#brand');
+    if (brandEl) brandEl.onclick = () => (location.href = '/explore');
+    await bootCard(decodeURIComponent(cm[1]));
     return;
   }
 
