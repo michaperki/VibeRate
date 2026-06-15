@@ -54,10 +54,29 @@ From any repo with captured sessions:
 
 ```bash
 export VBRT_API_URL=https://<app>.fly.dev
-vbrt push --all                # prints a shareable /p/<id> link
+vbrt push --all
 ```
 
-Open the link to confirm sessions, git timeline, docs, and memory render.
+The first push to a host **mints an owner token**, saves it to
+`~/.viberate/credentials.json`, and prints:
+
+- a shareable `/p/<id>` link (public — anyone with it can view), and
+- `Your projects: https://<app>.fly.dev/app` — the token-scoped dashboard.
+
+Every later push sends that saved token, so all your projects group under one
+owner. Open `/app` and paste the token (or visit `/app#<token>`) to list them.
+
+## Hosted vs local mode
+
+`VBRT_HOSTED=1` (set in `fly.toml`) makes the server multi-tenant:
+
+| | `/` | project list | who can enumerate |
+|---|---|---|---|
+| **Hosted** (`VBRT_HOSTED=1`) | public landing page | `/app`, token-scoped | only the owner |
+| **Local** (`vbrt serve`) | workspace home (SPA) | everything on the machine | n/a |
+
+Single-project pages (`/p/<id>`) are always public — the unguessable id is the
+share secret.
 
 ## Notes & next steps
 
@@ -70,6 +89,9 @@ Open the link to confirm sessions, git timeline, docs, and memory render.
   `fly volumes list` / `fly volumes snapshots list <vol-id>`.
 - **Custom domain** (when ready): `fly certs add viberate.app`, then point DNS
   per the instructions `fly certs show viberate.app` prints.
-- **Auth:** ingest is anonymous (gist-style) in v1. Before sharing widely,
-  consider rate-limiting `POST /api/projects` and the `--dry-run` redaction
-  preview so users can see exactly what leaves their machine.
+- **Pre-`VBRT_HOSTED` pushes have no owner** and won't appear in any dashboard
+  (still reachable by their `/p/<id>` link). Re-push to bring them under your token.
+- **Before sharing widely:** consider rate-limiting `POST /api/projects` and a
+  `vbrt push --dry-run` redaction preview so users see exactly what leaves their
+  machine. A real account system (e.g. GitHub OAuth) can later bind an owner
+  hash to an identity without reshaping storage.

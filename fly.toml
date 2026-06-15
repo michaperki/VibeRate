@@ -10,6 +10,9 @@ primary_region = "fra"
   PORT = "8080"
   # Projects are JSON files under here; the volume below makes them durable.
   VBRT_DATA_DIR = "/data"
+  # Multi-tenant mode: public landing at /, token-scoped dashboard at /app,
+  # no anonymous enumeration of the project list.
+  VBRT_HOSTED = "1"
 
 # Persistent volume for the file-based project store. The source name must match
 # the volume you create (`fly volumes create viberate_data ...`). One machine

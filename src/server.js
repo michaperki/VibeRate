@@ -5,9 +5,16 @@ import { listProjects, getProject, getSession, getActivity, getGit, getDocs, get
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
+import { newToken, hashToken, bearer } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+
+// Hosted mode (set in fly.toml) makes the server multi-tenant: `/` is a public
+// landing page, the project list is scoped to its owner token, and pushes mint
+// ownership. Local `vbrt serve` leaves this off and behaves single-user: `/` is
+// your workspace home and the list shows every project on the machine.
+const HOSTED = process.env.VBRT_HOSTED === '1';
 
 export function startServer(port = 4317) {
   const app = express();
@@ -15,20 +22,28 @@ export function startServer(port = 4317) {
 
   // Liveness probe for the host's health checks. Cheap, no I/O.
   app.get('/healthz', (_req, res) => {
-    res.json({ ok: true, schema: BUNDLE_SCHEMA });
+    res.json({ ok: true, hosted: HOSTED, schema: BUNDLE_SCHEMA });
   });
 
-  app.get('/api/projects', (_req, res) => {
-    res.json(listProjects());
+  // Project list. Hosted: requires an owner token and returns only that owner's
+  // projects (no anonymous enumeration). Local: returns everything.
+  app.get('/api/projects', (req, res) => {
+    if (!HOSTED) return res.json(listProjects());
+    const token = bearer(req);
+    if (!token) return res.status(401).json({ error: 'auth required' });
+    res.json(listProjects(hashToken(token)));
   });
 
-  // Cold-start context: what each agent preloads when launched in a directory.
+  // Cold-start context: the global instruction files on the *local* machine.
+  // Meaningless on a shared host, so hosted mode returns an empty shape.
   app.get('/api/context', (_req, res) => {
-    res.json(getContext());
+    res.json(HOSTED ? { global: { claude: [], codex: [], atoms: [] } } : getContext());
   });
 
   // Ingest: accept a pushed bundle, store it under a fresh unlisted id, and
-  // return the shareable URL. Anonymous (gist-style) — no auth required in v1.
+  // return the shareable URL. Gist-style ownership: a bundle pushed with a bearer
+  // token is owned by it; without one (hosted), we mint a token and return it so
+  // the client can save it and see all its projects later.
   app.post('/api/projects', (req, res) => {
     const bundle = req.body;
     if (!bundle || typeof bundle !== 'object' || !bundle.project || !Array.isArray(bundle.sessions)) {
@@ -38,9 +53,16 @@ export function startServer(port = 4317) {
       return res.status(409).json({ error: `unsupported schema ${bundle.schema}; expected ${BUNDLE_SCHEMA}` });
     }
     try {
-      const { id } = ingestBundle(bundle);
+      let owner = null;
+      let minted = null;
+      if (HOSTED) {
+        const provided = bearer(req);
+        const token = provided || (minted = newToken());
+        owner = hashToken(token);
+      }
+      const { id } = ingestBundle(bundle, owner);
       const url = `${req.protocol}://${req.get('host')}/p/${id}`;
-      res.status(201).json({ id, url });
+      res.status(201).json({ id, url, ...(minted ? { token: minted } : {}) });
     } catch (err) {
       res.status(500).json({ error: String(err.message || err) });
     }
@@ -85,13 +107,24 @@ export function startServer(port = 4317) {
     res.json(session);
   });
 
-  // Hosted single-project page: /p/<id> serves the SPA, which reads the id from
-  // the URL and loads that project directly (no picker).
-  app.get('/p/:id', (_req, res) => {
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
-  });
+  const sendApp = (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 
-  app.use(express.static(PUBLIC_DIR));
+  // Public single-project page: /p/<id> serves the SPA, which reads the id from
+  // the URL and loads that project directly (no picker). Always public — the
+  // unguessable id is the share secret.
+  app.get('/p/:id', sendApp);
+
+  // Front door. Hosted: `/` is the public landing page; the SPA dashboard lives
+  // at /app (token-scoped to your projects). Local: `/` is the SPA workspace home.
+  if (HOSTED) {
+    app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'landing.html')));
+    app.get(['/app', '/app/*'], sendApp);
+  } else {
+    app.get('/', sendApp);
+  }
+
+  // index:false so static doesn't auto-serve index.html at `/` (we route it above).
+  app.use(express.static(PUBLIC_DIR, { index: false }));
 
   // Bind all interfaces so the app is reachable inside a container / behind a
   // platform proxy (not just loopback).

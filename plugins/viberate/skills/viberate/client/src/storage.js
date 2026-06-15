@@ -35,10 +35,11 @@ export function saveBundle(bundle, opts = {}) {
 
 // Server-side ingest: store a pushed bundle under a fresh unguessable id and
 // return { id }. The id doubles as the project slug, so every existing read
-// endpoint (`/api/projects/:slug/...`) serves hosted projects unchanged.
-export function ingestBundle(bundle) {
+// endpoint (`/api/projects/:slug/...`) serves hosted projects unchanged. `owner`
+// (a hashed token) scopes the project to its pusher for list enumeration.
+export function ingestBundle(bundle, owner = null) {
   const id = crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars, unlisted
-  saveBundle(bundle, { slug: id, name: (bundle.project && bundle.project.name) || id });
+  saveBundle(bundle, { slug: id, name: (bundle.project && bundle.project.name) || id, owner });
   return { id };
 }
 
@@ -60,6 +61,7 @@ export function saveSessions(cwd, sessions, opts = {}) {
   });
   manifest.cwd = cwd;
   if (opts.name) manifest.name = opts.name;
+  if (opts.owner) manifest.owner = opts.owner; // hashed token; gist-style ownership
 
   const existingIds = new Set(manifest.sessions.map((s) => s.id));
   let added = 0;
@@ -96,7 +98,10 @@ export function saveSessions(cwd, sessions, opts = {}) {
   return { slug, added, skipped, total: manifest.sessions.length };
 }
 
-export function listProjects() {
+// List captured projects. With `owner` (a hashed token) set, return only that
+// owner's projects — used by the hosted dashboard so one pusher can't enumerate
+// another's. Local `vbrt serve` calls it with no owner and sees everything.
+export function listProjects(owner = null) {
   let slugs;
   try {
     slugs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true });
@@ -107,7 +112,9 @@ export function listProjects() {
   for (const e of slugs) {
     if (!e.isDirectory()) continue;
     const manifest = readJson(path.join(PROJECTS_DIR, e.name, 'project.json'), null);
-    if (manifest) projects.push(manifest);
+    if (!manifest) continue;
+    if (owner && manifest.owner !== owner) continue;
+    projects.push(manifest);
   }
   projects.sort((a, b) =>
     String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),

@@ -349,6 +349,19 @@ pre.code {
 /* files-touched in sidebar */
 .sess .meta.files { color: #8fa0bd; }
 
+/* hosted dashboard: token paste form */
+.token-form { display: flex; gap: 8px; max-width: 460px; margin-top: 8px; }
+.token-form input {
+  flex: 1; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
+  background: #12151c; color: var(--text); font-size: 13px;
+}
+.token-form input:focus { outline: none; border-color: var(--accent); }
+.token-form button {
+  padding: 9px 14px; border-radius: 8px; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; cursor: pointer; font-size: 13px; white-space: nowrap;
+}
+.token-form button:hover { filter: brightness(1.1); }
+
 /* ---------- brain map (centerpiece graph) ---------- */
 .brain { width: 100%; height: auto; max-height: 70vh; display: block; margin: 2px 0 8px; }
 .gedge { stroke: var(--border); stroke-width: 1.5; }

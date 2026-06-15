@@ -19,6 +19,7 @@ const state = {
   brush: null,
   turnAnchors: [],
   currentTurn: 0,
+  token: null, // hosted dashboard: owner token, sent as Bearer on API calls
 };
 
 // ---------- helpers ----------
@@ -51,7 +52,8 @@ function fmtDuration(ms) {
 }
 
 async function api(path) {
-  const res = await fetch(path);
+  const headers = state.token ? { authorization: `Bearer ${state.token}` } : {};
+  const res = await fetch(path, { headers });
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
 }
@@ -1422,21 +1424,89 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Hosted mode: /p/<id> loads that one project directly and hides the picker.
-// Local mode: show the project list as usual.
-async function boot() {
-  const brand = el('#brand');
-  if (brand) brand.onclick = showHome;
+// Token gate for the hosted dashboard (/app). The owner token is printed by
+// `vbrt push`; we accept it via /app#<token> (one-click from the CLI) or a paste
+// form, then keep it in localStorage and send it as a Bearer on API calls.
+function renderTokenPrompt(msg) {
+  showHome();
+  el('#home').innerHTML = `
+    <div class="home-wrap">
+      <header class="home-head"><h1>Your projects</h1>
+        <p class="dim-note">Paste the access token VibeRate saved when you first ran
+          <code>vbrt push</code> — it's in <code>~/.viberate/credentials.json</code>.</p></header>
+      ${msg ? `<div class="empty">${esc(msg)}</div>` : ''}
+      <div class="token-form">
+        <input id="token-input" type="password" placeholder="vbrt access token" autocomplete="off" />
+        <button id="token-go">View my projects</button>
+      </div>
+    </div>`;
+  const go = () => {
+    const v = el('#token-input').value.trim();
+    if (!v) return;
+    localStorage.setItem('vbrt_token', v);
+    location.href = '/app';
+  };
+  el('#token-go').onclick = go;
+  el('#token-input').addEventListener('keydown', (e) => e.key === 'Enter' && go());
+}
 
+async function bootDashboard() {
+  document.body.classList.add('dashboard');
+  // Accept a token handed off via the URL hash, then scrub it from the address bar.
+  const hash = location.hash.replace(/^#/, '').trim();
+  if (hash) {
+    localStorage.setItem('vbrt_token', hash);
+    history.replaceState(null, '', '/app');
+  }
+  const token = localStorage.getItem('vbrt_token');
+  if (!token) return renderTokenPrompt();
+  state.token = token;
+
+  showHome();
+  el('#home').innerHTML = `
+    <div class="home-wrap">
+      <header class="home-head"><h1>Your projects</h1>
+        <p class="dim-note">Everything you've pushed to VibeRate.
+          <button class="linkbtn" id="signout">sign out</button></p></header>
+    </div>`;
+  el('#signout').onclick = () => {
+    localStorage.removeItem('vbrt_token');
+    location.href = '/app';
+  };
+  try {
+    await loadProjects();
+  } catch (e) {
+    if (String(e.message) === '401') {
+      localStorage.removeItem('vbrt_token');
+      state.token = null;
+      renderTokenPrompt('That token wasn’t recognized — paste a valid one.');
+    } else {
+      throw e;
+    }
+  }
+}
+
+// Routing: /p/<id> = public single project; /app = token-scoped dashboard
+// (hosted); / = local workspace home.
+async function boot() {
   const m = location.pathname.match(/^\/p\/([A-Za-z0-9_-]+)/);
   if (m) {
-    // Hosted single-project link: open straight into the project, no home.
     document.body.classList.add('hosted');
     showProject();
     await selectProject(m[1]);
     return;
   }
+
+  const brand = el('#brand');
+
+  if (location.pathname.startsWith('/app')) {
+    if (brand) brand.onclick = () => (location.href = '/app');
+    await bootDashboard();
+    return;
+  }
+
   // Local: land on the workspace dashboard.
+  if (brand) brand.onclick = showHome;
   showHome();
   await Promise.all([loadProjects(), loadContext()]);
 }

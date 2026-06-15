@@ -152,9 +152,18 @@ async function cmdAdd(args = []) {
 
   if (push) {
     try {
-      const { url } = await pushBundle(bundle);
+      const { url, dashboardUrl, newToken } = await pushBundle(bundle);
       console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" — view & share at:`));
-      console.log(`  ${C.cyan(url)}\n`);
+      console.log(`  ${C.cyan(url)}`);
+      console.log(C.dim(`  Your projects: ${dashboardUrl}`));
+      if (newToken) {
+        console.log(
+          C.dim(
+            '  (saved an access token to ~/.viberate/credentials.json — keep it to manage your projects)',
+          ),
+        );
+      }
+      console.log('');
     } catch (err) {
       console.log(C.yellow(`\n✗ Push failed: ${err.message}`));
       console.log(C.dim('  (bundle was not saved locally; fix the endpoint and retry, or run `vbrt add` for a local copy)'));

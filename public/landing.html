@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VibeRate — GitHub for agent conversations</title>
+    <meta
+      name="description"
+      content="Capture your Claude Code & Codex sessions and turn them into an interactive, link-shareable dashboard of prompts, file changes, git timeline, and agent docs."
+    />
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #161922;
+        --border: #272c38;
+        --text: #e6e8ee;
+        --muted: #8b92a5;
+        --accent: #7c5cff;
+        --claude: #a978ff;
+        --codex: #2ecf8f;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(1200px 600px at 50% -10%, #1a1d2a 0%, var(--bg) 60%);
+        color: var(--text);
+        font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        min-height: 100vh;
+      }
+      a { color: inherit; }
+      .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+      header.nav {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 22px 0;
+      }
+      .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+      .brand .logo { color: var(--accent); font-size: 22px; }
+      .nav a.ghost {
+        text-decoration: none; color: var(--muted); font-size: 14px;
+        padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
+      }
+      .nav a.ghost:hover { color: var(--text); border-color: var(--accent); }
+
+      .hero { text-align: center; padding: 64px 0 36px; }
+      .hero h1 { font-size: 44px; line-height: 1.1; margin: 0 0 14px; letter-spacing: -0.02em; }
+      .hero h1 .grad {
+        background: linear-gradient(90deg, var(--claude), var(--accent), var(--codex));
+        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+      }
+      .hero .tagline { font-size: 18px; color: var(--muted); margin: 0 auto 10px; max-width: 620px; }
+      .hero .sub { color: var(--muted); max-width: 620px; margin: 0 auto 28px; }
+      .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      .btn {
+        text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: 600; font-size: 15px;
+      }
+      .btn.primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+      .btn.primary:hover { filter: brightness(1.12); }
+      .btn.secondary { color: var(--text); border: 1px solid var(--border); }
+      .btn.secondary:hover { border-color: var(--accent); }
+
+      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 40px 0 16px; }
+      .card {
+        background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px 20px;
+      }
+      .card .n { color: var(--accent); font-weight: 700; font-size: 13px; }
+      .card h3 { margin: 6px 0 6px; font-size: 16px; }
+      .card p { margin: 0; color: var(--muted); font-size: 13.5px; }
+      code {
+        background: #12151c; border: 1px solid var(--border); border-radius: 6px;
+        padding: 1px 6px; font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .install {
+        margin: 28px auto 0; max-width: 560px; background: #12151c; border: 1px solid var(--border);
+        border-radius: 12px; padding: 16px 18px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px; color: #cdd2de;
+      }
+      .install .dim { color: var(--muted); }
+      footer { text-align: center; color: var(--muted); font-size: 13px; padding: 48px 0 32px; }
+      @media (max-width: 680px) { .steps { grid-template-columns: 1fr; } .hero h1 { font-size: 34px; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="nav">
+        <div class="brand"><span class="logo">★</span> VibeRate</div>
+        <a class="ghost" href="/app">Your projects →</a>
+      </header>
+
+      <section class="hero">
+        <h1>GitHub for <span class="grad">agent conversations</span></h1>
+        <p class="tagline">Expressing your will is a skill.</p>
+        <p class="sub">
+          Capture your Claude Code &amp; Codex sessions and turn them into an interactive,
+          link-shareable dashboard — every prompt, file change, git commit, and agent doc,
+          in one timeline you can send to anyone.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="/app">Open your dashboard</a>
+          <a class="btn secondary" href="https://github.com/michaperki/VibeRate" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+      </section>
+
+      <section class="steps">
+        <div class="card">
+          <div class="n">01</div>
+          <h3>Install the skill</h3>
+          <p>Add the VibeRate skill to Claude Code (or grab the <code>vbrt</code> CLI). No accounts, no setup.</p>
+        </div>
+        <div class="card">
+          <div class="n">02</div>
+          <h3>Push a repo</h3>
+          <p>Run <code>vbrt push</code> in any project. Your sessions are redacted, then uploaded.</p>
+        </div>
+        <div class="card">
+          <div class="n">03</div>
+          <h3>Share the link</h3>
+          <p>Get an unlisted <code>/p/&lt;id&gt;</code> URL — a full, browsable view of how the work happened.</p>
+        </div>
+      </section>
+
+      <div class="install">
+        <div class="dim"># point the client at this server &amp; push</div>
+        export VBRT_API_URL=https://vbrt.fly.dev<br />
+        vbrt push --all
+      </div>
+
+      <footer>
+        VibeRate · <a href="/app">dashboard</a> ·
+        <a href="https://github.com/michaperki/VibeRate" target="_blank" rel="noopener">github</a>
+      </footer>
+    </div>
+  </body>
+</html>
