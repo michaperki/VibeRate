@@ -9,7 +9,7 @@ import { extractGit } from '../src/git.js';
 import { extractDocsMulti } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
 import { buildBundle } from '../src/bundle.js';
-import { pushBundle, apiBase } from '../src/push.js';
+import { pushBundle, apiBase, login } from '../src/push.js';
 import { slugify, claudeRoots, codexRoots, canonicalKey } from '../src/paths.js';
 
 const C = {
@@ -185,6 +185,33 @@ async function cmdAdd(args = []) {
   console.log(C.dim(`Run ${C.bold('vbrt serve')} to browse.`));
 }
 
+async function cmdLogin(args) {
+  let apiUrl = '';
+  let token = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--api') {
+      apiUrl = args[++i] || '';
+      continue;
+    }
+    if (!args[i].startsWith('--') && !token) token = args[i];
+  }
+  apiUrl = apiUrl || apiBase();
+  if (!token) {
+    console.log(C.yellow('Usage: vbrt login <token> [--api https://your-host]'));
+    console.log(C.dim('Get a token from your dashboard → "Connect CLI".'));
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    const { apiUrl: saved, tokenPath } = login(apiUrl, token);
+    console.log(C.green(`\n✓ Connected to ${saved}`));
+    console.log(C.dim(`  Token saved to ${tokenPath}. Now run ${C.bold('vbrt push')} in any repo.`));
+  } catch (err) {
+    console.log(C.yellow(`\n✗ ${err.message}`));
+    process.exitCode = 1;
+  }
+}
+
 async function cmdServe(args) {
   // Precedence: --port flag > PORT env (cloud hosts inject it) > local default.
   const portArg = args.find((a) => /^--port=/.test(a));
@@ -201,6 +228,7 @@ function cmdHelp() {
 ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
 
   ${C.cyan('vbrt')} ${C.dim('|')} ${C.cyan('vbrt add')}     Pick this folder's sessions and save them locally
+  ${C.cyan('vbrt login <token>')}  Connect this machine to your account (token from the dashboard)
   ${C.cyan('vbrt push')}          Upload to your private dashboard (needs VBRT_API_URL)
   ${C.cyan('vbrt push --public')}   Publish on push (share a link immediately; default is private)
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
@@ -219,6 +247,9 @@ async function main() {
       break;
     case 'push':
       await cmdAdd(['push', ...rest]);
+      break;
+    case 'login':
+      await cmdLogin(rest);
       break;
     case 'serve':
       await cmdServe(rest);

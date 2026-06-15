@@ -73,6 +73,16 @@ export function startServer(port = 4317) {
     res.json({ ok: true, projectCount: updated ? updated.ownerHashes.length : 0 });
   });
 
+  // "Connect CLI": mint a fresh token already bound to the signed-in account, so
+  // a web-first user can `vbrt login <token>` and push straight into their account.
+  app.post('/api/tokens', (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ error: 'sign in first' });
+    const token = newToken();
+    linkOwner(user.id, hashToken(token));
+    res.json({ token });
+  });
+
   // Cold-start context: the global instruction files on the *local* machine.
   // Meaningless on a shared host, so hosted mode returns an empty shape.
   app.get('/api/context', (_req, res) => {

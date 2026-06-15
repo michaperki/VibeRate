@@ -368,6 +368,10 @@ pre.code {
 }
 .proj-badge:hover { color: var(--text); border-color: var(--accent); }
 
+/* dashboard: Connect CLI box */
+.cli-box { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin: 6px 0 14px; max-width: 620px; background: var(--panel); }
+.cli-box .code { margin: 8px 0; white-space: pre-wrap; word-break: break-all; user-select: all; }
+
 /* sign-in screen */
 .signin { display: flex; flex-direction: column; gap: 10px; max-width: 320px; margin: 12px 0 18px; }
 .signin-btn {

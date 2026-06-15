@@ -1531,10 +1531,12 @@ async function bootDashboard() {
 
   showHome();
   const who = me ? esc(me.name || me.email || 'your account') : 'token access';
+  const connect = me ? ` · <button class="linkbtn" id="connect-cli">＋ Connect CLI</button>` : '';
   el('#home').innerHTML = `
     <div class="home-wrap">
       <header class="home-head"><h1>Your workspace</h1>
-        <p class="dim-note">Signed in as ${who}. <button class="linkbtn" id="signout">sign out</button></p></header>
+        <p class="dim-note">Signed in as ${who}. <button class="linkbtn" id="signout">sign out</button>${connect}</p></header>
+      <div id="cli-connect"></div>
       <div id="ws-overview"></div>
     </div>`;
   el('#signout').onclick = async () => {
@@ -1547,6 +1549,22 @@ async function bootDashboard() {
     state.token = null;
     location.href = me ? '/' : '/app';
   };
+  const cc = el('#connect-cli');
+  if (cc)
+    cc.onclick = async () => {
+      cc.disabled = true;
+      try {
+        const { token } = await apiPost('/api/tokens', {});
+        el('#cli-connect').innerHTML = `
+          <div class="cli-box">
+            <div class="dim-note">Run this once in your terminal — the token is shown only now:</div>
+            <pre class="code">vbrt login ${esc(token)} --api ${esc(location.origin)}</pre>
+            <div class="dim-note">Then <code>vbrt push</code> in any repo lands under your account.</div>
+          </div>`;
+      } catch {
+        cc.disabled = false;
+      }
+    };
   try {
     await loadProjects(); // sidebar; throws '401' if not authorized
     const ws = await api('/api/workspace');

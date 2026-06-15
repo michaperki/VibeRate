@@ -10,8 +10,23 @@ import { DATA_DIR } from './paths.js';
 // and show up together on the dashboard.
 //
 // Endpoint is configurable so the same client points at local dev or production.
+// After `vbrt login`, fall back to the single saved endpoint so `vbrt push` works
+// without re-exporting VBRT_API_URL each session.
 export function apiBase() {
-  return (process.env.VBRT_API_URL || '').replace(/\/+$/, '');
+  const env = (process.env.VBRT_API_URL || '').replace(/\/+$/, '');
+  if (env) return env;
+  const urls = Object.keys(readCreds());
+  return urls.length === 1 ? urls[0] : '';
+}
+
+// `vbrt login <token>`: save an account-bound token (minted from the dashboard's
+// "Connect CLI") for an endpoint, so pushes from this machine attach to that account.
+export function login(apiUrl, token) {
+  const url = (apiUrl || '').replace(/\/+$/, '');
+  if (!url) throw new Error('No endpoint. Pass --api <url> or set VBRT_API_URL.');
+  if (!token) throw new Error('Missing token.');
+  saveToken(url, token);
+  return { apiUrl: url, tokenPath: credsPath() };
 }
 
 // Owner tokens live in one file keyed by endpoint, so dev and prod don't collide.
