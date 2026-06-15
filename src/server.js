@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getMemory, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
+import { extractPromptUnits, buildFeed } from './prompts.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
 import { newToken, hashToken, bearer } from './auth.js';
 import { mountAuth, currentUser } from './oauth.js';
@@ -194,12 +195,29 @@ export function startServer(port = 4317) {
     res.json(session);
   });
 
+  // Prompt units of a session: the prompt-card chain (before/prompt/after).
+  app.get('/api/projects/:slug/sessions/:id/prompts', (req, res) => {
+    if (!guardRead(req, res)) return;
+    const session = getSession(req.params.slug, req.params.id);
+    if (!session) return res.status(404).json({ error: 'not found' });
+    res.json(extractPromptUnits(session, req.params.id));
+  });
+
+  // Discover feed: substantive prompt cards across published projects. Public —
+  // it's the "see how others prompt" surface. Local serve shows everything.
+  app.get('/api/feed', (_req, res) => {
+    res.json(buildFeed(60, { publicOnly: HOSTED }));
+  });
+
   const sendApp = (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 
   // Public single-project page: /p/<id> serves the SPA, which reads the id from
   // the URL and loads that project directly (no picker). Always public — the
   // unguessable id is the share secret.
   app.get('/p/:id', sendApp);
+
+  // Public discover feed of prompt cards.
+  app.get('/explore', sendApp);
 
   // Front door. Hosted: `/` is the public landing page; the SPA dashboard lives
   // at /app (token-scoped to your projects). Local: `/` is the SPA workspace home.

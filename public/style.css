@@ -368,6 +368,29 @@ pre.code {
 }
 .proj-badge:hover { color: var(--text); border-color: var(--accent); }
 
+/* prompt cards (feed + session) */
+#feed { display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
+.pcard { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; }
+.pc-head { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.pc-proj { color: var(--text); font-weight: 600; text-decoration: none; }
+.pc-proj:hover { color: var(--accent); }
+.pc-doc { border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; color: #8fa0bd; }
+.pc-when { margin-left: auto; }
+.pc-before { background: #12151c; border: 1px dashed #3a3550; border-radius: 8px; padding: 6px 10px; margin-bottom: 9px; }
+.pc-before summary { cursor: pointer; color: var(--claude); font-size: 12px; }
+.pc-bu, .pc-ba { font-size: 12px; color: #9aa1b2; margin-top: 5px; padding-left: 6px; }
+.pc-ba { border-left: 2px solid var(--codex); color: #cdd2de; }
+.pc-prompt { background: #12151c; border-left: 3px solid var(--accent); padding: 11px 13px; border-radius: 6px; font-size: 15px; white-space: pre-wrap; max-height: 280px; overflow: auto; }
+.pc-after { margin-top: 10px; }
+.pc-after summary { cursor: pointer; color: #a8a0d8; font-size: 12px; }
+.pc-rz { color: #9aa1b2; font-size: 11px; padding: 2px 0 2px 4px; }
+.pc-act { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #8fa0bd; background: #0c0e13; border-radius: 5px; padding: 3px 7px; margin: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-more { font-size: 11px; color: var(--muted); padding: 2px 4px; }
+.pc-verdict { font-size: 13px; color: #cdd2de; margin: 8px 0 0; padding-left: 8px; border-left: 2px solid var(--codex); }
+.pc-bar { display: flex; align-items: center; gap: 14px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; }
+.pc-rate { color: var(--muted); }
+.pc-open { margin-left: auto; color: var(--accent); text-decoration: none; }
+
 /* dashboard: Connect CLI box */
 .cli-box { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin: 6px 0 14px; max-width: 620px; background: var(--panel); }
 .cli-box .code { margin: 8px 0; white-space: pre-wrap; word-break: break-all; user-select: all; }

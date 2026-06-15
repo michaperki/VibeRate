@@ -1629,8 +1629,62 @@ function renderWorkspaceSection(ws) {
     </section>`;
 }
 
+// A prompt card: the before-context (collapsed), the prompt (the atom), and a
+// capped "how it played out". The unit people rate, discuss, and learn from.
+function renderPromptCard(c) {
+  const b = c.before;
+  const before = b && (b.agent || b.prompt)
+    ? `<details class="pc-before"><summary>▸ earlier in this session</summary>
+         ${b.prompt ? `<div class="pc-bu">you: ${esc(b.prompt)}</div>` : ''}
+         ${b.agent ? `<div class="pc-ba">agent: ${esc(b.agent)}</div>` : ''}
+       </details>`
+    : '';
+  const docs = (c.docRefs || []).map((d) => `<span class="pc-doc">📄 ${esc(d)}</span>`).join('');
+  const steps = ((c.after && c.after.steps) || [])
+    .map((s) => (s.kind === 'action' ? `<div class="pc-act">$ ${esc(s.text)}</div>` : `<div class="pc-rz">💭 ${esc(s.text)}</div>`))
+    .join('');
+  const shown = (c.after && c.after.steps ? c.after.steps.length : 0);
+  const more = c.after && c.after.stepCount > shown ? `<div class="pc-more">+${c.after.stepCount - shown} more</div>` : '';
+  const verdict = c.after && c.after.verdict ? `<div class="pc-verdict">${esc(c.after.verdict)}</div>` : '';
+  const played = steps || verdict
+    ? `<details class="pc-after"><summary>▸ how it played out${c.after.stepCount ? ` · ${c.after.stepCount} steps` : ''}</summary>${steps}${more}${verdict}</details>`
+    : '';
+  const proj = c.project
+    ? `<span class="badge ${esc(c.source || '')}">${esc(c.source || '')}</span><a class="pc-proj" href="/p/${esc(c.project.slug)}">${esc(c.project.name)}</a>`
+    : '';
+  const when = c.ts ? `<span class="pc-when">${fmtAgo(Date.parse(c.ts))}</span>` : '';
+  const open = c.project ? `<a class="pc-open" href="/p/${esc(c.project.slug)}">open session →</a>` : '';
+  return `<article class="pcard">
+    <div class="pc-head">${proj}${docs}${when}</div>
+    ${before}
+    <div class="pc-prompt">${formatText(c.prompt)}</div>
+    ${played}
+    <div class="pc-bar"><span class="pc-rate" title="ratings coming soon">▲ rate ▼</span>${open}</div>
+  </article>`;
+}
+
+// /explore — the public discover feed of prompt cards.
+async function bootFeed() {
+  document.body.classList.add('feed');
+  showHome();
+  el('#home').innerHTML = `
+    <div class="home-wrap">
+      <header class="home-head"><h1>Explore prompts</h1>
+        <p class="dim-note">How people express their will — substantive prompts from published sessions.
+          <a href="/app">your workspace →</a></p></header>
+      <div id="feed"><div class="empty">Loading…</div></div>`;
+  try {
+    const cards = await api('/api/feed');
+    el('#feed').innerHTML = cards.length
+      ? cards.map(renderPromptCard).join('')
+      : '<div class="empty">No published prompts yet — publish a project and its prompts show up here.</div>';
+  } catch {
+    el('#feed').innerHTML = '<div class="empty">Couldn’t load the feed.</div>';
+  }
+}
+
 // Routing: /p/<id> = public single project; /app = token-scoped dashboard
-// (hosted); / = local workspace home.
+// (hosted); /explore = public feed; / = local workspace home.
 async function boot() {
   const m = location.pathname.match(/^\/p\/([A-Za-z0-9_-]+)/);
   if (m) {
@@ -1651,6 +1705,13 @@ async function boot() {
     const t = location.hash.replace(/^#/, '').trim();
     if (t) localStorage.setItem('vbrt_pending_link', t);
     location.replace('/app');
+    return;
+  }
+
+  if (location.pathname.startsWith('/explore')) {
+    const brandEl = el('#brand');
+    if (brandEl) brandEl.onclick = () => (location.href = '/explore');
+    await bootFeed();
     return;
   }
 
