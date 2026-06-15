@@ -482,6 +482,20 @@ body.view-project #home { display: none; }
 #brand { cursor: pointer; }
 #brand:hover .brand-sub { color: var(--accent); }
 
+/* Public surfaces (/explore, /c/<id>): no workspace sidebar — a landing-style
+   centered column with a top nav. */
+body.public { background: radial-gradient(1200px 600px at 50% -10%, #1a1d2a 0%, var(--bg) 60%); }
+body.public #sidebar { display: none; }
+body.public #main { display: block; }
+body.public #home { padding: 0; }
+body.public .home-wrap { max-width: 820px; margin: 0 auto; padding: 0 24px 64px; }
+.pubnav { max-width: 820px; margin: 0 auto; padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; }
+.pn-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; text-decoration: none; color: var(--text); }
+.pn-logo { color: var(--accent); font-size: 20px; }
+.pn-links a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 13px; }
+.pn-links a:hover { color: var(--text); }
+body.public #feed { margin: 0 auto; }
+
 .home-wrap { max-width: 1100px; padding: 28px 32px 60px; }
 .home-head h1 { margin: 0 0 4px; font-size: 26px; }
 .home-section { margin-top: 30px; }

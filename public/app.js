@@ -282,7 +282,7 @@ async function loadProjects() {
     box.innerHTML = '<div class="empty">No projects yet.<br>Run <code>vbrt add</code> in a folder.</div>';
     return;
   }
-  const dash = document.body.classList.contains('dashboard');
+  const dash = document.body.classList.contains('workspace');
   box.innerHTML = projects
     .map((p) => {
       const vis = p.visibility || 'public';
@@ -1504,7 +1504,7 @@ async function renderSignIn(msg) {
 }
 
 async function bootDashboard() {
-  document.body.classList.add('dashboard');
+  document.body.classList.add('workspace'); // flag for publish controls (not a style hook)
   // Accept a machine token handed off via /app#<token>, then scrub the address bar.
   const hash = location.hash.replace(/^#/, '').trim();
   if (hash) {
@@ -1700,9 +1700,10 @@ document.addEventListener('click', async (e) => {
 
 // /c/<id> — a single prompt card's permalink page.
 async function bootCard(id) {
-  document.body.classList.add('cardview');
+  document.body.classList.add('public');
   showHome();
   el('#home').innerHTML = `
+    ${publicNav()}
     <div class="home-wrap">
       <header class="home-head"><h1>Prompt</h1><p class="dim-note"><a href="/explore">← explore</a></p></header>
       <div id="cardwrap"><div class="empty">Loading…</div></div>
@@ -1715,16 +1716,25 @@ async function bootCard(id) {
   }
 }
 
+// Top nav for the public surfaces (no workspace sidebar).
+function publicNav() {
+  return `<nav class="pubnav">
+    <a class="pn-brand" href="/"><span class="pn-logo">★</span> VibeRate</a>
+    <span class="pn-links"><a href="/explore">Explore</a><a href="/app">Your workspace →</a></span>
+  </nav>`;
+}
+
 // /explore — the public discover feed of prompt cards.
 async function bootFeed() {
-  document.body.classList.add('feed');
+  document.body.classList.add('public');
   showHome();
   el('#home').innerHTML = `
+    ${publicNav()}
     <div class="home-wrap">
       <header class="home-head"><h1>Explore prompts</h1>
-        <p class="dim-note">How people express their will — substantive prompts from published sessions.
-          <a href="/app">your workspace →</a></p></header>
-      <div id="feed"><div class="empty">Loading…</div></div>`;
+        <p class="dim-note">How people express their will — substantive prompts from published sessions.</p></header>
+      <div id="feed"><div class="empty">Loading…</div></div>
+    </div>`;
   try {
     const cards = await api('/api/feed');
     el('#feed').innerHTML = cards.length
