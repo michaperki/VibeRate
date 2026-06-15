@@ -140,13 +140,15 @@ export function startServer(port = 4317) {
     return project;
   };
 
-  // Publish / unpublish a project (owner-only in hosted mode).
+  // Publish / unpublish a project (owner-only in hosted mode). Authorizes via the
+  // caller's owners — a signed-in account (session) OR a machine token — so
+  // publishing works from the web dashboard, not just the CLI token.
   app.post('/api/projects/:slug/visibility', (req, res) => {
     const project = getProject(req.params.slug);
     if (!project) return res.status(404).json({ error: 'not found' });
     if (HOSTED) {
-      const token = bearer(req);
-      if (!token || hashToken(token) !== project.owner) return res.status(403).json({ error: 'forbidden' });
+      const owners = currentOwners(req);
+      if (!owners || !owners.includes(project.owner)) return res.status(403).json({ error: 'forbidden' });
     }
     const updated = setVisibility(req.params.slug, req.body && req.body.visibility);
     res.json({ slug: req.params.slug, visibility: updated ? updated.visibility : 'private' });
