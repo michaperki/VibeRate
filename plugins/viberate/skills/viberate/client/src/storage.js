@@ -37,10 +37,21 @@ export function saveBundle(bundle, opts = {}) {
 // return { id }. The id doubles as the project slug, so every existing read
 // endpoint (`/api/projects/:slug/...`) serves hosted projects unchanged. `owner`
 // (a hashed token) scopes the project to its pusher for list enumeration.
-export function ingestBundle(bundle, owner = null) {
+export function ingestBundle(bundle, { owner = null, visibility = null } = {}) {
   const id = crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars, unlisted
-  saveBundle(bundle, { slug: id, name: (bundle.project && bundle.project.name) || id, owner });
+  saveBundle(bundle, { slug: id, name: (bundle.project && bundle.project.name) || id, owner, visibility });
   return { id };
+}
+
+// Flip a project public/private (the "publish" action). Returns the manifest.
+export function setVisibility(slug, visibility) {
+  const manifestPath = path.join(projectDir(slug), 'project.json');
+  const manifest = readJson(manifestPath, null);
+  if (!manifest) return null;
+  manifest.visibility = visibility === 'public' ? 'public' : 'private';
+  manifest.updatedAt = new Date().toISOString();
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return manifest;
 }
 
 // Persist a set of normalized sessions under a project slug derived from cwd
@@ -62,6 +73,7 @@ export function saveSessions(cwd, sessions, opts = {}) {
   manifest.cwd = cwd;
   if (opts.name) manifest.name = opts.name;
   if (opts.owner) manifest.owner = opts.owner; // hashed token; gist-style ownership
+  if (opts.visibility && !manifest.visibility) manifest.visibility = opts.visibility; // set once at create; publish toggles it later
 
   const existingIds = new Set(manifest.sessions.map((s) => s.id));
   let added = 0;

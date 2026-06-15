@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getMemory, getWorkspaceRollup, ingestBundle } from './storage.js';
+import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getMemory, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
@@ -15,6 +15,17 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 // ownership. Local `vbrt serve` leaves this off and behaves single-user: `/` is
 // your workspace home and the list shows every project on the machine.
 const HOSTED = process.env.VBRT_HOSTED === '1';
+
+// A project's reads (its page + APIs) are allowed when: we're local (single-user),
+// the project is published public, or the requester holds the owner token. Private
+// projects are invisible to everyone but their owner — push ≠ publish.
+function canRead(project, req) {
+  if (!HOSTED) return true;
+  if (!project) return false;
+  if (project.visibility === 'public') return true;
+  const token = bearer(req);
+  return !!token && hashToken(token) === project.owner;
+}
 
 export function startServer(port = 4317) {
   const app = express();
@@ -72,27 +83,53 @@ export function startServer(port = 4317) {
         const token = provided || (minted = newToken());
         owner = hashToken(token);
       }
-      const { id } = ingestBundle(bundle, owner);
+      // Private by default; `vbrt push --public` (?public=1) publishes on push.
+      const visibility = HOSTED ? (req.query.public === '1' ? 'public' : 'private') : 'public';
+      const { id } = ingestBundle(bundle, { owner, visibility });
       const url = `${req.protocol}://${req.get('host')}/p/${id}`;
-      res.status(201).json({ id, url, ...(minted ? { token: minted } : {}) });
+      res.status(201).json({ id, url, visibility, ...(minted ? { token: minted } : {}) });
     } catch (err) {
       res.status(500).json({ error: String(err.message || err) });
     }
   });
 
-  app.get('/api/projects/:slug', (req, res) => {
+  // Read guard: resolves the project and enforces visibility. Returns null (and
+  // sends 404 — we don't reveal that a private project exists) when not allowed.
+  const guardRead = (req, res) => {
+    const project = getProject(req.params.slug);
+    if (!project || !canRead(project, req)) {
+      res.status(404).json({ error: 'not found' });
+      return null;
+    }
+    return project;
+  };
+
+  // Publish / unpublish a project (owner-only in hosted mode).
+  app.post('/api/projects/:slug/visibility', (req, res) => {
     const project = getProject(req.params.slug);
     if (!project) return res.status(404).json({ error: 'not found' });
-    res.json(project);
+    if (HOSTED) {
+      const token = bearer(req);
+      if (!token || hashToken(token) !== project.owner) return res.status(403).json({ error: 'forbidden' });
+    }
+    const updated = setVisibility(req.params.slug, req.body && req.body.visibility);
+    res.json({ slug: req.params.slug, visibility: updated ? updated.visibility : 'private' });
+  });
+
+  app.get('/api/projects/:slug', (req, res) => {
+    const project = guardRead(req, res);
+    if (project) res.json(project);
   });
 
   app.get('/api/projects/:slug/activity', (req, res) => {
+    if (!guardRead(req, res)) return;
     const activity = getActivity(req.params.slug);
     if (!activity) return res.status(404).json({ error: 'not found' });
     res.json(activity);
   });
 
   app.get('/api/projects/:slug/git', (req, res) => {
+    if (!guardRead(req, res)) return;
     const git = getGit(req.params.slug);
     if (!git) return res.status(404).json({ error: 'not found' });
     res.json(git);
@@ -102,18 +139,21 @@ export function startServer(port = 4317) {
   // local viewer). When none exists — e.g. the hosted server, which only has the
   // uploaded bundle — fall back to the memory snapshot saved from that bundle.
   app.get('/api/projects/:slug/memory', (req, res) => {
+    if (!guardRead(req, res)) return;
     const live = getProjectMemory(req.params.slug);
     if (live && live.ok) return res.json(live);
     res.json(getMemory(req.params.slug) || live);
   });
 
   app.get('/api/projects/:slug/docs', (req, res) => {
+    if (!guardRead(req, res)) return;
     const docs = getDocs(req.params.slug);
     if (!docs) return res.status(404).json({ error: 'not found' });
     res.json(docs);
   });
 
   app.get('/api/projects/:slug/sessions/:id', (req, res) => {
+    if (!guardRead(req, res)) return;
     const session = getSession(req.params.slug, req.params.id);
     if (!session) return res.status(404).json({ error: 'not found' });
     res.json(session);

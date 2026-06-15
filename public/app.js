@@ -58,6 +58,13 @@ async function api(path) {
   return res.json();
 }
 
+async function apiPost(path, body) {
+  const headers = { 'content-type': 'application/json', ...(state.token ? { authorization: `Bearer ${state.token}` } : {}) };
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
 // Light markdown: fenced code blocks, inline code, bold. Newlines via CSS.
 function formatText(raw) {
   const parts = String(raw ?? '').split('```');
@@ -275,17 +282,39 @@ async function loadProjects() {
     box.innerHTML = '<div class="empty">No projects yet.<br>Run <code>vbrt add</code> in a folder.</div>';
     return;
   }
+  const dash = document.body.classList.contains('dashboard');
   box.innerHTML = projects
-    .map(
-      (p) => `
+    .map((p) => {
+      const vis = p.visibility || 'public';
+      const pill = dash ? `<span class="vis ${vis}">${vis === 'public' ? '🌐 public' : '🔒 private'}</span>` : '';
+      const toggle = dash
+        ? `<button class="vis-toggle" data-slug="${esc(p.slug)}" data-to="${vis === 'public' ? 'private' : 'public'}">${vis === 'public' ? 'unpublish' : 'publish'}</button>`
+        : '';
+      return `
       <div class="proj" data-slug="${esc(p.slug)}">
         <div class="name">${esc(p.name || p.slug)}</div>
-        <div class="meta">${p.sessions.length} session(s)</div>
-      </div>`,
-    )
+        <div class="meta">${p.sessions.length} session(s) ${pill}</div>
+        ${toggle}
+      </div>`;
+    })
     .join('');
   box.querySelectorAll('.proj').forEach((node) => {
-    node.addEventListener('click', () => selectProject(node.dataset.slug));
+    node.addEventListener('click', (e) => {
+      if (e.target.closest('.vis-toggle')) return; // let the toggle handle its own click
+      selectProject(node.dataset.slug);
+    });
+  });
+  box.querySelectorAll('.vis-toggle').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      try {
+        await apiPost(`/api/projects/${btn.dataset.slug}/visibility`, { visibility: btn.dataset.to });
+        await loadProjects();
+      } catch {
+        btn.disabled = false;
+      }
+    });
   });
 }
 
@@ -1545,7 +1574,12 @@ async function boot() {
   if (m) {
     document.body.classList.add('hosted');
     showProject();
-    await selectProject(m[1]);
+    try {
+      await selectProject(m[1]);
+    } catch (e) {
+      el('#conversation').innerHTML =
+        '<div class="empty">This project is private or the link is invalid.<br>If it’s yours, open your <a href="/app">dashboard</a> to view or publish it.</div>';
+    }
     return;
   }
 

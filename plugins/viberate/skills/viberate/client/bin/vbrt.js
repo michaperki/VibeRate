@@ -152,10 +152,17 @@ async function cmdAdd(args = []) {
 
   if (push) {
     try {
-      const { url, dashboardUrl, newToken, tokenPath } = await pushBundle(bundle);
-      console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" — view & share at:`));
-      console.log(`  ${C.cyan(url)}`);
-      console.log(C.dim(`  Your projects: ${dashboardUrl}`));
+      const isPublic = args.includes('--public');
+      const { url, dashboardUrl, newToken, tokenPath, visibility } = await pushBundle(bundle, { isPublic });
+      if (visibility === 'public') {
+        console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (public) — view & share at:`));
+        console.log(`  ${C.cyan(url)}`);
+        console.log(C.dim(`  Your projects: ${dashboardUrl}`));
+      } else {
+        console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (private) — only you can see it:`));
+        console.log(`  ${C.cyan(dashboardUrl)}`);
+        console.log(C.dim('  Publish it from your dashboard, or push with --public to share a link.'));
+      }
       if (newToken) {
         console.log(C.dim(`  (saved an access token to ${tokenPath} — keep it to manage your projects)`));
       }
@@ -193,7 +200,8 @@ function cmdHelp() {
 ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
 
   ${C.cyan('vbrt')} ${C.dim('|')} ${C.cyan('vbrt add')}     Pick this folder's sessions and save them locally
-  ${C.cyan('vbrt push')}          Pick sessions and upload to the hosted viewer (needs VBRT_API_URL)
+  ${C.cyan('vbrt push')}          Upload to your private dashboard (needs VBRT_API_URL)
+  ${C.cyan('vbrt push --public')}   Publish on push (share a link immediately; default is private)
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port

@@ -40,14 +40,14 @@ function saveToken(apiUrl, token) {
   }
 }
 
-export async function pushBundle(bundle, { apiUrl = apiBase(), token = loadToken(apiBase()) } = {}) {
+export async function pushBundle(bundle, { apiUrl = apiBase(), token = loadToken(apiBase()), isPublic = false } = {}) {
   if (!apiUrl) {
     throw new Error(
       'No hosted endpoint configured. Set VBRT_API_URL (e.g. https://vbrt.fly.dev) to push.',
     );
   }
   const safe = redactBundle(bundle); // scrub secrets before leaving the machine
-  const res = await fetch(`${apiUrl}/api/projects`, {
+  const res = await fetch(`${apiUrl}/api/projects${isPublic ? '?public=1' : ''}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
