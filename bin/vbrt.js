@@ -173,8 +173,9 @@ async function cmdAdd(args = []) {
 }
 
 async function cmdServe(args) {
+  // Precedence: --port flag > PORT env (cloud hosts inject it) > local default.
   const portArg = args.find((a) => /^--port=/.test(a));
-  const port = portArg ? Number(portArg.split('=')[1]) : 4317;
+  const port = portArg ? Number(portArg.split('=')[1]) : Number(process.env.PORT) || 4317;
   const { startServer } = await import('../src/server.js');
   const { port: actual } = await startServer(port);
   const url = `http://localhost:${actual}`;

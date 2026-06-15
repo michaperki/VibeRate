@@ -7,6 +7,7 @@
     "vbrt": "bin/vbrt.js"
   },
   "scripts": {
+    "start": "node bin/vbrt.js serve",
     "serve": "node bin/vbrt.js serve"
   },
   "engines": {

@@ -13,6 +13,11 @@ export function startServer(port = 4317) {
   const app = express();
   app.use(express.json({ limit: '50mb' })); // bundles carry full conversations
 
+  // Liveness probe for the host's health checks. Cheap, no I/O.
+  app.get('/healthz', (_req, res) => {
+    res.json({ ok: true, schema: BUNDLE_SCHEMA });
+  });
+
   app.get('/api/projects', (_req, res) => {
     res.json(listProjects());
   });
@@ -88,7 +93,9 @@ export function startServer(port = 4317) {
 
   app.use(express.static(PUBLIC_DIR));
 
+  // Bind all interfaces so the app is reachable inside a container / behind a
+  // platform proxy (not just loopback).
   return new Promise((resolve) => {
-    const server = app.listen(port, () => resolve({ server, port }));
+    const server = app.listen(port, '0.0.0.0', () => resolve({ server, port }));
   });
 }

@@ -1,0 +1,40 @@
+# Fly.io config for the VibeRate hosted server.
+# `app` must be globally unique on Fly — change it (and the *.fly.dev URL follows)
+# if "viberate" is taken. `fra` (Frankfurt) is the closest region to Tel Aviv.
+app = "viberate"
+primary_region = "fra"
+
+[build]
+
+[env]
+  PORT = "8080"
+  # Projects are JSON files under here; the volume below makes them durable.
+  VBRT_DATA_DIR = "/data"
+
+# Persistent volume for the file-based project store. The source name must match
+# the volume you create (`fly volumes create viberate_data ...`). One machine
+# only — a volume can't be shared across machines, so don't scale past 1.
+[mounts]
+  source = "viberate_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Scale to zero when idle (cheap); the proxy cold-starts the machine on the
+  # next request. Bump min_machines_running to 1 for always-on / snappy links.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
