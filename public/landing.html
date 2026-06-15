@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VibeRate — GitHub for agent conversations</title>
+    <title>VibeRate — get better at prompting, together</title>
     <meta
       name="description"
-      content="Capture your Claude Code & Codex sessions and turn them into an interactive, link-shareable dashboard of prompts, file changes, git timeline, and agent docs."
+      content="See how others prompt, rate what works, and learn from the prompts everyone's talking about. Expressing your will is a skill; let's get better together."
     />
     <style>
       :root {
@@ -83,19 +83,18 @@
     <div class="wrap">
       <header class="nav">
         <div class="brand"><span class="logo">★</span> VibeRate</div>
-        <a class="ghost" href="/app">Your projects →</a>
+        <a class="ghost" href="/app">Sign in →</a>
       </header>
 
       <section class="hero">
-        <h1>GitHub for <span class="grad">agent conversations</span></h1>
-        <p class="tagline">Expressing your will is a skill.</p>
+        <h1>Get better at prompting — <span class="grad">together</span>.</h1>
+        <p class="tagline">Expressing your will is a skill; let's get better together.</p>
         <p class="sub">
-          Capture your Claude Code &amp; Codex sessions and turn them into an interactive,
-          link-shareable dashboard — every prompt, file change, git commit, and agent doc,
-          in one timeline you can send to anyone.
+          See how others prompt, rate what works, and learn from the prompts
+          everyone's talking about — drawn from real Claude Code &amp; Codex sessions.
         </p>
         <div class="cta">
-          <a class="btn primary" href="/app">Open your dashboard</a>
+          <a class="btn primary" href="/app">Sign in</a>
           <a class="btn secondary" href="https://github.com/michaperki/VibeRate" target="_blank" rel="noopener">View on GitHub</a>
         </div>
       </section>
@@ -103,25 +102,25 @@
       <section class="steps">
         <div class="card">
           <div class="n">01</div>
-          <h3>Install the skill</h3>
-          <p>Add the VibeRate skill to Claude Code (or grab the <code>vbrt</code> CLI). No accounts, no setup.</p>
+          <h3>Capture</h3>
+          <p>Bring your Claude Code &amp; Codex sessions in with the skill or <code>vbrt push</code>. Private by default.</p>
         </div>
         <div class="card">
           <div class="n">02</div>
-          <h3>Push a repo</h3>
-          <p>Run <code>vbrt push</code> in any project. Your sessions are redacted, then uploaded.</p>
+          <h3>Publish</h3>
+          <p>Surface the prompts worth sharing — the clever, the hard-won, the controversial.</p>
         </div>
         <div class="card">
           <div class="n">03</div>
-          <h3>Share the link</h3>
-          <p>Get an unlisted <code>/p/&lt;id&gt;</code> URL — a full, browsable view of how the work happened.</p>
+          <h3>Get better</h3>
+          <p>See how others express their will, swap feedback, and learn from the prompts that land.</p>
         </div>
       </section>
 
       <div class="install">
-        <div class="dim"># point the client at this server &amp; push</div>
-        export VBRT_API_URL=https://vbrt.fly.dev<br />
-        vbrt push --all
+        <div class="dim"># sign in, grab a token from "Connect CLI", then:</div>
+        vbrt login &lt;token&gt;<br />
+        vbrt push
       </div>
 
       <footer>
