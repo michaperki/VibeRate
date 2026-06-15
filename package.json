@@ -1,0 +1,19 @@
+{
+  "name": "viberate",
+  "version": "0.1.0",
+  "description": "Browse old Codex & Claude Code coding sessions as projects",
+  "type": "module",
+  "bin": {
+    "vbrt": "bin/vbrt.js"
+  },
+  "scripts": {
+    "serve": "node bin/vbrt.js serve"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.0",
+    "express": "^4.21.2"
+  }
+}

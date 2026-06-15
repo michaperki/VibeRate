@@ -1,0 +1,11 @@
+{
+  "name": "viberate",
+  "version": "0.1.0",
+  "description": "Capture this repository's Claude Code / Codex sessions and publish them to VibeRate — an interactive, link-shareable dashboard of prompts, file changes, git timeline, and agent docs.",
+  "author": {
+    "name": "Michael Perkins",
+    "email": "mperkins1995@gmail.com"
+  },
+  "keywords": ["sessions", "dashboard", "visualization", "sharing", "claude-code", "codex"],
+  "license": "MIT"
+}

@@ -1,0 +1,42 @@
+# VibeRate — Roadmap
+
+> "GitHub for agent conversations." A downloadable agent skill (push client) plus
+> hosted infra where vibe coders publish, view, and share their Claude Code /
+> Codex sessions as interactive dashboards.
+
+## Done (v0 — local + push foundations)
+
+- **Capture pipeline** — discover → parse Claude/Codex sessions, extract git history + agent docs.
+- **Viewer** — activity timeline, conversation viewer, and the AI-architecture network with **Web / Tree / Recent** layouts, animated transitions, and the doc-reader **overlay** (compact, no-scroll dashboard).
+- **Client/server split** — `buildBundle` produces one payload; local sink (disk) and push sink (HTTP) share the contract.
+- **Hosted ingest** — `POST /api/projects` mints an unlisted id, `/p/:id` serves that project's dashboard.
+- **Secret redaction** on upload (keys/tokens/private-key blocks scrubbed before leaving the machine).
+- **Agent skill** — non-interactive `vbrt push --all`, pure-Node bundled client (no node_modules), installed via personal skills folder.
+- **Marketplace scaffolding** — `marketplace.json` + plugin manifest; `build-skill.mjs --plugin`.
+
+## Phase 1 — Make the loop real (deploy + publish)
+
+Social features all require a shared backend, so a thin deploy gates most of what follows.
+
+- **Deploy the host** — viewer + ingest on a real URL; swap file store for a DB (projects keyed by id).
+- **Publish the marketplace** — push repo to GitHub; verify `/plugin marketplace add` → `/plugin install`.
+- **Default endpoint** — point the skill at the deployed URL so the localhost step disappears.
+- **Identity (gist → claim)** — anonymous push returns an unlisted link; optional "claim your account" attaches projects to an owner (token flow).
+
+## Phase 2 — Social / sharing (the core product)
+
+- **Feedback** — comment / give feedback on a shared project or a specific prompt/turn.
+- **Fork** — copy someone's prompt(s)/session into your own space to adapt and re-run.
+- **Discovery** — popular / trending "repos", profiles, browse by tag.
+- **Sharing controls** — unlisted vs public; what conversation data is exposed (pairs with redaction).
+
+## Phase 3 — Viewer UX polish
+
+- **Minimap** for the conversation viewer (overview + jump for long sessions).
+- **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)
+
+## Open questions / to weigh
+
+- **Deployment vs. features** — Phase 2 is the differentiator but structurally needs Phase 1's backend. Recommendation: a *minimal* deploy early (unblocks real testing + social), then invest in features. Don't gold-plate infra before the social loop proves out.
+- What's the right unit to "fork" — a whole project, a session, or a single prompt?
+- How much conversation content is safe to expose publicly even after redaction?
