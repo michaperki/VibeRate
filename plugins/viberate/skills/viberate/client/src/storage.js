@@ -167,6 +167,47 @@ export function getMemory(slug) {
   return readJson(path.join(projectDir(slug), 'memory.json'), null);
 }
 
+// Overarching ("workspace") rollup across one owner's projects, built only from
+// already-pushed data — no machine-local reads. Aggregates each project's memory
+// notes into a single list tagged with which projects they came from, plus
+// headline activity stats. With `owner` null (local), spans every project.
+export function getWorkspaceRollup(owner = null) {
+  const projects = listProjects(owner);
+  let sessions = 0;
+  let messages = 0;
+  let commits = 0;
+  let added = 0;
+  let removed = 0;
+  const memMap = new Map(); // type::title -> note + the projects it appears in
+
+  for (const p of projects) {
+    sessions += (p.sessions || []).length;
+    for (const a of getActivity(p.slug) || []) {
+      messages += a.userCount || 0;
+      added += a.added || 0;
+      removed += a.removed || 0;
+    }
+    const g = getGit(p.slug);
+    if (g && Array.isArray(g.commits)) commits += g.commits.length;
+
+    const mem = getMemory(p.slug);
+    if (mem && mem.ok) {
+      for (const n of mem.notes || []) {
+        const key = `${n.type}::${String(n.title || '').toLowerCase().trim()}`;
+        if (!memMap.has(key)) {
+          memMap.set(key, { title: n.title, description: n.description, type: n.type, body: n.body, mtime: n.mtime || 0, projects: [] });
+        }
+        const e = memMap.get(key);
+        if (!e.projects.some((x) => x.id === p.slug)) e.projects.push({ id: p.slug, name: p.name || p.slug });
+        if ((n.mtime || 0) > e.mtime) e.mtime = n.mtime;
+      }
+    }
+  }
+
+  const memory = [...memMap.values()].sort((a, b) => b.mtime - a.mtime);
+  return { stats: { projects: projects.length, sessions, messages, commits, added, removed }, memory };
+}
+
 // Per-session activity for the timeline: timestamps of the messages the USER
 // sent (their prompts), plus the user-message count. Tool calls and agent
 // replies are excluded — they're not "messages I sent". Also derives, from the

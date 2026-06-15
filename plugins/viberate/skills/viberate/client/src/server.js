@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getMemory, ingestBundle } from './storage.js';
+import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getMemory, getWorkspaceRollup, ingestBundle } from './storage.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
@@ -41,6 +41,15 @@ export function startServer(port = 4317) {
   // Meaningless on a shared host, so hosted mode returns an empty shape.
   app.get('/api/context', (_req, res) => {
     res.json(HOSTED ? { global: { claude: [], codex: [], atoms: [] } } : getContext());
+  });
+
+  // Overarching workspace rollup: memory + stats aggregated across the owner's
+  // projects (built from pushed data only). Hosted is token-scoped; local spans all.
+  app.get('/api/workspace', (req, res) => {
+    if (!HOSTED) return res.json(getWorkspaceRollup());
+    const token = bearer(req);
+    if (!token) return res.status(401).json({ error: 'auth required' });
+    res.json(getWorkspaceRollup(hashToken(token)));
   });
 
   // Ingest: accept a pushed bundle, store it under a fresh unlisted id, and

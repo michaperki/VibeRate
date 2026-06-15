@@ -1465,16 +1465,20 @@ async function bootDashboard() {
   showHome();
   el('#home').innerHTML = `
     <div class="home-wrap">
-      <header class="home-head"><h1>Your projects</h1>
+      <header class="home-head"><h1>Your workspace</h1>
         <p class="dim-note">Everything you've pushed to VibeRate.
           <button class="linkbtn" id="signout">sign out</button></p></header>
+      <div id="ws-overview"></div>
     </div>`;
   el('#signout').onclick = () => {
     localStorage.removeItem('vbrt_token');
     location.href = '/app';
   };
   try {
-    await loadProjects();
+    await loadProjects(); // sidebar; throws '401' if the token is bad
+    const ws = await api('/api/workspace');
+    const node = el('#ws-overview');
+    if (node) node.innerHTML = renderWorkspaceSection(ws);
   } catch (e) {
     if (String(e.message) === '401') {
       localStorage.removeItem('vbrt_token');
@@ -1484,6 +1488,54 @@ async function bootDashboard() {
       throw e;
     }
   }
+}
+
+// The "overarching" view: activity stats + agent memory aggregated across all of
+// the owner's projects, each note tagged with the projects it came from.
+function renderWorkspaceSection(ws) {
+  const s = (ws && ws.stats) || {};
+  const notes = (ws && ws.memory) || [];
+  const lines = s.added || s.removed ? ` · <b class="diff-add">+${s.added}</b>/<b class="diff-del">−${s.removed}</b> lines` : '';
+  const statLine = `<div class="ov-line1"><b>${s.projects || 0}</b> projects · <b>${s.sessions || 0}</b> sessions · <b>${s.messages || 0}</b> messages${s.commits ? ` · <b>${s.commits}</b> commits` : ''}${lines}</div>`;
+
+  const order = ['user', 'feedback', 'project', 'reference', 'note'];
+  const byType = new Map();
+  for (const n of notes) {
+    const t = n.type || 'note';
+    if (!byType.has(t)) byType.set(t, []);
+    byType.get(t).push(n);
+  }
+  const groups = order.filter((t) => byType.has(t)).concat([...byType.keys()].filter((t) => !order.includes(t)));
+  const memHtml = notes.length
+    ? groups
+        .map(
+          (t) => `<div class="atom-group">
+            <div class="atom-section">${esc(t)}</div>
+            ${byType
+              .get(t)
+              .map(
+                (n) => `<div class="atom-row">
+                  <span class="atom-text">${esc(n.title)}${n.description ? ` <span class="recall-desc">— ${esc(n.description)}</span>` : ''}</span>
+                  <span class="atom-badges">${(n.projects || [])
+                    .map((p) => `<a class="proj-badge" href="/p/${esc(p.id)}" title="${esc(p.name)}">${esc(p.name)}</a>`)
+                    .join('')}</span>
+                </div>`,
+              )
+              .join('')}
+          </div>`,
+        )
+        .join('')
+    : '<div class="empty">No memory captured yet — push a repo whose agent memory is included (the default) to see it aggregated here.</div>';
+
+  return `
+    <section class="home-section">
+      <h2>🧠 Across your projects <span class="dim-note">memory &amp; activity from everything you've pushed</span></h2>
+      <div class="ov-stats">${statLine}</div>
+      <div class="ctx-bucket">
+        <div class="ctx-bucket-head"><span class="dim-note">agent memory — ${notes.length} note${notes.length === 1 ? '' : 's'} across your projects</span></div>
+        ${memHtml}
+      </div>
+    </section>`;
 }
 
 // Routing: /p/<id> = public single project; /app = token-scoped dashboard

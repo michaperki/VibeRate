@@ -349,6 +349,14 @@ pre.code {
 /* files-touched in sidebar */
 .sess .meta.files { color: #8fa0bd; }
 
+/* overarching workspace: which projects a memory note came from */
+.proj-badge {
+  font-size: 10px; color: var(--muted); text-decoration: none;
+  border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; margin-left: 4px;
+  white-space: nowrap;
+}
+.proj-badge:hover { color: var(--text); border-color: var(--accent); }
+
 /* hosted dashboard: token paste form */
 .token-form { display: flex; gap: 8px; max-width: 460px; margin-top: 8px; }
 .token-form input {
