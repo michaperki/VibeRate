@@ -359,6 +359,13 @@ pre.code {
 }
 .vis-toggle:hover { border-color: var(--accent); }
 .vis-toggle:disabled { opacity: 0.5; cursor: default; }
+/* selected project = accent background; force the pill + toggle to white so they
+   don't disappear (publish text was accent-on-accent). */
+.proj.active .vis,
+.proj.active .vis.public,
+.proj.active .vis.private { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
+.proj.active .vis-toggle { color: #fff; border-color: rgba(255, 255, 255, 0.55); }
+.proj.active .vis-toggle:hover { border-color: #fff; }
 
 /* overarching workspace: which projects a memory note came from */
 .proj-badge {
