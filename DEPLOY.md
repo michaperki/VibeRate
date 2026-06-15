@@ -24,7 +24,7 @@ fly auth login          # opens a browser
 taken, edit `app = "..."` to something free (your URL becomes `<app>.fly.dev`).
 
 ```bash
-fly apps create viberate     # use the same name as in fly.toml
+fly apps create vbrt     # use the same name as in fly.toml (URL: vbrt.fly.dev)
 ```
 
 ## 3. Create the persistent volume

@@ -1,7 +1,7 @@
 # Fly.io config for the VibeRate hosted server.
 # `app` must be globally unique on Fly — change it (and the *.fly.dev URL follows)
 # if "viberate" is taken. `fra` (Frankfurt) is the closest region to Tel Aviv.
-app = "viberate"
+app = "vbrt"
 primary_region = "fra"
 
 [build]
