@@ -203,7 +203,7 @@ export function startServer(port = 4317) {
     if (!guardRead(req, res)) return;
     const session = getSession(req.params.slug, req.params.id);
     if (!session) return res.status(404).json({ error: 'not found' });
-    res.json(extractPromptUnits(session, req.params.id));
+    res.json(extractPromptUnits(session, req.params.id, req.params.slug));
   });
 
   // Discover feed: substantive prompt cards across published projects. Public —

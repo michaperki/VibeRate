@@ -88,6 +88,21 @@ const lastAssistantText = (items) => {
   return null;
 };
 
+// How full the model's context window was when this prompt was sent: read the
+// usage off the first assistant message that answered it (that request's input
+// includes this prompt + everything before it). null when usage wasn't captured
+// (e.g. Codex sessions). Surfaced per-prompt as the "dumb zone" gauge.
+function contextAt(items) {
+  for (const m of items) {
+    const u = m.usage;
+    if (u && u.context) {
+      const window = u.window || 200000;
+      return { tokens: u.context, window, pct: Math.min(100, Math.round((u.context / window) * 100)), model: u.model || null };
+    }
+  }
+  return null;
+}
+
 // Capped after-narrative: reasoning first-lines + tool actions, plus the final
 // assistant text as the "verdict". stepCount lets the UI show "+N more".
 function summarizeAfter(items, cap = 6) {
@@ -130,6 +145,7 @@ export function extractPromptUnits(session, sessionId, slug = null) {
       before,
       after: summarizeAfter(t.items),
       docRefs: docRefs(prompt),
+      context: contextAt(t.items),
       chars: prompt.length,
     });
   }

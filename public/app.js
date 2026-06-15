@@ -211,15 +211,6 @@ function toolFile(m) {
   return null;
 }
 
-function toolCmd(m) {
-  const inp = m.input;
-  if (inp && typeof inp === 'object') {
-    const c = inp.command || inp.cmd;
-    return Array.isArray(c) ? c.join(' ') : c || null;
-  }
-  return null;
-}
-
 const CAT_LABEL = { edit: 'edit', read: 'read', cmd: 'cmd', search: 'search', web: 'web', other: 'other' };
 
 function statsFor(messages) {
@@ -1283,98 +1274,41 @@ function wireActivity() {
 
 // ---------- conversation rendering ----------
 
-// Group messages into turns delimited by user text messages.
-function buildTurns(messages) {
-  const turns = [];
-  let cur = null;
-  for (const m of messages) {
-    if (m.kind === 'text' && m.role === 'user') {
-      cur = { user: m, items: [] };
-      turns.push(cur);
-    } else {
-      if (!cur) {
-        cur = { user: null, items: [] };
-        turns.push(cur);
-      }
-      cur.items.push(m);
-    }
-  }
-  return turns;
-}
-
-function renderToolDetail(m) {
-  if (m.kind === 'thinking')
-    return `<details class="tool thinking"><summary>💭 thinking</summary><div class="body">${esc(m.text)}</div></details>`;
-  if (m.kind === 'tool_use') {
-    const file = toolFile(m);
-    const cmd = toolCmd(m);
-    const sub = file ? ` <span class="t-arg">${esc(file)}</span>` : cmd ? ` <span class="t-arg">${esc(cmd.slice(0, 80))}</span>` : '';
-    const input = typeof m.input === 'string' ? m.input : JSON.stringify(m.input, null, 2);
-    return `<details class="tool"><summary>🔧 ${esc(m.name || 'tool')}${sub}</summary><div class="body">${esc(input)}</div></details>`;
-  }
-  if (m.kind === 'tool_result')
-    return `<details class="tool"><summary>📤 result</summary><div class="body">${esc(m.text)}</div></details>`;
-  return '';
-}
-
-// Split a turn's items into ordered segments: visible assistant text vs.
-// collapsible activity bundles (runs of thinking/tool_use/tool_result).
-function renderTurnItems(items) {
-  let html = '';
-  let bundle = [];
-  const flush = () => {
-    if (!bundle.length) return;
-    const s = statsFor(bundle);
-    const summary = `${bundle.filter((b) => b.kind !== 'thinking').length || bundle.length} actions`;
-    html += `
-      <details class="activity">
-        <summary>▸ ${summary}${s.thinking ? ` · ${s.thinking} thinking` : ''} ${statChips(s)}</summary>
-        <div class="activity-body">${bundle.map(renderToolDetail).join('')}</div>
-      </details>`;
-    bundle = [];
-  };
-  items.forEach((m, i) => {
-    if (m.kind === 'text' && m.role === 'assistant') {
-      flush();
-      const isLast = i === items.length - 1;
-      html += `<div class="msg assistant ${isLast ? 'final' : 'interim'}">
-        <div class="who">assistant${isLast ? ' · reply' : ''} ${m.ts ? `<span class="ts">${fmtTime(m.ts)}</span>` : ''}</div>
-        <div class="bubble">${formatText(m.text)}</div>
-      </div>`;
-    } else {
-      bundle.push(m);
-    }
-  });
-  flush();
-  return html;
-}
-
-function renderTurn(turn, idx) {
-  const anchor = `turn-${idx}`;
-  let html = `<div class="turn" id="${anchor}">`;
-  if (turn.user) {
-    html += `<div class="msg user">
-      <div class="who">you ${turn.user.ts ? `<span class="ts">${fmtTime(turn.user.ts)}</span>` : ''}</div>
-      <div class="bubble">${formatText(turn.user.text)}</div>
-    </div>`;
-  }
-  html += renderTurnItems(turn.items);
-  html += `</div>`;
-  return html;
-}
-
 async function selectSession(slug, id) {
   state.session = id;
   document.querySelectorAll('.sess').forEach((n) => n.classList.toggle('active', n.dataset.id === id));
   const s = await api(`/api/projects/${slug}/sessions/${id}`);
+  if (state.session !== id) return; // a newer click won the race
+  // Prompt units carry before/prompt/after + the context-fullness gauge — the
+  // reader's unit of display. Empty (old server / a session with no typed prompts)
+  // just yields an empty reader.
+  let units = [];
+  try {
+    units = await api(`/api/projects/${slug}/sessions/${id}/prompts`);
+    if (state.session !== id) return;
+  } catch {
+    /* old server without /prompts */
+  }
+  state._session = s;
+  state._units = units;
+  renderSessionReader();
+}
+
+function renderSessionReader() {
+  const s = state._session;
+  const units = state._units || [];
   const stats = statsFor(s.messages);
-  const turns = buildTurns(s.messages);
-  state.turnAnchors = turns.map((_, i) => `turn-${i}`);
+  // Nav follows the prompt cards: one stop per unit, anchored by card ordinal.
+  state.turnAnchors = units.map((_, i) => `turn-${i}`);
   state.currentTurn = 0;
   const end = endState(s.messages);
   const dur = fmtDuration(new Date(s.endedAt) - new Date(s.startedAt));
-
   const filesList = [...stats.files].slice(0, 40);
+
+  const endMarker = `<div class="end-marker ${end.cls}">${end.text}</div>`;
+  const body = units.length
+    ? units.map(renderReaderCard).join('') + endMarker
+    : '<div class="empty">No prompts in this session.</div>';
 
   el('#conversation').innerHTML = `
     <div class="conv-toolbar">
@@ -1392,22 +1326,67 @@ async function selectSession(slug, id) {
         <div class="files-list" id="files-list" hidden>${filesList.map((f) => `<div>${esc(f)}</div>`).join('')}</div>
       </div>
       <div class="nav">
-        <button id="nav-prev" title="Previous turn (k)">◀ prev</button>
-        <span id="nav-counter" class="counter"></span>
-        <button id="nav-next" title="Next turn (j)">next ▶</button>
         <span class="spacer"></span>
+        <button id="nav-prev" title="Previous prompt (k)">◀ prev</button>
+        <span id="nav-counter" class="counter"></span>
+        <button id="nav-next" title="Next prompt (j)">next ▶</button>
         <button id="nav-final" title="Jump to final reply">⤓ final</button>
         <button id="expand-all">expand all</button>
         <button id="collapse-all">collapse all</button>
       </div>
     </div>
-    <div class="conv-body">
-      ${turns.map(renderTurn).join('')}
-      <div class="end-marker ${end.cls}">${end.text}</div>
-    </div>`;
+    <div class="conv-body">${body}</div>`;
 
   el('#conversation').scrollTop = 0;
-  wireConversation(turns.length);
+  wireConversation(units.length);
+}
+
+// A prompt-time context-fullness gauge — how full the model's window was when the
+// prompt was sent. ≥75% gets a "dumb zone" warning. Hidden when no usage (Codex).
+function contextGauge(ctx) {
+  if (!ctx || !ctx.tokens) return '';
+  const k = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+  const hot = ctx.pct >= 75;
+  const title = `context window ${ctx.pct}% full when this prompt was sent — ${k(ctx.tokens)} / ${k(ctx.window)} tokens${hot ? ' · dumb zone' : ''}`;
+  return `<span class="ctx-gauge${hot ? ' hot' : ''}" title="${esc(title)}">
+    <span class="ctx-bar"><span class="ctx-fill" style="width:${ctx.pct}%"></span></span>
+    <span class="ctx-pct">${ctx.pct}%${hot ? ' ⚠' : ''}</span>
+  </span>`;
+}
+
+// One prompt unit as an internal reader card. Acks ("go ahead") collapse to a slim
+// connector so the chain stays legible without giving filler a full card.
+function renderReaderCard(u, i) {
+  const anchor = `turn-${i}`;
+  if (u.isAck) {
+    return `<div class="turn rcard-ack" id="${anchor}"><span class="ack-arrow">↳ you:</span> <span class="ack-text">${esc(u.prompt)}</span>${contextGauge(u.context)}</div>`;
+  }
+  const b = u.before;
+  const before = b && (b.agent || b.prompt)
+    ? `<details class="pc-before"><summary>▸ earlier in this session</summary>
+         ${b.prompt ? `<div class="pc-bu">you: ${esc(b.prompt)}</div>` : ''}
+         ${b.agent ? `<div class="pc-ba">agent: ${esc(b.agent)}</div>` : ''}
+       </details>`
+    : '';
+  const docs = (u.docRefs || []).map((d) => `<span class="pc-doc">📄 ${esc(d)}</span>`).join('');
+  const steps = ((u.after && u.after.steps) || [])
+    .map((s) => (s.kind === 'action' ? `<div class="pc-act">$ ${esc(s.text)}</div>` : `<div class="pc-rz">💭 ${esc(s.text)}</div>`))
+    .join('');
+  const shown = u.after && u.after.steps ? u.after.steps.length : 0;
+  const more = u.after && u.after.stepCount > shown ? `<div class="pc-more">+${u.after.stepCount - shown} more</div>` : '';
+  const verdict = u.after && u.after.verdict ? `<div class="pc-verdict">${esc(u.after.verdict)}</div>` : '';
+  const played = steps || verdict
+    ? `<details class="pc-after"><summary>▸ how it played out${u.after.stepCount ? ` · ${u.after.stepCount} steps` : ''}</summary>${steps}${more}${verdict}</details>`
+    : '';
+  const when = u.ts ? `<span class="pc-when">${fmtTime(u.ts)}</span>` : '';
+  const link = u.cardId ? `<a class="pc-link" href="/c/${esc(u.cardId)}" title="permalink" target="_blank" rel="noopener">🔗</a>` : '';
+  return `<article class="turn pcard rcard" id="${anchor}">
+    <div class="pc-head">${docs}${contextGauge(u.context)}${when}</div>
+    ${before}
+    <div class="pc-prompt">${formatText(u.prompt)}</div>
+    ${played}
+    ${link ? `<div class="pc-bar">${link}</div>` : ''}
+  </article>`;
 }
 
 function wireConversation(turnCount) {

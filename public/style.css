@@ -405,6 +405,30 @@ pre.code {
 .pc-link:hover { color: var(--accent); }
 .pc-open { margin-left: auto; color: var(--accent); text-decoration: none; }
 
+/* session reader: prompt-unit cards */
+.conv-body .rcard { margin: 0 0 14px; }
+.conv-body .rcard .pc-prompt { font-size: 15px; }
+/* ack prompts collapse to a slim connector between cards */
+.rcard-ack {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 14px; padding: 5px 12px; font-size: 13px; color: #9aa1b2;
+  border-left: 2px dashed #3a3550;
+}
+.rcard-ack .ack-arrow { color: var(--claude); flex: none; }
+.rcard-ack .ack-text { color: #cdd2de; }
+
+/* prompt-time context-fullness gauge ("dumb zone" signal) */
+.ctx-gauge { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); }
+.ctx-gauge .ctx-bar {
+  width: 38px; height: 5px; border-radius: 3px; overflow: hidden;
+  background: #2a2f3c; flex: none;
+}
+.ctx-gauge .ctx-fill { display: block; height: 100%; background: var(--codex); }
+.ctx-gauge .ctx-pct { font-variant-numeric: tabular-nums; }
+.ctx-gauge.hot .ctx-fill { background: #f0a93b; }
+.ctx-gauge.hot .ctx-pct { color: #f0a93b; }
+.rcard-ack .ctx-gauge { margin-left: auto; }
+
 /* dashboard: Connect CLI box */
 .cli-box { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin: 6px 0 14px; max-width: 620px; background: var(--panel); }
 .cli-box .code { margin: 8px 0; white-space: pre-wrap; word-break: break-all; user-select: all; }
