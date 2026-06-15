@@ -4,18 +4,35 @@ import path from 'node:path';
 
 export const HOME = os.homedir();
 
-// Where vbrt stores captured projects (flat JSON on disk). Default to ~/.viberate
-// but fall back to the legacy ~/.ratemyprompt if it exists and the new one doesn't,
-// so projects captured before the rename still show without a migration step.
-function defaultDataDir() {
-  const nu = path.join(HOME, '.viberate');
-  const legacy = path.join(HOME, '.ratemyprompt');
+// Where vbrt stores captured projects (flat JSON on disk): ~/.viberate.
+const NEW_DATA_DIR = path.join(HOME, '.viberate');
+const LEGACY_DATA_DIR = path.join(HOME, '.ratemyprompt');
+
+// One-time rebrand migration: rename the pre-rename store so the on-disk name
+// matches the brand. Runs only when no explicit data dir is set (so the hosted
+// server with VBRT_DATA_DIR=/data is untouched) and only when the new dir
+// doesn't exist yet — after that it's a no-op.
+function migrateLegacyDataDir() {
+  if (process.env.VBRT_DATA_DIR || process.env.RMP_DATA_DIR) return;
   try {
-    if (!fs.existsSync(nu) && fs.existsSync(legacy)) return legacy;
+    if (!fs.existsSync(NEW_DATA_DIR) && fs.existsSync(LEGACY_DATA_DIR)) {
+      fs.renameSync(LEGACY_DATA_DIR, NEW_DATA_DIR);
+    }
+  } catch {
+    /* rename can fail across devices/permissions; defaultDataDir() still reads legacy */
+  }
+}
+migrateLegacyDataDir();
+
+// Default to ~/.viberate; if the migration above couldn't rename, still read the
+// legacy dir so old captures aren't lost.
+function defaultDataDir() {
+  try {
+    if (!fs.existsSync(NEW_DATA_DIR) && fs.existsSync(LEGACY_DATA_DIR)) return LEGACY_DATA_DIR;
   } catch {
     /* ignore */
   }
-  return nu;
+  return NEW_DATA_DIR;
 }
 export const DATA_DIR = process.env.VBRT_DATA_DIR || process.env.RMP_DATA_DIR || defaultDataDir();
 export const PROJECTS_DIR = path.join(DATA_DIR, 'projects');
