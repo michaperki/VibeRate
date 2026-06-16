@@ -76,11 +76,11 @@ concept it changed — that link is the "living history."
   UI: a "🕰 Time travel" toggle on the graph reveals a scrubber that renders the
   brain *as of* a commit (born-later docs hidden, changed docs ring) + a real LCS
   diff panel. Mock kept at `prototypes/brain-timetravel.html`.
-  - [ ] *v1 gap:* an **archived** doc (no longer a current graph node) shows in the
-    diff panel but **not as a ghost node** on the graph — needs historical-only
-    nodes added to the layout. (The mock showed ghost nodes; deferred.)
-  - [ ] *Follow-up:* the **push skill bundle** must include `extractDocHistory`
-    for hosted pushes to capture history (local `vbrt add` already does).
+  - [x] *Ghost nodes:* archived docs (newest history version = deletion) are now
+    laid into the graph and ghost in during time-travel — hidden before birth,
+    live during their lifetime, struck-through ghost after deletion.
+  - [x] *Push skill bundle:* rebuilt with `build-skill.mjs --plugin` so hosted
+    pushes capture history (the build copies all of `src/` + `bin/vbrt.js`).
 
 ### C. Prompt reader / outcome rail (Slice 4)
 - [ ] **Real diffs** per edit in the reader.
