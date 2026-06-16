@@ -38,6 +38,15 @@ function fmtTime(iso) {
   return iso.slice(11, 16);
 }
 
+// "1 msg" / "2 msgs" — count + correctly-pluralized word. `plw` returns just the
+// word (for when the number is rendered separately, e.g. bolded).
+function plw(n, word, suffix = 's') {
+  return word + (n === 1 ? '' : suffix);
+}
+function plural(n, word, suffix = 's') {
+  return `${n} ${plw(n, word, suffix)}`;
+}
+
 function fmtDuration(ms) {
   if (!ms || ms < 0) return '—';
   const s = Math.round(ms / 1000);
@@ -284,7 +293,7 @@ async function loadProjects() {
       return `
       <div class="proj" data-slug="${esc(p.slug)}">
         <div class="name">${esc(p.name || p.slug)}</div>
-        <div class="meta">${p.sessions.length} session(s) ${pill}</div>
+        <div class="meta">${plural(p.sessions.length, 'session')} ${pill}</div>
         ${toggle}
       </div>`;
     })
@@ -536,7 +545,7 @@ function renderSessionList() {
       const dur = s.startedAt && s.endedAt ? fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)) : '';
       const act = state.activity.byId[s.id];
       const count = act ? act.userCount : s.messageCount;
-      const label = act ? `${count} msgs` : `${count} total`;
+      const label = act ? plural(count, 'msg') : `${count} total`;
       const color = (state.colorById || {})[s.id] || 'var(--muted)';
       const dl = act ? diffLabel(act) : '';
       return `
@@ -557,7 +566,7 @@ function renderSessionList() {
     : '';
 
   el('#sessions').innerHTML = `
-    <div class="pane-title">${esc(p.name || p.slug)} · ${p.sessions.length} sessions</div>
+    <div class="pane-title">${esc(p.name || p.slug)} · ${plural(p.sessions.length, 'session')}</div>
     <div class="filters">
       ${chip('all', `all ${p.sessions.length}`)}
       ${counts.claude ? chip('claude', `claude ${counts.claude}`) : ''}
@@ -642,7 +651,7 @@ function renderTimeline() {
     <div class="conv-toolbar">
       <div class="conv-head">
         <h2>${esc(state.projectData.name)}</h2>
-        <div class="meta">${sessions.length} conversations · ${fmtShort(tMin)} → ${fmtShort(tMax)}${
+        <div class="meta">${plural(sessions.length, 'conversation')} · ${fmtShort(tMin)} → ${fmtShort(tMax)}${
           enriched ? '' : ' · <span class="warn-inline">restart <code>vbrt serve</code> for message data</span>'
         }</div>
       </div>
@@ -1356,7 +1365,7 @@ function overviewHeader(sessions) {
   const lines = added || removed ? ` · <b class="diff-add">+${added}</b>/<b class="diff-del">−${removed}</b> lines` : '';
   return `
     <div class="ov-stats">
-      <div class="ov-line1"><b>${convos}</b> conversations · <b>${messages}</b> messages${state.git.ok ? ` · <b>${commits}</b> commits` : ''}${brain ? ` · <b>${brain}</b> 🧠 brain edits` : ''}${lines}</div>
+      <div class="ov-line1"><b>${convos}</b> ${plw(convos, 'conversation')} · <b>${messages}</b> ${plw(messages, 'message')}${state.git.ok ? ` · <b>${commits}</b> ${plw(commits, 'commit')}` : ''}${brain ? ` · <b>${brain}</b> 🧠 ${plw(brain, 'brain edit')}` : ''}${lines}</div>
       <div class="ov-line2">${fmtShort(firstT)} – ${fmtShort(lastT)} · last active <b>${fmtAgo(lastT)}</b>
         <span class="ov-split"><span class="sw2" style="background:var(--claude)"></span>${claude}
         <span class="sw2" style="background:var(--codex)"></span>${codex}</span>
@@ -1395,7 +1404,7 @@ function renderRibbon(sessions) {
     }
   const maxBin = Math.max(1, ...bins);
   const heat = bins
-    .map((n, i) => (n ? `<span class="rib-h" style="left:${(i / N) * 100}%;height:${4 + Math.round((Math.sqrt(n) / Math.sqrt(maxBin)) * 22)}px" title="${n} msgs"></span>` : ''))
+    .map((n, i) => (n ? `<span class="rib-h" style="left:${(i / N) * 100}%;height:${4 + Math.round((Math.sqrt(n) / Math.sqrt(maxBin)) * 22)}px" title="${plural(n, 'msg')}"></span>` : ''))
     .join('');
 
   const maxCount = Math.max(1, ...sessions.map((s) => s.userCount));
@@ -1405,7 +1414,7 @@ function renderRibbon(sessions) {
       const sel = state.selectedConvo === s.id ? ' sel' : '';
       const dl = diffLabel(s);
       return `<span class="rib-b${sel}" data-convo="${esc(s.id)}" style="left:${pct(s.start)}%;width:${wpx(s.userCount)}px;background:${SRC_COLOR[s.source] || 'var(--accent)'}"
-           title="${esc(fmtShortDT(s.start))} · ${s.source} · ${s.userCount} msgs${dl ? ' · ' + dl : ''} · ${esc(s.title)}"></span>`;
+           title="${esc(fmtShortDT(s.start))} · ${s.source} · ${plural(s.userCount, 'msg')}${dl ? ' · ' + dl : ''} · ${esc(s.title)}"></span>`;
     })
     .join('');
 
@@ -1626,11 +1635,11 @@ function renderSessionReader() {
         <div class="meta">
           <span class="badge ${s.source}">${s.source}</span>
           ${fmtDate(s.startedAt)} → ${fmtDate(s.endedAt)} · ${dur} ·
-          ${stats.userTurns} your turns · ${stats.toolCalls} tools
+          ${plural(stats.userTurns, 'turn')} · ${plural(stats.toolCalls, 'tool')}
         </div>
         <div class="chips">
           ${statChips(stats)}
-          ${stats.files.size ? `<span class="chip files" id="files-toggle">${stats.files.size} files touched ▾</span>` : ''}
+          ${stats.files.size ? `<span class="chip files" id="files-toggle">${plural(stats.files.size, 'file')} touched ▾</span>` : ''}
         </div>
         <div class="files-list" id="files-list" hidden>${filesList.map((f) => `<div>${esc(f)}</div>`).join('')}</div>
       </div>
