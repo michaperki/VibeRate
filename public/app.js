@@ -515,7 +515,6 @@ async function selectProject(slug) {
     if (d && Array.isArray(d.docs) && d.docs.length) {
       state.docs = { ok: true, files: d.docs };
       state.docTab = d.docs[0].name;
-      state.docGraph = buildDocGraph(d.docs);
     }
   } catch {
     /* no agent docs captured for this project */
@@ -535,6 +534,11 @@ async function selectProject(slug) {
   } catch {
     /* no history captured */
   }
+
+  // Build the graph now that history is known: include archived docs (deleted in
+  // history) as nodes so they can ghost in during time travel. They're laid out
+  // with the rest but hidden outside time-travel mode.
+  if (state.docs.ok) state.docGraph = buildDocGraph([...state.docs.files, ...archivedPseudoFiles()]);
 
   // Agent memory scoped to this project (Tier-2). Recall-only; index always loads.
   state.projectMemory = null;
@@ -870,6 +874,9 @@ function buildDocGraph(files) {
     content: f.content || '',
     mtime: f.mtime || 0,
     rank: i, // server priority order (entry docs first)
+    archived: !!f.archived, // a doc deleted in history — a ghost during time travel
+    bornT: f.bornT,
+    deathT: f.deathT,
   }));
   const seen = new Set();
   const edges = [];
@@ -1095,7 +1102,8 @@ function renderCenterpiece() {
   }
   const g = state.docGraph;
   const files = state.docs.files;
-  const active = files.find((f) => f.name === state.docTab) || files[0];
+  // Resolve from graph nodes so an archived ghost opens its (historical) content.
+  const active = g.nodes.find((n) => n.name === state.docTab) || files[0] || g.nodes[0];
 
   // Time-travel: render the graph "as of" the selected brain commit. Nodes born
   // after that point are hidden; the docs changed *at* that commit get a ring.
@@ -1108,16 +1116,22 @@ function renderCenterpiece() {
     const cm = ttLine[state.ttIndex];
     ttAsof = cm.t;
     for (const d of brainDocsOf(cm, brainNodeSet())) {
-      const node = currentDocNode(docName(d));
+      const node = graphNode(docName(d)); // incl. archived ghosts
       if (node) ttChanged.set(node.name, docStatus(d) || 'modified');
     }
   }
-  const ttHidden = (name) => tt && docBirthT(name) > ttAsof;
+  // A node is hidden when it doesn't exist as of the scrubbed moment — or, outside
+  // time-travel, whenever it's an archived doc. Ghost = archived and past its death.
+  const hideOf = (n) => {
+    if (tt) return (n.archived ? n.bornT : docBirthT(n.name)) > ttAsof;
+    return !!n.archived;
+  };
+  const ghostOf = (n) => tt && n.archived && ttAsof >= n.deathT && !hideOf(n);
 
   const edgesSvg = g.edges
     .map(
       (e) =>
-        `<line x1="${g.nodes[e.i].x.toFixed(1)}" y1="${g.nodes[e.i].y.toFixed(1)}" x2="${g.nodes[e.j].x.toFixed(1)}" y2="${g.nodes[e.j].y.toFixed(1)}" class="gedge${tt && (ttHidden(g.nodes[e.i].name) || ttHidden(g.nodes[e.j].name)) ? ' tt-hidden' : ''}"/>`,
+        `<line x1="${g.nodes[e.i].x.toFixed(1)}" y1="${g.nodes[e.i].y.toFixed(1)}" x2="${g.nodes[e.j].x.toFixed(1)}" y2="${g.nodes[e.j].y.toFixed(1)}" class="gedge${hideOf(g.nodes[e.i]) || hideOf(g.nodes[e.j]) ? ' tt-hidden' : ''}"/>`,
     )
     .join('');
   const recent = state.docLayout === 'recent';
@@ -1143,14 +1157,16 @@ function renderCenterpiece() {
       const pmax = (0.16 + f * 0.26).toFixed(2); // newer → brighter halo
       const delay = ((i * 0.37) % 2.3).toFixed(2); // stagger so they don't pulse in unison
       const haloStyle = `animation-duration:${dur}s;animation-delay:${delay}s;--pmax:${pmax}`;
-      const chg = ringMap.get(n.name);
+      const hidden = hideOf(n);
+      const ghost = ghostOf(n);
+      const chg = hidden ? undefined : ringMap.get(n.name);
       const ringCls = chg === 'added' ? 'born' : 'changed';
       const ring = chg
         ? `<circle class="gring ${ringCls}" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="none" stroke="${n.color}"/>`
         : '';
       // Keep hidden nodes in the DOM (display:none) so node↔group indices stay
       // aligned for the layout-morph tween.
-      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${ttHidden(n.name) ? ' tt-hidden' : ''}" data-doc="${esc(n.name)}">
+      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}" data-doc="${esc(n.name)}">
         <circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         ${ring}
@@ -1188,7 +1204,7 @@ function renderCenterpiece() {
         <span class="lay-toggle">${toggle}</span>
         ${state.docHistory ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
         <span class="brain-key" title="Each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow = recency</span>
-        <span class="dim-note">${files.length} docs · ${g.edges.length} links</span></div>
+        <span class="dim-note">${files.length} docs · ${g.edges.filter((e) => !g.nodes[e.i].archived && !g.nodes[e.j].archived).length} links</span></div>
       <div class="brain-wrap">
         <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${timeAxis}${edgesSvg}${nodesSvg}</svg>
         <div class="brain-peek" id="brainPeek" hidden></div>
@@ -1511,13 +1527,43 @@ function brainDocsOf(c, brainSet) {
   });
 }
 
-// The current brain-graph node whose name/basename matches a doc, or null (e.g.
-// the doc was since deleted — we only hold the current snapshot's content).
+// The current (non-archived) brain-graph node matching a doc, or null (the doc
+// was since deleted — only its history holds content).
 function currentDocNode(name) {
   const g = state.docGraph;
   if (!g) return null;
   const base = name.split('/').pop();
+  return g.nodes.find((n) => !n.archived && (n.name === name || n.base === base)) || null;
+}
+// Any graph node (incl. archived ghosts) matching a doc — used by time-travel.
+function graphNode(name) {
+  const g = state.docGraph;
+  if (!g) return null;
+  const base = name.split('/').pop();
   return g.nodes.find((n) => n.name === name || n.base === base) || null;
+}
+
+// Pseudo-"files" for docs that were archived (their newest history version is a
+// deletion), so the graph builder lays them out as ghost nodes. Carries the
+// lifetime (bornT…deathT) and the last content (for hover-peek / the ghost).
+function archivedPseudoFiles() {
+  const h = state.docHistory;
+  if (!h) return [];
+  const out = [];
+  for (const [path, versions] of Object.entries(h)) {
+    if (!versions.length || versions[0].status !== 'deleted') continue;
+    const lastContent = (versions.find((v) => v.content != null) || {}).content || '';
+    out.push({
+      name: path,
+      content: lastContent,
+      bytes: lastContent.length,
+      mtime: versions[0].t,
+      archived: true,
+      bornT: versions[versions.length - 1].t,
+      deathT: versions[0].t,
+    });
+  }
+  return out;
 }
 
 // The brain docs changed in the most recent brain-touching commit, mapped to

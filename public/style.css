@@ -516,6 +516,12 @@ pre.code {
 @media (prefers-reduced-motion: reduce) { .gring { display: none; } }
 /* time travel: hidden (not-yet-born) nodes/edges as of the scrubbed moment */
 .gnode.tt-hidden, .gedge.tt-hidden { display: none; }
+/* archived doc, scrubbed past its deletion — a faded, struck-through ghost */
+.gnode.ghost { opacity: 0.4; }
+.gnode.ghost .ghalo { display: none; }
+.gnode.ghost circle { fill: #2a2f3c !important; stroke: #5a6275; stroke-dasharray: 3 2; }
+.gnode.ghost .glabel { fill: var(--dim, #6b7280); text-decoration: line-through; }
+.gnode.ghost:hover { opacity: 0.75; }
 .tt-toggle.on { color: #fff; background: var(--accent); border-color: var(--accent); }
 
 /* time-travel control strip + diff panel under the graph */
