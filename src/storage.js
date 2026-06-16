@@ -40,12 +40,14 @@ function repoKey(cwd) {
   return String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
-// Find an existing project owned by `owner` that came from the same repo path,
-// so a re-push updates it instead of minting a duplicate. Only matches within the
-// owner's own projects (never across owners).
+// Find an existing project from the same repo path, so a re-push updates it
+// instead of minting a duplicate. With an `owner` (hosted) it matches only within
+// that owner's projects (never across owners); with `owner` null (local, single-
+// user `vbrt serve`) it matches any project by path — so local pushes are
+// idempotent by repo, which is what makes the live-streaming dev loop work.
 function findOwnedProjectByCwd(owner, cwd) {
   const key = repoKey(cwd);
-  if (!owner || !key) return null;
+  if (!key) return null;
   return listProjects(owner).find((m) => repoKey(m.cwd) === key) || null;
 }
 
