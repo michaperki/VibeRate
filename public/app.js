@@ -1253,12 +1253,34 @@ function lastActive(sessions) {
   return Math.max(...sessions.flatMap((s) => (s.msgs || []).map((m) => m.t)).concat(sessions.map((s) => s.start)));
 }
 
+// Brain-doc detection unifies the timeline with the graph: a changed .md counts
+// as "brain" if it's a node in this project's brain graph. Falls back to a known
+// agent-doc basename list when no graph was captured. Tolerant of both the new
+// commit-doc shape ({name,status}) and the legacy bare-string shape.
+const BRAIN_FALLBACK = new Set(['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md']);
+const docName = (d) => (typeof d === 'string' ? d : (d && d.name)) || '';
+const docStatus = (d) => (typeof d === 'string' ? null : (d && d.status)) || null;
+function brainNodeSet() {
+  const g = state.docGraph;
+  if (g && g.nodes && g.nodes.length) return new Set(g.nodes.map((n) => n.base.toLowerCase()));
+  return null;
+}
+function brainDocsOf(c, brainSet) {
+  if (!c.docs) return [];
+  const set = brainSet !== undefined ? brainSet : brainNodeSet();
+  return c.docs.filter((d) => {
+    const base = docName(d).split('/').pop().toLowerCase();
+    return set ? set.has(base) : BRAIN_FALLBACK.has(base);
+  });
+}
+const STATUS_GLYPH = { added: '＋', modified: '∆', deleted: '−', renamed: '→', copied: '⎘' };
+
 function overviewHeader(sessions) {
   const convos = sessions.length;
   const messages = sessions.reduce((a, s) => a + (s.userCount || 0), 0);
   const wc = windowCommits(sessions);
   const commits = wc.length;
-  const brain = wc.filter((c) => c.docs && c.docs.length).length;
+  const brain = wc.filter((c) => brainDocsOf(c).length).length;
   const firstT = Math.min(...sessions.map((s) => s.start));
   const lastT = lastActive(sessions);
   const claude = sessions.filter((s) => s.source === 'claude').length;
@@ -1287,11 +1309,13 @@ function renderRibbon(sessions) {
   const span = Math.max(1, tMax - tMin);
   const pct = (t) => ((t - tMin) / span) * 100;
   state._rib = { tMin, tMax };
+  state._winByHash = Object.fromEntries(commits.map((c) => [c.hash, c]));
+  const brainSet = brainNodeSet();
 
   const ctick = commits
     .map(
       (c) =>
-        `<span class="rib-c ${c.isRevert ? 'revert' : ''}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · ${esc(c.hash)} · ${esc(c.subject)}"></span>`,
+        `<span class="rib-c ${c.isRevert ? 'revert' : ''}" data-commit="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · ${esc(c.hash)} · ${esc(c.subject)}"></span>`,
     )
     .join('');
 
@@ -1330,20 +1354,22 @@ function renderRibbon(sessions) {
       if (!churn) return '';
       const h = 4 + Math.round((Math.sqrt(churn) / Math.sqrt(maxChurn)) * 22);
       const addPct = Math.round((add / churn) * 100);
-      return `<span class="rib-code" style="left:${pct(s.start)}%;height:${h}px" title="${esc(fmtShortDT(s.start))} · +${add}/−${del} lines · ${esc(s.title)}"><span class="rib-code-add" style="height:${addPct}%"></span><span class="rib-code-del" style="height:${100 - addPct}%"></span></span>`;
+      return `<span class="rib-code" data-code="${esc(s.id)}" style="left:${pct(s.start)}%;height:${h}px" title="${esc(fmtShortDT(s.start))} · +${add}/−${del} lines · ${esc(s.title)}"><span class="rib-code-add" style="height:${addPct}%"></span><span class="rib-code-del" style="height:${100 - addPct}%"></span></span>`;
     })
     .join('');
   const codeRow = state.activity.ok
     ? `<div class="rib-row"><span class="rib-lab">code</span><div class="rib-track rib-codetrack">${codeBars}</div></div>`
     : '';
 
-  // "brain" lane — commits that changed agent/SOUL/AGENTS/etc docs.
-  const brainCommits = commits.filter((c) => c.docs && c.docs.length);
-  const brainMarks = brainCommits
-    .map(
-      (c) =>
-        `<span class="rib-d" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · 🧠 ${esc(c.docs.join(', '))} · ${esc(c.subject)}"></span>`,
-    )
+  // "brain" lane — commits that changed a brain-graph doc (unified with the
+  // graph's doc set). Tooltip lists each doc with its change (added/modified/…).
+  const brainMarks = commits
+    .map((c) => {
+      const bd = brainDocsOf(c, brainSet);
+      if (!bd.length) return '';
+      const list = bd.map((d) => `${docStatus(d) ? (STATUS_GLYPH[docStatus(d)] || '') + ' ' : ''}${docName(d).split('/').pop()}`).join(', ');
+      return `<span class="rib-d" data-brain="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · 🧠 ${esc(list)} · ${esc(c.subject)}"></span>`;
+    })
     .join('');
   const brainRow = state.git.ok
     ? `<div class="rib-row"><span class="rib-lab">brain</span><div class="rib-track rib-brain">${brainMarks}</div></div>`
@@ -1379,6 +1405,24 @@ function wireActivity() {
       };
     });
 
+  // Commit / brain / code ticks open a detail popover (previously inert).
+  const lookupCommit = (h) => state._winByHash && state._winByHash[h];
+  el('#conversation').querySelectorAll('[data-commit]').forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    const c = lookupCommit(b.dataset.commit);
+    if (c) openRibDetail(b, commitDetailHtml(c));
+  }));
+  el('#conversation').querySelectorAll('[data-brain]').forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    const c = lookupCommit(b.dataset.brain);
+    if (c) openRibDetail(b, brainDetailHtml(c));
+  }));
+  el('#conversation').querySelectorAll('[data-code]').forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    const s = (state._tlSessions || []).find((x) => x.id === b.dataset.code);
+    if (s) openRibDetail(b, codeDetailHtml(s));
+  }));
+
   const brush = document.getElementById('ribBrush');
   if (brush && state._rib) {
     brush.onmousedown = (e) => {
@@ -1409,6 +1453,73 @@ function wireActivity() {
       e.preventDefault();
     };
   }
+}
+
+// ---------- ribbon detail popover (commit / brain / code) ----------
+
+const ribEsc = (e) => { if (e.key === 'Escape') closeRibDetail(); };
+const ribOutside = (e) => {
+  if (!e.target.closest('.rib-pop') && !e.target.closest('[data-commit],[data-brain],[data-code]')) closeRibDetail();
+};
+function closeRibDetail() {
+  const p = el('.rib-pop');
+  if (p) p.remove();
+  document.removeEventListener('keydown', ribEsc, true);
+  document.removeEventListener('click', ribOutside, true);
+}
+function openRibDetail(anchorEl, html) {
+  closeRibDetail();
+  const card = anchorEl.closest('.dash-card');
+  if (!card) return;
+  const pop = document.createElement('div');
+  pop.className = 'rib-pop';
+  pop.innerHTML = `<button class="rib-pop-x" title="Close">✕</button>${html}`;
+  card.appendChild(pop);
+  const cb = card.getBoundingClientRect();
+  const ab = anchorEl.getBoundingClientRect();
+  let left = ab.left - cb.left + ab.width / 2 - pop.offsetWidth / 2;
+  left = Math.max(8, Math.min(left, cb.width - pop.offsetWidth - 8));
+  let top = ab.bottom - cb.top + 8;
+  if (top + pop.offsetHeight > cb.height - 4) top = ab.top - cb.top - pop.offsetHeight - 8; // flip above
+  pop.style.left = `${left}px`;
+  pop.style.top = `${Math.max(8, top)}px`;
+  pop.querySelector('.rib-pop-x').onclick = closeRibDetail;
+  const openBtn = pop.querySelector('[data-open-sess]');
+  if (openBtn) openBtn.onclick = () => { const id = openBtn.dataset.openSess; closeRibDetail(); selectSession(state.project, id); };
+  // Defer the dismiss listeners so the opening click doesn't immediately close it.
+  setTimeout(() => {
+    document.addEventListener('keydown', ribEsc, true);
+    document.addEventListener('click', ribOutside, true);
+  }, 0);
+}
+
+function statusRow(d) {
+  const st = docStatus(d);
+  const badge = st ? `<span class="rp-st st-${st}">${esc(st)}</span>` : '';
+  return `<div class="rp-doc">${badge}<code>${esc(docName(d))}</code></div>`;
+}
+function commitDetailHtml(c) {
+  const bd = brainDocsOf(c);
+  const flags = [c.isMerge ? 'merge' : '', c.isRevert ? 'revert' : ''].filter(Boolean).join(' · ');
+  return `<div class="rp-head">commit <code>${esc(c.hash)}</code>${flags ? ` <span class="rp-flag">${esc(flags)}</span>` : ''}</div>
+    <div class="rp-sub">${esc(c.subject || '(no subject)')}</div>
+    <div class="rp-meta">${esc(fmtShortDT(c.t))}${c.files ? ` · ${c.files} file${c.files === 1 ? '' : 's'} changed` : ''}${bd.length ? ` · ${bd.length} 🧠` : ''}</div>
+    ${bd.length ? `<div class="rp-docs">${bd.map(statusRow).join('')}</div>` : ''}`;
+}
+function brainDetailHtml(c) {
+  const bd = brainDocsOf(c);
+  return `<div class="rp-head">🧠 brain changed</div>
+    <div class="rp-docs">${bd.map(statusRow).join('')}</div>
+    <div class="rp-sub">${esc(c.subject || '')}</div>
+    <div class="rp-meta">${esc(fmtShortDT(c.t))} · <code>${esc(c.hash)}</code></div>`;
+}
+function codeDetailHtml(s) {
+  const files = (s.files || []).slice(0, 8);
+  const more = (s.fileCount || 0) > files.length ? `<div class="rp-more">+${s.fileCount - files.length} more</div>` : '';
+  return `<div class="rp-head">${esc(s.title || 'session')}</div>
+    <div class="rp-meta"><b class="diff-add">+${s.added || 0}</b>/<b class="diff-del">−${s.removed || 0}</b> lines · ${s.fileCount || 0} file${s.fileCount === 1 ? '' : 's'}</div>
+    ${files.length ? `<div class="rp-files">${files.map((f) => `<div>${esc(f)}</div>`).join('')}${more}</div>` : ''}
+    <button class="rp-open" data-open-sess="${esc(s.id)}">open session →</button>`;
 }
 
 // ---------- conversation rendering ----------
