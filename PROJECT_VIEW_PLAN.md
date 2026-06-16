@@ -144,33 +144,21 @@ The review flagged these as the strongest parts. Don't break them while polishin
 
 ---
 
-## 🧪 Experiment — plan-completion % → brain node status
+## 🧪 Experiment — plan-completion % → brain node ring · ✅ shipped & archived
 
-> **Full spec + checklist: [PLAN_COMPLETION.md](PLAN_COMPLETION.md).** Now in
-> active development (rides the just-shipped time-travel doc-history).
+Plan/checklist docs now surface a **completion %** as an **Arc ring** on their
+brain node (amber→green by %), via a checkbox-ratio parser (`completionOf`).
+In **time-travel** the ring fills as you scrub (each as-of version reparsed).
+Spec doc `PLAN_COMPLETION.md` was **archived** when v1 shipped — it now lives as
+a ghost node, the first inhabitant of the brain graveyard (closing its own loop).
 
-Plan/spec docs (this file, ROADMAP, BACKLOG, *_NEXT_PASS, …) get created and
-progressively completed. Idea: surface a **completion %** per plan doc and use it
-to **annotate that doc's brain node**, so the user sees at a glance which plans are
-fresh, in-progress, or done. Read-only — we visualize status, we don't
-archive/complete from the UI.
-
-Two sources for the number (use both; marker wins):
-- **Semantic marker (authoritative).** The coding agent, when it updates a plan,
-  writes a completion line at the **bottom** of the doc (LLMs estimate a number
-  more accurately *after* reading the whole doc than before). Convention TBD, e.g.
-  a trailing `<!-- completion: 45% -->` or `**Completion: 45%**`. Parsed at push.
-- **Checkbox parser (fallback, nearly free).** Ratio of `- [x]` to `- [ ]` in the
-  doc. Works on any checklist-style plan with no marker.
-
-Visualization (don't overload existing encodings): node **color already = doc
-type/role**, so layer completion as a **progress ring/arc around the node** (empty
-→ full) rather than recoloring — a donut of doneness. Only "plan-type" docs get a
-ring (heuristic: has a completion marker or checkboxes, or filename matches
-PLAN/ROADMAP/BACKLOG/TASKS). Capture step extracts `completion` per doc into the
-bundle; the brain renderer draws the ring.
-
-*Status: idea to prototype — fits read-only, no editing required.*
+Completion follow-ups (when needed):
+- [ ] **Semantic marker** — agent writes `<!-- completion: N% -->` at the doc's
+  **bottom** (reads the whole plan before committing to a number; avoids cluttering
+  the top), parsed at capture as an authoritative override of the checkbox ratio.
+- [ ] **Filename-based plan detection** — give a ring to plan-named docs
+  (PLAN/ROADMAP/BACKLOG/TASKS) that lack checkboxes (needs the marker to have a %).
+- [ ] **Outcome rollup** — surface completion in the workspace/prompt outcome views.
 
 ---
 
@@ -181,4 +169,5 @@ the prompt-unit / brain prototypes) — don't pick unilaterally.
 - Reader density → resolved: **Narrative** (others removed).
 - Brain organization → resolved: hover-peek + role-clustering + fit-to-canvas;
   heading-explosion dropped; recoloring not pursued (clustering sufficed).
-- Still open: outcome-rail placement (C); completion-ring visual (experiment).
+- Completion-ring visual → resolved: **Arc** (mocked Arc/Liquid/Segments).
+- Still open: outcome-rail placement (C).

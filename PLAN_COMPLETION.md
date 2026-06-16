@@ -57,12 +57,9 @@ matches `PLAN` / `ROADMAP` / `BACKLOG` / `TASKS` / `*_NEXT_PASS`. Non-plan docs
   the content of the version at the scrubbed commit, so it animates as you scrub.
 - Tooltip / small legend entry explaining "ring = plan completion".
 
-## Implementation checklist
+## Implementation checklist (v1 — all shipped)
 
 - [x] `completionOf(content)` — checkbox ratio → `{ pct, done, total }` or `null`.
-- [ ] `isPlanDoc(name, content)` — filename pattern. *(v1 gates the ring on
-      "has checkboxes" via `completionOf`; the filename half only matters once the
-      no-checkbox semantic marker exists, so it rides with that follow-up.)*
 - [x] Compute completion for current nodes in `buildDocGraph` (from doc content).
 - [x] Render the progress **Arc** ring around plan nodes (amber→green by %).
 - [x] Time-travel: ring uses the as-of version's content (from `history.json`),
@@ -70,12 +67,12 @@ matches `PLAN` / `ROADMAP` / `BACKLOG` / `TASKS` / `*_NEXT_PASS`. Non-plan docs
 - [x] Ring legend (`◔ ring = % done`) + completion bar in the hover-peek.
 - [x] Verify on `PROJECT_VIEW_PLAN.md` (0→8→17% over history) + this file.
 
-## Later / out of scope for v1
-
-- [ ] Semantic `<!-- completion: N% -->` marker parsing (capture-time, override).
-- [ ] Roll completion into the workspace/prompt "outcome" surfaces.
+Future work (semantic `<!-- completion: N% -->` marker, filename-based plan
+detection, outcome-surface rollup) lives in `PROJECT_VIEW_PLAN.md` §🧪 — it's no
+longer this doc's concern.
 
 ---
 
-When this experiment is done, this doc gets **archived** — and should then show up
-as a **ghost node** in the brain graph (the graveyard), closing the loop.
+**Done.** This experiment is complete; the doc is now **archived** → it should
+appear as a **ghost node** in the brain graveyard (visible while time-travelling
+its own lifetime: born → ring fills to 100% → ghost). Loop closed. 🪦
