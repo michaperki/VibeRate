@@ -1461,17 +1461,20 @@ function brainPeekHtml(n) {
 function wireBrainPeek(root) {
   const peek = root.querySelector('#brainPeek');
   const wrap = root.querySelector('.brain-wrap');
-  if (!peek || !wrap || !state.docGraph) return;
-  const byName = new Map(state.docGraph.nodes.map((n) => [n.name, n]));
+  if (!peek || !wrap) return;
   root.querySelectorAll('.gnode').forEach((g) => {
     g.addEventListener('mouseenter', () => {
       if (state.docOpen) return; // full reader is open — don't peek over it
-      const n = byName.get(g.dataset.doc);
+      // Look up the node live (not a captured map) so a live/stream update shows
+      // fresh content without a re-wire.
+      const n = (state.docGraph?.nodes || []).find((x) => x.name === g.dataset.doc);
       if (!n) return;
       peek.innerHTML = brainPeekHtml(n);
       peek.hidden = false;
       const wb = wrap.getBoundingClientRect();
-      const cb = g.querySelector('circle').getBoundingClientRect();
+      // the body circle (not the glow/ring overlays) for anchoring
+      const body = g.querySelector('circle:not(.live-glow):not(.gring):not(.gctrack):not(.gcprog)') || g.querySelector('circle');
+      const cb = body.getBoundingClientRect();
       const pw = peek.offsetWidth;
       const ph = peek.offsetHeight;
       let left = cb.right - wb.left + 12;
