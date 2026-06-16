@@ -67,15 +67,20 @@ async function assembleBundle(cwd, sessions, parsed, { includeMemory = true } = 
   return { bundle, commits, docs, memory, repoPaths };
 }
 
-// A cheap fingerprint of the repo's brain inputs — mtimes/sizes of the agent docs
-// plus git HEAD/index — so `vbrt watch` can tell when something changed.
-function watchSignature(repoPaths) {
+// A cheap fingerprint of the repo's live inputs — agent-doc mtimes/sizes, git
+// HEAD/index, and the session logs' mtimes/sizes — so `vbrt watch` can tell when
+// the brain *or the live conversation* changed. (Statting the cached session-file
+// list is cheap; the list itself is re-discovered periodically.)
+function watchSignature(repoPaths, sessionFiles = []) {
   const parts = [];
   for (const d of extractDocsMulti(repoPaths)) parts.push(`${d.name}:${Math.floor(d.mtime || 0)}:${d.bytes || 0}`);
   for (const p of repoPaths) {
     for (const f of ['HEAD', 'index']) {
       try { parts.push(`${f}:${Math.floor(fs.statSync(path.join(p, '.git', f)).mtimeMs)}`); } catch { /* not a repo / no file */ }
     }
+  }
+  for (const f of sessionFiles) {
+    try { const st = fs.statSync(f); parts.push(`s:${f}:${Math.floor(st.mtimeMs)}:${st.size}`); } catch { /* gone */ }
   }
   return parts.sort().join('|');
 }
@@ -92,19 +97,25 @@ async function cmdWatch(args = []) {
   }
   const includeMemory = !args.includes('--no-memory');
   const isPublic = args.includes('--public');
-  const sessions0 = await discoverSessions(cwd);
+  let sessions0 = await discoverSessions(cwd);
+  let sessionFiles = sessions0.map((s) => s.file);
   const repoPaths = [...new Set([cwd, ...sessions0.map((s) => s.cwd).filter(Boolean)])];
-  console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim('(Ctrl-C to stop)')}`);
+  console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim(`(${sessionFiles.length} session(s) + brain docs + git · Ctrl-C to stop)`)}`);
 
-  let lastSig = watchSignature(repoPaths); // baseline; don't push on startup
+  let lastSig = watchSignature(repoPaths, sessionFiles); // baseline; don't push on startup
   let pendingSince = 0;
   let busy = false;
+  let rediscoverIn = 10; // re-scan for new session files every ~20s
   const DEBOUNCE = 1500;
 
   const tick = async () => {
     if (busy) return;
+    if (--rediscoverIn <= 0) {
+      rediscoverIn = 10;
+      try { sessionFiles = (await discoverSessions(cwd)).map((s) => s.file); } catch { /* keep old list */ }
+    }
     let sig;
-    try { sig = watchSignature(repoPaths); } catch { return; }
+    try { sig = watchSignature(repoPaths, sessionFiles); } catch { return; }
     if (sig !== lastSig) { lastSig = sig; pendingSince = Date.now(); return; } // changed — wait to settle
     if (!pendingSince || Date.now() - pendingSince < DEBOUNCE) return;
     pendingSince = 0;

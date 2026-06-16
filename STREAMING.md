@@ -73,8 +73,9 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 
 ## Implementation checklist
 
-- [x] `vbrt watch` CLI — poll brain docs + git (`watchSignature`), debounce,
-      re-push (upsert). *(Watches docs/git; live session-log watching is a follow-up.)*
+- [x] `vbrt watch` CLI — poll brain docs + git **+ the active session logs**
+      (`watchSignature`), debounce, re-push (upsert). So live *conversation* growth
+      (new prompts/turns) triggers pushes too, not just brain edits.
 - [x] Rebundle on change — `assembleBundle` (shared with `add`/`push`) re-bundles
       and pushes; ingest upsert keeps it one project.
 - [x] Viewer transport — poll the project `updatedAt` stamp; refetch on change.
