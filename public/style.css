@@ -57,8 +57,9 @@ body {
 .proj:hover { background: var(--panel-2); }
 .proj.active { background: var(--accent); color: #fff; }
 .proj .name { font-weight: 600; }
+.proj .proj-path { font-size: 10.5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proj .meta { font-size: 11px; color: var(--muted); }
-.proj.active .meta { color: rgba(255, 255, 255, 0.8); }
+.proj.active .meta, .proj.active .proj-path { color: rgba(255, 255, 255, 0.8); }
 
 #main { flex: 1; display: flex; min-width: 0; }
 

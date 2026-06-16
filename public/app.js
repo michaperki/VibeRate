@@ -47,6 +47,13 @@ function plural(n, word, suffix = 's') {
   return `${n} ${plw(n, word, suffix)}`;
 }
 
+// Last couple of path segments of a cwd — a compact differentiator for projects
+// that share a display name (e.g. .../documents/dev/viberate).
+function pathTail(cwd, n = 2) {
+  const parts = String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '').split('/').filter(Boolean);
+  return parts.slice(-n).join('/') || String(cwd || '');
+}
+
 function fmtDuration(ms) {
   if (!ms || ms < 0) return '—';
   const s = Math.round(ms / 1000);
@@ -283,6 +290,13 @@ async function loadProjects() {
     return;
   }
   const dash = document.body.classList.contains('workspace');
+  // Disambiguate identically-named projects (a real navigation hazard) with a
+  // path tail — only shown when a name actually collides.
+  const nameCounts = {};
+  for (const p of projects) {
+    const k = (p.name || p.slug).toLowerCase();
+    nameCounts[k] = (nameCounts[k] || 0) + 1;
+  }
   box.innerHTML = projects
     .map((p) => {
       const vis = p.visibility || 'public';
@@ -290,9 +304,14 @@ async function loadProjects() {
       const toggle = dash
         ? `<button class="vis-toggle" data-slug="${esc(p.slug)}" data-to="${vis === 'public' ? 'private' : 'public'}">${vis === 'public' ? 'unpublish' : 'publish'}</button>`
         : '';
+      const collides = nameCounts[(p.name || p.slug).toLowerCase()] > 1;
+      const disambig = collides
+        ? `<div class="proj-path" title="${esc(p.cwd || '')}">${esc(pathTail(p.cwd))}${p.updatedAt ? ` · ${fmtAgo(Date.parse(p.updatedAt))}` : ''}</div>`
+        : '';
       return `
       <div class="proj" data-slug="${esc(p.slug)}">
         <div class="name">${esc(p.name || p.slug)}</div>
+        ${disambig}
         <div class="meta">${plural(p.sessions.length, 'session')} ${pill}</div>
         ${toggle}
       </div>`;
