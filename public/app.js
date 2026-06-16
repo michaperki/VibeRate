@@ -559,15 +559,21 @@ function renderSessionList() {
   const counts = p.sessions.reduce((a, s) => ((a[s.source] = (a[s.source] || 0) + 1), a), {});
   const chip = (key, label) =>
     `<button class="filter ${state.sourceFilter === key ? 'on' : ''}" data-f="${key}">${label}</button>`;
-  const list = filteredSessions()
-    .map((s) => {
-      const dur = s.startedAt && s.endedAt ? fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)) : '';
-      const act = state.activity.byId[s.id];
-      const count = act ? act.userCount : s.messageCount;
-      const label = act ? plural(count, 'msg') : `${count} total`;
-      const color = (state.colorById || {})[s.id] || 'var(--muted)';
-      const dl = act ? diffLabel(act) : '';
-      return `
+
+  // A session you never typed into (no user messages) is noise — fold these out
+  // of the main list into a collapsed group of thin rows so they don't eat space.
+  const userCountOf = (s) => { const act = state.activity.byId[s.id]; return act ? act.userCount : s.messageCount; };
+  const all = filteredSessions();
+  const substantive = all.filter((s) => userCountOf(s) > 0);
+  const empties = all.filter((s) => userCountOf(s) === 0);
+
+  const card = (s) => {
+    const dur = s.startedAt && s.endedAt ? fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)) : '';
+    const act = state.activity.byId[s.id];
+    const label = act ? plural(act.userCount, 'msg') : `${s.messageCount} total`;
+    const color = (state.colorById || {})[s.id] || 'var(--muted)';
+    const dl = act ? diffLabel(act) : '';
+    return `
         <div class="sess ${state.session === s.id ? 'active' : ''}${state.selectedConvo === s.id ? ' hl' : ''}" data-id="${esc(s.id)}">
           <div class="row">
             <span class="badge ${s.source}">${s.source}</span>
@@ -577,8 +583,17 @@ function renderSessionList() {
           <div class="meta">${label}${dur ? ` · ${dur}` : ''}</div>
           ${dl ? `<div class="meta files">${dl}</div>` : ''}
         </div>`;
-    })
-    .join('');
+  };
+  const thinRow = (s) => `
+        <div class="sess empty-sess ${state.session === s.id ? 'active' : ''}" data-id="${esc(s.id)}">
+          <span class="badge ${s.source}">${s.source}</span>
+          <span class="es-title">${esc(s.title)}</span>
+          <span class="es-date">${fmtDate(s.startedAt)}</span>
+        </div>`;
+  const list = substantive.map(card).join('');
+  const emptyBlock = empties.length
+    ? `<details class="empty-sessions"><summary>${plural(empties.length, 'empty session')} · you sent no prompt</summary>${empties.map(thinRow).join('')}</details>`
+    : '';
 
   const brushBanner = state.brush
     ? `<div class="list-brush">▭ filtered to ${fmtShort(state.brush[0])} – ${fmtShort(state.brush[1])} <button class="linkbtn" data-list-brush-clear>clear</button></div>`
@@ -593,7 +608,8 @@ function renderSessionList() {
     </div>
     <div class="list-legend"><span class="sw legend-rainbow"></span> a colour per session · <span class="badge claude">claude</span> / <span class="badge codex">codex</span> = agent</div>
     ${brushBanner}
-    ${list || '<div class="empty">No sessions in this range.</div>'}`;
+    ${list || (empties.length ? '' : '<div class="empty">No sessions in this range.</div>')}
+    ${emptyBlock}`;
 
   const bc = el('#sessions').querySelector('[data-list-brush-clear]');
   if (bc) bc.addEventListener('click', () => {

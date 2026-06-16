@@ -367,6 +367,18 @@ pre.code {
 /* files-touched in sidebar */
 .sess .meta.files { color: #8fa0bd; }
 
+/* empty sessions (no prompt) — folded into a collapsed group of thin rows */
+.empty-sessions { margin-top: 6px; }
+.empty-sessions > summary { cursor: pointer; font-size: 11px; color: var(--muted); padding: 6px 4px; list-style: none; }
+.empty-sessions > summary::-webkit-details-marker { display: none; }
+.empty-sessions > summary::before { content: '▸ '; }
+.empty-sessions[open] > summary::before { content: '▾ '; }
+.empty-sessions > summary:hover { color: var(--text); }
+.sess.empty-sess { display: flex; align-items: center; gap: 7px; padding: 5px 8px; opacity: 0.75; }
+.sess.empty-sess .es-title { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess.empty-sess .es-date { font-size: 10px; color: var(--dim, #6b7280); flex: none; }
+.sess.empty-sess:hover { opacity: 1; }
+
 /* dashboard: per-project visibility pill + publish toggle */
 .vis { font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--border); margin-left: 4px; white-space: nowrap; }
 .vis.public { color: var(--codex); border-color: rgba(46,207,143,0.4); }
