@@ -552,8 +552,11 @@ pre.code {
 /* opaque power-user terms get a dotted underline + help cursor, explained on hover */
 .jargon { cursor: help; border-bottom: 1px dotted currentColor; }
 .ctx-gauge { cursor: help; }
-.brain-key { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); cursor: help; }
+.brain-key { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 11px; color: var(--muted); cursor: pointer; background: none; border: 1px solid transparent; border-radius: 6px; padding: 2px 7px; }
+.brain-key:hover { color: var(--text); border-color: var(--border); }
 .brain-key .bk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: keypulse 3s ease-in-out infinite; }
+.brain-key:not(.on) { color: var(--dim, #6b7280); }
+.brain-key:not(.on) .bk-dot { animation: none; opacity: 0.35; box-shadow: none; }
 @keyframes keypulse { 0%, 100% { opacity: 0.5; transform: scale(0.82); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .brain-key .bk-dot { animation: none; } }
 /* Recent view: faint vertical time axis */

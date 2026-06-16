@@ -12,6 +12,7 @@ const state = {
   docTab: null,
   docOpen: false, // doc reader overlay shown for the selected node
   docGraph: null,
+  brainGlow: (() => { try { return localStorage.getItem('vbrt_brain_glow') !== 'off'; } catch { return true; } })(),
   docHistory: null, // { capturedAt, docHistory: { path: [{hash,t,status,content}] } }
   timeTravel: false, // brain time-travel mode active
   ttIndex: 0, // selected commit index within the brain-history timeline
@@ -1167,7 +1168,7 @@ function renderCenterpiece() {
       // Keep hidden nodes in the DOM (display:none) so node↔group indices stay
       // aligned for the layout-morph tween.
       return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}" data-doc="${esc(n.name)}">
-        <circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>
+        ${state.brainGlow ? `<circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>` : ''}
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         ${ring}
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
@@ -1203,7 +1204,7 @@ function renderCenterpiece() {
       <div class="dash-head"><span class="jargon" title="Your agent/brain docs (SOUL, AGENTS, CLAUDE, README, plans…) as a graph — edges mean one doc references another. Hover a node to peek inside.">🧠 AI architecture</span>
         <span class="lay-toggle">${toggle}</span>
         ${state.docHistory ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
-        <span class="brain-key" title="Each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow = recency</span>
+        <button class="brain-key${state.brainGlow ? ' on' : ''}" data-glow-toggle title="Toggle the recency glow — each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow ${state.brainGlow ? '= recency' : 'off'}</button>
         <span class="dim-note">${files.length} docs · ${g.edges.filter((e) => !g.nodes[e.i].archived && !g.nodes[e.j].archived).length} links</span></div>
       <div class="brain-wrap">
         <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${timeAxis}${edgesSvg}${nodesSvg}</svg>
@@ -1347,6 +1348,12 @@ function wireDocTabs() {
   root.querySelectorAll('[data-layout]').forEach((b) => {
     b.onclick = () => setLayout(b.dataset.layout);
   });
+  const glowBtn = root.querySelector('[data-glow-toggle]');
+  if (glowBtn) glowBtn.onclick = () => {
+    state.brainGlow = !state.brainGlow;
+    try { localStorage.setItem('vbrt_brain_glow', state.brainGlow ? 'on' : 'off'); } catch { /* ignore */ }
+    rerenderCenterpiece();
+  };
   wireBrainPeek(root);
   wireTimeTravel(root);
 }
