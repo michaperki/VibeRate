@@ -1122,13 +1122,8 @@ function renderCenterpiece() {
       if (node) ttChanged.set(node.name, docStatus(d) || 'modified');
     }
   }
-  // A node is hidden when it doesn't exist as of the scrubbed moment — or, outside
-  // time-travel, whenever it's an archived doc. Ghost = archived and past its death.
-  const hideOf = (n) => {
-    if (tt) return (n.archived ? n.bornT : docBirthT(n.name)) > ttAsof;
-    return !!n.archived;
-  };
-  const ghostOf = (n) => tt && n.archived && ttAsof >= n.deathT && !hideOf(n);
+  const hideOf = (n) => ttHiddenOf(n, ttAsof, tt);
+  const ghostOf = (n) => ttGhostOf(n, ttAsof, tt);
 
   const edgesSvg = g.edges
     .map(
@@ -1163,17 +1158,27 @@ function renderCenterpiece() {
       const ghost = ghostOf(n);
       const chg = hidden ? undefined : ringMap.get(n.name);
       const ringCls = chg === 'added' ? 'born' : 'changed';
-      const ring = chg
-        ? `<circle class="gring ${ringCls}" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="none" stroke="${n.color}"/>`
-        : '';
+      // Lifecycle ring (born/flash) — always in the DOM so scrubbing can replay it
+      // on whichever node changed; invisible at rest (CSS opacity 0).
+      const lring = `<circle class="gring${chg ? ' ' + ringCls : ''}" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="none" stroke="${n.color}"/>`;
+      // Completion ring — included for any plan-ish node (has a % now, or is an
+      // archived doc that once did) so the scrub can fill/empty it in place.
       const comp = hidden || ghost ? null : (tt ? completionAt(n, ttAsof) : n.completion);
-      const cring = comp ? completionRing(n, comp.pct) : '';
-      // Keep hidden nodes in the DOM (display:none) so node↔group indices stay
-      // aligned for the layout-morph tween.
+      const ringable = n.completion || n.archived;
+      const cR = (n.r + 5);
+      const cC = 2 * Math.PI * cR;
+      const cPct = comp ? comp.pct : 0;
+      const cHide = comp ? '' : ' style="opacity:0"';
+      const cring = ringable
+        ? `<circle class="gctrack" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${cR.toFixed(1)}" fill="none"${cHide}/>` +
+          `<circle class="gcprog" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${cR.toFixed(1)}" fill="none" stroke="${pctColor(cPct)}" stroke-dasharray="${((cPct / 100) * cC).toFixed(1)} ${cC.toFixed(1)}" transform="rotate(-90 ${n.x.toFixed(1)} ${n.y.toFixed(1)})"${cHide}/>`
+        : '';
+      // Hidden nodes stay in the DOM (now opacity-faded, not display:none) so the
+      // node↔group indices stay aligned and birth/death can animate.
       return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}" data-doc="${esc(n.name)}">
         ${state.brainGlow ? `<circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>` : ''}
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
-        ${ring}${cring}
+        ${lring}${cring}
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
         ${sub}
       </g>`;
@@ -1366,14 +1371,71 @@ function wireDocTabs() {
   wireTimeTravel(root);
 }
 
+// Animate the brain to the scrubbed moment *in place* (no DOM rebuild), so births
+// fade in, deaths fade to ghost, and rings fill smoothly via CSS transitions. The
+// controls/diff panel is refreshed on its own. Shared shape with future streaming.
+function applyBrainAsOf() {
+  const svg = el('#conversation .brain');
+  const g = state.docGraph;
+  if (!svg || !g) return;
+  const tt = state.timeTravel && state.docHistory;
+  const line = tt ? ttTimeline() : [];
+  const cm = line[state.ttIndex];
+  const asof = cm ? cm.t : Infinity;
+  const changed = new Map();
+  if (cm) for (const d of brainDocsOf(cm, brainNodeSet())) {
+    const node = graphNode(docName(d));
+    if (node) changed.set(node.name, docStatus(d) || 'modified');
+  }
+  const groups = svg.querySelectorAll('.gnode');
+  groups.forEach((grp, i) => {
+    const n = g.nodes[i];
+    if (!n) return;
+    const hidden = ttHiddenOf(n, asof, tt);
+    const ghost = ttGhostOf(n, asof, tt);
+    grp.classList.toggle('tt-hidden', hidden);
+    grp.classList.toggle('ghost', ghost);
+    // completion ring fills/empties (CSS transitions stroke-dasharray)
+    const prog = grp.querySelector('.gcprog');
+    const track = grp.querySelector('.gctrack');
+    if (prog && track) {
+      const comp = hidden || ghost ? null : completionAt(n, asof);
+      if (comp) {
+        const C = 2 * Math.PI * (n.r + 5);
+        prog.setAttribute('stroke-dasharray', `${((comp.pct / 100) * C).toFixed(1)} ${C.toFixed(1)}`);
+        prog.setAttribute('stroke', pctColor(comp.pct));
+        prog.style.opacity = track.style.opacity = '';
+      } else {
+        prog.style.opacity = track.style.opacity = '0';
+      }
+    }
+    // replay the born/flash ring on whichever doc changed at this commit
+    const gr = grp.querySelector('.gring');
+    if (gr) {
+      gr.classList.remove('born', 'changed');
+      const chg = hidden ? null : changed.get(n.name);
+      if (chg) { void gr.getBoundingClientRect(); gr.classList.add(chg === 'added' ? 'born' : 'changed'); }
+    }
+  });
+  svg.querySelectorAll('.gedge').forEach((ln, k) => {
+    const e = g.edges[k];
+    if (e) ln.classList.toggle('tt-hidden', ttHiddenOf(g.nodes[e.i], asof, tt) || ttHiddenOf(g.nodes[e.j], asof, tt));
+  });
+}
+
+// Move to a commit and animate there, refreshing only the controls panel (the
+// SVG keeps its elements so transitions run).
+function scrubTo(idx, len) {
+  state.ttIndex = Math.max(0, Math.min(len - 1, idx));
+  state.ttFocus = null;
+  applyBrainAsOf();
+  refreshTTControls();
+}
+
 // Wire the time-travel toggle, scrubber, play, and per-doc diff focus.
 function wireTimeTravel(root) {
   const len = (state.timeTravel && state.docHistory) ? ttTimeline().length : 0;
-  const go = (idx) => {
-    state.ttIndex = Math.max(0, Math.min(len - 1, idx));
-    state.ttFocus = null; // re-focus the first changed doc at the new commit
-    rerenderCenterpiece();
-  };
+  const go = (idx) => scrubTo(idx, len);
   const stopPlay = () => { if (state._ttPlay) { clearInterval(state._ttPlay); state._ttPlay = null; } };
   root.querySelectorAll('[data-tt]').forEach((b) => {
     const act = b.dataset.tt;
@@ -1388,20 +1450,24 @@ function wireTimeTravel(root) {
     else if (act === 'now') b.onclick = () => { stopPlay(); go(len - 1); };
     else if (act === 'range') b.oninput = () => { stopPlay(); go(Number(b.value)); };
     else if (act === 'play') b.onclick = () => {
-      if (state._ttPlay) { stopPlay(); rerenderCenterpiece(); return; }
+      if (state._ttPlay) { stopPlay(); refreshTTControls(); return; }
       if (state.ttIndex >= len - 1) state.ttIndex = 0;
       state._ttPlay = setInterval(() => {
-        if (state.ttIndex >= len - 1) { stopPlay(); rerenderCenterpiece(); return; }
-        state.ttIndex += 1;
-        state.ttFocus = null;
-        rerenderCenterpiece();
-      }, 1400);
-      rerenderCenterpiece();
+        if (state.ttIndex >= len - 1) { stopPlay(); refreshTTControls(); return; }
+        scrubTo(state.ttIndex + 1, len);
+      }, 1500);
+      scrubTo(state.ttIndex, len); // apply current + flip button to ⏸
     };
   });
   root.querySelectorAll('[data-tt-focus]').forEach((b) => {
-    b.onclick = () => { state.ttFocus = b.dataset.ttFocus; rerenderCenterpiece(); };
+    b.onclick = () => { state.ttFocus = b.dataset.ttFocus; refreshTTControls(); }; // diff only, leave the graph
   });
+}
+
+// Rebuild just the time-travel control strip + diff panel (not the SVG).
+function refreshTTControls() {
+  const c = el('#conversation .tt-controls');
+  if (c) { c.outerHTML = renderTimeTravel(ttTimeline()); wireTimeTravel(el('#conversation')); }
 }
 
 // Switch layout mode and tween nodes/edges from their current spots to the new
@@ -1685,6 +1751,16 @@ function pctColor(p) {
   const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
+// Node lifecycle predicates as of a moment — shared by the full render and the
+// in-place scrub animation. (Also the foundation for streaming create/remove.)
+function ttHiddenOf(n, asof, tt) {
+  if (tt) return (n.archived ? n.bornT : docBirthT(n.name)) > asof;
+  return !!n.archived; // outside time-travel, archived docs aren't shown
+}
+function ttGhostOf(n, asof, tt) {
+  return tt && n.archived && asof >= n.deathT && !ttHiddenOf(n, asof, tt);
+}
+
 // A doc's completion as of a moment (uses the historical version in time-travel).
 function completionAt(node, asof) {
   if (asof === Infinity || !state.docHistory) return node.completion;
@@ -1692,13 +1768,6 @@ function completionAt(node, asof) {
   if (!v) return node.completion;
   const ver = v.find((x) => x.t <= asof && x.content != null); // newest ≤ asof
   return ver ? completionOf(ver.content) : null;
-}
-// The Arc ring SVG (track + progress sweep starting at 12 o'clock).
-function completionRing(n, pct) {
-  const R = n.r + 5;
-  const C = 2 * Math.PI * R;
-  return `<circle class="gctrack" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${R.toFixed(1)}" fill="none"/>` +
-    `<circle class="gcprog" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${R.toFixed(1)}" fill="none" stroke="${pctColor(pct)}" stroke-dasharray="${((pct / 100) * C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 ${n.x.toFixed(1)} ${n.y.toFixed(1)})"/>`;
 }
 const STATUS_GLYPH = { added: '＋', modified: '∆', deleted: '−', renamed: '→', copied: '⎘' };
 
