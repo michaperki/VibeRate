@@ -507,7 +507,10 @@ pre.code {
 @keyframes brainpulse { 0%, 100% { opacity: 0; } 50% { opacity: var(--pmax, 0.3); } }
 @media (prefers-reduced-motion: reduce) { .ghalo { animation: none; opacity: 0; } }
 /* "glow = recency" legend dot — breathes between dim and bright (never vanishes) */
-.brain-key { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); cursor: default; }
+/* opaque power-user terms get a dotted underline + help cursor, explained on hover */
+.jargon { cursor: help; border-bottom: 1px dotted currentColor; }
+.ctx-gauge { cursor: help; }
+.brain-key { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); cursor: help; }
 .brain-key .bk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: keypulse 3s ease-in-out infinite; }
 @keyframes keypulse { 0%, 100% { opacity: 0.5; transform: scale(0.82); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .brain-key .bk-dot { animation: none; } }

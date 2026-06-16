@@ -811,7 +811,7 @@ function renderBrainHistory() {
 
   return `
     <section class="dash-card brain-history">
-      <div class="dash-head"><span>🧠 Brain history</span><span class="dim-note">${entries.length} change${entries.length === 1 ? '' : 's'} · newest first</span></div>
+      <div class="dash-head"><span class="jargon" title="Every commit that changed a brain doc, across the whole project — the brain graph's history over time.">🧠 Brain history</span><span class="dim-note">${plural(entries.length, 'change')} · newest first</span></div>
       <div class="bh-list">${rows}</div>
     </section>`;
 }
@@ -1134,7 +1134,7 @@ function renderCenterpiece() {
 
   return `
     <section class="dash-card centerpiece">
-      <div class="dash-head"><span>🧠 AI architecture</span>
+      <div class="dash-head"><span class="jargon" title="Your agent/brain docs (SOUL, AGENTS, CLAUDE, README, plans…) as a graph — edges mean one doc references another. Hover a node to peek inside.">🧠 AI architecture</span>
         <span class="lay-toggle">${toggle}</span>
         <span class="brain-key" title="Each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow = recency</span>
         <span class="dim-note">${files.length} docs · ${g.edges.length} links</span></div>
@@ -1404,7 +1404,7 @@ function overviewHeader(sessions) {
   const lines = added || removed ? ` · <b class="diff-add">+${added}</b>/<b class="diff-del">−${removed}</b> lines` : '';
   return `
     <div class="ov-stats">
-      <div class="ov-line1"><b>${convos}</b> ${plw(convos, 'conversation')} · <b>${messages}</b> ${plw(messages, 'message')}${state.git.ok ? ` · <b>${commits}</b> ${plw(commits, 'commit')}` : ''}${brain ? ` · <b>${brain}</b> 🧠 ${plw(brain, 'brain edit')}` : ''}${lines}</div>
+      <div class="ov-line1"><b>${convos}</b> ${plw(convos, 'conversation')} · <b>${messages}</b> ${plw(messages, 'message')}${state.git.ok ? ` · <b>${commits}</b> ${plw(commits, 'commit')}` : ''}${brain ? ` · <span class="jargon" title="commits that changed a brain doc — SOUL / AGENTS / CLAUDE / ROADMAP / etc."><b>${brain}</b> 🧠 ${plw(brain, 'brain edit')}</span>` : ''}${lines}</div>
       <div class="ov-line2">${fmtShort(firstT)} – ${fmtShort(lastT)} · last active <b>${fmtAgo(lastT)}</b>
         <span class="ov-split"><span class="sw2" style="background:var(--claude)"></span>${claude}
         <span class="sw2" style="background:var(--codex)"></span>${codex}</span>
