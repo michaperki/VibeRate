@@ -591,6 +591,7 @@ function renderSessionList() {
       ${counts.claude ? chip('claude', `claude ${counts.claude}`) : ''}
       ${counts.codex ? chip('codex', `codex ${counts.codex}`) : ''}
     </div>
+    <div class="list-legend"><span class="sw legend-rainbow"></span> a colour per session · <span class="badge claude">claude</span> / <span class="badge codex">codex</span> = agent</div>
     ${brushBanner}
     ${list || '<div class="empty">No sessions in this range.</div>'}`;
 
@@ -680,6 +681,7 @@ function renderTimeline() {
         <div class="dash-head"><span>📊 Activity</span></div>
         ${overviewHeader(sessions)}
         ${renderRibbon(sessions)}
+        ${ribbonLegend()}
       </section>
       ${renderCenterpiece()}
       ${renderBrainHistory()}
@@ -1298,16 +1300,18 @@ const dayKey = (t) => {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 };
 
-const srcLegend = () =>
-  `<div class="mini-legend">
-     <span class="k"><span class="sw2" style="background:var(--claude)"></span> claude</span>
-     <span class="k"><span class="sw2" style="background:var(--codex)"></span> codex</span>
-     ${
-       state.git.ok
-         ? '<span class="k"><span class="cmark"></span> commit</span><span class="k"><span class="cmark revert"></span> revert</span>'
-         : ''
-     }
-   </div>`;
+// Legend for the Activity timeline — decodes every mark at rest (the review's
+// top issue: the marks carry meaning but had no key). Wired in under the ribbon.
+function ribbonLegend() {
+  const git = state.git.ok;
+  return `<div class="ribbon-legend">
+    <span class="rl-item"><span class="rl-sw" style="background:var(--claude)"></span><span class="rl-sw" style="background:var(--codex)"></span> agent: claude / codex</span>
+    ${git ? '<span class="rl-item"><span class="rl-tick"></span> commit</span>' : ''}
+    ${git ? '<span class="rl-item"><span class="rl-diamond"></span> 🧠 brain-doc change</span>' : ''}
+    <span class="rl-item"><span class="rl-code"><span class="a"></span><span class="d"></span></span> code: +added / −removed</span>
+    <span class="rl-item rl-hint">click a mark for detail · drag the messages row to filter</span>
+  </div>`;
+}
 
 // ---------- merged Activity widget (3 competing concepts) ----------
 

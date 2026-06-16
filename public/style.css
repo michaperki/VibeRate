@@ -266,6 +266,23 @@ pre.code {
 .mini-legend { display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: var(--muted); align-items: center; flex-wrap: wrap; }
 .mini-legend .k { display: flex; align-items: center; gap: 5px; }
 .mini-legend .sw2 { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+/* Activity timeline legend — decodes every ribbon mark at rest */
+.ribbon-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 11px; font-size: 10.5px; color: var(--muted); align-items: center; }
+.ribbon-legend .rl-item { display: inline-flex; align-items: center; gap: 5px; }
+.ribbon-legend .rl-hint { color: var(--dim, #6b7280); font-style: italic; }
+.rl-sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.rl-tick { width: 2px; height: 10px; background: var(--muted); display: inline-block; }
+.rl-diamond { width: 8px; height: 8px; background: #ffd166; transform: rotate(45deg); display: inline-block; border-radius: 1px; box-shadow: 0 0 4px rgba(255, 209, 102, 0.6); }
+.rl-code { display: inline-flex; flex-direction: column; width: 6px; height: 11px; border-radius: 1px; overflow: hidden; }
+.rl-code .a { background: #3fb950; height: 55%; }
+.rl-code .d { background: #f85149; height: 45%; }
+
+/* session-list dot key */
+.list-legend { font-size: 10.5px; color: var(--muted); margin: 0 4px 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.list-legend .badge { font-size: 9px; padding: 0 4px; }
+.legend-rainbow { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex: none;
+  background: conic-gradient(#e6b3ff, #7c5cff, #5aa9e6, #2ecf8f, #ffd166, #ff8fa3, #e6b3ff); }
 .cmark { width: 8px; height: 8px; transform: rotate(45deg); border-radius: 1px; background: var(--muted); opacity: 0.8; }
 .cmark:hover { opacity: 1; outline: 1px solid var(--text); }
 .cmark.revert { background: #ff7a59; opacity: 1; }
