@@ -99,6 +99,45 @@ concept it changed — that link is the "living history."
 ### F. Hygiene
 - [ ] **Tests** around parsers / prompt extraction / redaction / activity attribution.
 
+### G. Legibility & polish — *external review, ranked by impact*
+> An outside review (2026-06) of the live UI. The bones are strong; these are the
+> first-contact legibility gaps. Ranked by the reviewer's impact order.
+
+1. [ ] **Color/dot legend (highest impact).** The per-session **identity hues**
+   (`colorForIndex`, golden-angle HSL → `state.colorById`) appear as `.sw`
+   swatches in the session list and as the timeline colors, with **no key** — so
+   the primary visual signal can't be decoded. They mean "which session is this"
+   (links list ↔ timeline), *not* status. Add a legend / hover; make any
+   header status dot self-explain. *(Verify exactly what each dot encodes before
+   labelling — identity hue vs. source badge vs. visibility.)*
+2. [ ] **Suppress empty / duplicate sessions.** `(no prompt) · 0 msgs · 0s` cards
+   waste prime space — collapse / filter-by-default / render as thin rows.
+   **Group or dedupe** near-identical sessions (same prompt across models) into one
+   expandable cluster instead of N stacked cards.
+3. [ ] **Project rename-collision (workspace tier).** Two projects both named
+   `viberate` are interchangeable — disambiguate with path / last-active / a
+   differentiator so navigation isn't a coin-flip.
+4. [ ] **Timeline legibility.** Make the row labels + color coding legible **at
+   rest** (not hover-only); ensure every mark has a hover detail. (Commit/brain/
+   code ticks are now clickable + detailed — this is the at-rest labelling pass:
+   bigger labels, a small inline key for code red/green + brain diamond.)
+5. [ ] **Pluralization pass.** `1 msgs`→`1 msg`, `1 session(s)`→`1 session`, etc.
+   Sites incl. `renderSessionList` ("msgs"), the projects sidebar ("session(s)"),
+   ribbon tooltips. Add a `plural(n, word)` helper. Small, but reads as sloppiness.
+6. [ ] **Jargon tooltip layer.** One-line tooltips on "brain edits", 🧠,
+   "glow = recency" (have one), the context-% gauge (`7%`/`21%`), CLAUDE/CODEX
+   badges. Keep the density; lower the first-contact cost.
+
+## Guardrails — keep, don't regress (external review)
+
+The review flagged these as the strongest parts. Don't break them while polishing:
+- **Session detail view** — turn nav (`prev · turn 1/5 · next · final`), action-type
+  pills (`7 edit · 22 cmd · 15 read · 6 files`), inline file cards, collapsible
+  "how it played out · N steps". This is the best screen.
+- **CLAUDE/CODEX badges** + source filter pills (`all 62 / claude 31 / codex 31`).
+- **Web / Tree / Recent** layouts — keep all three; **Tree reads as most legible**.
+- **Dark theme + purple accent**; unambiguous selected-project highlight.
+
 ---
 
 ## 🧪 Experiment — plan-completion % → brain node status

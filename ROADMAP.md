@@ -34,6 +34,13 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
 - **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)
+- **Legibility pass (external review, 2026-06)** — first-contact gaps on an otherwise polished UI; full breakdown + ranking in `PROJECT_VIEW_PLAN.md` §G:
+  - **Color/dot legend** — per-session identity hues carry no key; users can't decode the primary signal *(top priority)*.
+  - **Suppress empty / duplicate sessions** — `(no prompt) · 0 msgs` cards and same-prompt-across-models dupes should collapse / cluster, not stack as full cards.
+  - **Project name-collision** — disambiguate identically-named projects (path / last-active).
+  - **Timeline legibility** — row labels + color coding readable at rest, not hover-only.
+  - **Pluralization + jargon tooltips** — `1 msg`, and one-line tooltips for "brain edits" / 🧠 / context-% gauge.
+  - *Keep (don't regress):* session detail view, CLAUDE/CODEX badges + filter pills, Web/Tree/Recent (Tree most legible), dark/purple theme.
 
 ## Open questions / to weigh
 
