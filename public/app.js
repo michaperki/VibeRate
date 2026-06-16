@@ -898,6 +898,7 @@ function buildDocGraph(files) {
     n.r = 9 + Math.round(Math.sqrt(n.bytes / maxB) * 14);
     n.color = docColor(n.base);
     n.role = docRole(n.base);
+    n.completion = completionOf(n.content); // checkbox plan? → ring
   });
   const W = 760;
   const H = Math.round(Math.max(220, Math.min(760, 80 + nodes.length * 15)));
@@ -1165,12 +1166,14 @@ function renderCenterpiece() {
       const ring = chg
         ? `<circle class="gring ${ringCls}" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="none" stroke="${n.color}"/>`
         : '';
+      const comp = hidden || ghost ? null : (tt ? completionAt(n, ttAsof) : n.completion);
+      const cring = comp ? completionRing(n, comp.pct) : '';
       // Keep hidden nodes in the DOM (display:none) so node↔group indices stay
       // aligned for the layout-morph tween.
       return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}" data-doc="${esc(n.name)}">
         ${state.brainGlow ? `<circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>` : ''}
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
-        ${ring}
+        ${ring}${cring}
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
         ${sub}
       </g>`;
@@ -1205,6 +1208,7 @@ function renderCenterpiece() {
         <span class="lay-toggle">${toggle}</span>
         ${state.docHistory ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
         <button class="brain-key${state.brainGlow ? ' on' : ''}" data-glow-toggle title="Toggle the recency glow — each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow ${state.brainGlow ? '= recency' : 'off'}</button>
+        ${g.nodes.some((n) => n.completion) ? '<span class="ring-key jargon" title="Ring around a node = its checklist completion (amber → green). Checklist/plan docs only.">◔ ring = % done</span>' : ''}
         <span class="dim-note">${files.length} docs · ${g.edges.filter((e) => !g.nodes[e.i].archived && !g.nodes[e.j].archived).length} links</span></div>
       <div class="brain-wrap">
         <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${timeAxis}${edgesSvg}${nodesSvg}</svg>
@@ -1292,7 +1296,11 @@ function brainPeekHtml(n) {
     ? shown.map((h) => `<div class="bp-h l${h.lvl}">${h.lvl > 1 ? '§ ' : ''}${esc(h.text)}</div>`).join('') +
       (all.length > shown.length ? `<div class="bp-h l3">+${all.length - shown.length} more</div>` : '')
     : '<div class="bp-flat">no headings — flat doc</div>';
+  const comp = n.completion
+    ? `<div class="bp-comp"><span class="bp-comp-bar"><span style="width:${n.completion.pct}%;background:${pctColor(n.completion.pct)}"></span></span>${n.completion.pct}% done · ${n.completion.done}/${n.completion.total}</div>`
+    : '';
   return `<div class="bp-head"><span class="bp-name">${esc(n.base)}</span><span class="bp-meta">${esc(kb)} · ${all.length} section${all.length === 1 ? '' : 's'}</span></div>
+    ${comp}
     ${first ? `<div class="bp-first">${esc(first)}</div>` : ''}
     <div class="bp-sections">${list}</div>`;
 }
@@ -1430,9 +1438,10 @@ function animateGraph(g, from, to) {
       n.y = from[i].y + (to[i].y - from[i].y) * e;
       const grp = groups[i];
       if (!grp) return;
-      grp.querySelectorAll('circle').forEach((c) => { // halo + node both follow
+      grp.querySelectorAll('circle').forEach((c) => { // halo + node + rings all follow
         c.setAttribute('cx', n.x.toFixed(1));
         c.setAttribute('cy', n.y.toFixed(1));
+        if (c.classList.contains('gcprog')) c.setAttribute('transform', `rotate(-90 ${n.x.toFixed(1)} ${n.y.toFixed(1)})`);
       });
       const lab = grp.querySelector('.glabel');
       if (lab) {
@@ -1656,6 +1665,40 @@ function ttDiffRows(name, hash) {
   const prev = v[idx + 1]; // older
   if (cur.status === 'deleted') return lineDiff(prev ? prev.content : '', '');
   return lineDiff(prev ? prev.content : '', cur.content || '');
+}
+
+// ---------- plan completion (checkbox ratio → brain node ring) ----------
+
+// Checkbox completion of a doc: ratio of [x] to all [ ]/[x]. null = no checkboxes
+// (→ not a checklist plan → no ring). The semantic-marker override is a follow-up.
+function completionOf(content) {
+  const boxes = String(content || '').match(/^[ \t>*+-]*\[([ xX])\]/gm) || [];
+  if (!boxes.length) return null;
+  const done = boxes.filter((b) => /\[[xX]\]/.test(b)).length;
+  return { pct: Math.round((done / boxes.length) * 100), done, total: boxes.length };
+}
+// Completion color: warm amber (low) → green (done).
+function pctColor(p) {
+  const a = [240, 120, 60];
+  const b = [63, 185, 80];
+  const t = Math.max(0, Math.min(1, p / 100));
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+// A doc's completion as of a moment (uses the historical version in time-travel).
+function completionAt(node, asof) {
+  if (asof === Infinity || !state.docHistory) return node.completion;
+  const v = histFor(node.name);
+  if (!v) return node.completion;
+  const ver = v.find((x) => x.t <= asof && x.content != null); // newest ≤ asof
+  return ver ? completionOf(ver.content) : null;
+}
+// The Arc ring SVG (track + progress sweep starting at 12 o'clock).
+function completionRing(n, pct) {
+  const R = n.r + 5;
+  const C = 2 * Math.PI * R;
+  return `<circle class="gctrack" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${R.toFixed(1)}" fill="none"/>` +
+    `<circle class="gcprog" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${R.toFixed(1)}" fill="none" stroke="${pctColor(pct)}" stroke-dasharray="${((pct / 100) * C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 ${n.x.toFixed(1)} ${n.y.toFixed(1)})"/>`;
 }
 const STATUS_GLYPH = { added: '＋', modified: '∆', deleted: '−', renamed: '→', copied: '⎘' };
 

@@ -562,6 +562,10 @@ pre.code {
 /* Recent view: faint vertical time axis */
 .time-axis .taxis-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
 .time-axis .taxis-lab { fill: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* plan-completion ring: a faint track + an amber→green progress arc */
+.gctrack { stroke: #2f3543; stroke-width: 3; }
+.gcprog { stroke-width: 3; stroke-linecap: round; pointer-events: none; transition: stroke-dasharray 0.4s ease, stroke 0.4s ease; }
+.ring-key { font-size: 11px; color: var(--muted); }
 .glabel { fill: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0; transition: opacity 0.1s; pointer-events: none; }
 .gsub { fill: var(--muted); font-size: 9px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0; transition: opacity 0.1s; pointer-events: none; }
 .gnode:hover .glabel, .gnode.on .glabel { fill: var(--text); opacity: 1; }
@@ -587,6 +591,9 @@ pre.code {
 .brain-peek .bp-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; color: var(--text); }
 .brain-peek .bp-meta { font-size: 10px; color: var(--dim, #6b7280); margin-left: auto; white-space: nowrap; }
 .brain-peek .bp-first { font-size: 11px; color: var(--muted); font-style: italic; margin-bottom: 6px; }
+.brain-peek .bp-comp { display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: var(--muted); margin-bottom: 6px; }
+.brain-peek .bp-comp-bar { flex: 1; height: 5px; border-radius: 3px; background: #2a2f3c; overflow: hidden; }
+.brain-peek .bp-comp-bar span { display: block; height: 100%; }
 .brain-peek .bp-sections { border-top: 1px solid var(--border); padding-top: 5px; max-height: 220px; overflow: hidden; }
 .brain-peek .bp-h { font-size: 11px; color: var(--muted); padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brain-peek .bp-h.l2 { padding-left: 10px; }

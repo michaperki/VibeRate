@@ -1,6 +1,7 @@
 # Plan-Completion % → Brain Node Status
 
-Status: **in progress** · an experiment within the [Project View Plan](PROJECT_VIEW_PLAN.md).
+Status: **v1 shipped** (Arc ring, checkbox parser, time-travel fill) · follow-ups:
+semantic marker + outcome rollup · an experiment within the [Project View Plan](PROJECT_VIEW_PLAN.md).
 
 ## Why
 
@@ -58,14 +59,16 @@ matches `PLAN` / `ROADMAP` / `BACKLOG` / `TASKS` / `*_NEXT_PASS`. Non-plan docs
 
 ## Implementation checklist
 
-- [ ] `completionOf(content)` — checkbox ratio → `{ pct, done, total }` or `null`.
-- [ ] `isPlanDoc(name, content)` — has checkboxes OR filename matches plan pattern.
-- [ ] Compute completion for current nodes in `buildDocGraph` (from doc content).
-- [ ] Render the progress ring around plan-type nodes (current view).
-- [ ] Time-travel: ring uses the as-of version's content (from `history.json`),
-      so it animates while scrubbing.
-- [ ] Ring legend / hover tooltip ("ring = plan completion").
-- [ ] Verify on `PROJECT_VIEW_PLAN.md` + this file (real % + scrub animation).
+- [x] `completionOf(content)` — checkbox ratio → `{ pct, done, total }` or `null`.
+- [ ] `isPlanDoc(name, content)` — filename pattern. *(v1 gates the ring on
+      "has checkboxes" via `completionOf`; the filename half only matters once the
+      no-checkbox semantic marker exists, so it rides with that follow-up.)*
+- [x] Compute completion for current nodes in `buildDocGraph` (from doc content).
+- [x] Render the progress **Arc** ring around plan nodes (amber→green by %).
+- [x] Time-travel: ring uses the as-of version's content (from `history.json`),
+      so it fills while scrubbing.
+- [x] Ring legend (`◔ ring = % done`) + completion bar in the hover-peek.
+- [x] Verify on `PROJECT_VIEW_PLAN.md` (0→8→17% over history) + this file.
 
 ## Later / out of scope for v1
 
