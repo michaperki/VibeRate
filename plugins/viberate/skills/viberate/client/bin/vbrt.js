@@ -28,7 +28,7 @@ function fmtDate(iso) {
 }
 
 const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
-const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|_next_pass/i;
+const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|stream|_next_pass/i;
 
 // Assemble the full capture bundle from a cwd + its (already-parsed) sessions:
 // git history, agent docs, per-brain-doc version history, and memory. Shared by

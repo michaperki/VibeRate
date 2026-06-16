@@ -96,13 +96,12 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 - [x] Verify by editing a brain doc while watching (Mike confirmed: rings fill /
       nodes glow live).
 
-## Later
-
-- [ ] SSE/WebSocket (drop polling) — only if polling ever feels laggy.
-- [ ] Reader refinement — append new turns instead of full re-render (preserve
-      expanded `<details>` while following).
+Follow-ups (only if needed) moved to `ROADMAP.md` under `vbrt watch` — SSE/WebSocket
+(if polling lags) and reader append-vs-rerender. No longer this doc's concern.
 
 ---
 
-When shipped, this doc gets **archived → ghost node**, like its predecessor
-[the plan-completion experiment]. Loop continues.
+**Done.** Brain *and* conversation stream live, hands-free, hosted-ready. This doc
+is now **archived** → it should appear as a **ghost node** in the graveyard
+(born → ring fills to 100% → archived). And Mike's watching it happen **live**
+from the deployed site — the feature burying itself, in real time. Loop closed. 🪦
