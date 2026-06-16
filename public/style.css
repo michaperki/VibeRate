@@ -498,9 +498,20 @@ pre.code {
 .gnode { cursor: pointer; transition: opacity 0.45s ease; }
 /* :not(rings) so the body-circle stroke rules don't clobber the completion ring's
    own (inline, per-%) stroke colour — author CSS beats SVG presentation attrs. */
-.gnode circle:not(.gctrack):not(.gcprog) { stroke: rgba(0, 0, 0, 0.45); stroke-width: 1; transition: stroke-width 0.1s; }
-.gnode:hover circle:not(.gctrack):not(.gcprog) { stroke: var(--text); stroke-width: 2; }
-.gnode.on circle:not(.gctrack):not(.gcprog) { stroke: var(--text); stroke-width: 3; }
+.gnode circle:not(.gctrack):not(.gcprog):not(.live-glow) { stroke: rgba(0, 0, 0, 0.45); stroke-width: 1; transition: stroke-width 0.1s; }
+.gnode:hover circle:not(.gctrack):not(.gcprog):not(.live-glow) { stroke: var(--text); stroke-width: 2; }
+.gnode.on circle:not(.gctrack):not(.gcprog):not(.live-glow) { stroke: var(--text); stroke-width: 3; }
+/* streaming: a lingering "just changed" glow on a live-updated node */
+.live-glow { stroke: none; pointer-events: none; filter: blur(3px); transform-box: fill-box; transform-origin: center; animation: liveglow 12s ease-out forwards; }
+@keyframes liveglow {
+  0% { opacity: 0; transform: scale(0.85); }
+  8% { opacity: 0.85; transform: scale(1.22); }
+  20% { opacity: 0.4; transform: scale(1); }
+  32% { opacity: 0.8; transform: scale(1.16); }
+  46% { opacity: 0.4; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .live-glow { animation: none; opacity: 0; } }
 /* gentle recency-modulated "breathing" halo behind each node (duration/delay/
    brightness set inline per node); the halo itself never takes a stroke.
    opacity:0 + fill-mode:both hold the 0% frame during the stagger delay, so a

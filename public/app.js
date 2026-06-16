@@ -1224,10 +1224,12 @@ function renderCenterpiece() {
   const tMax = mtimes.length ? Math.max(...mtimes) : 0;
   const tMin = mtimes.length ? Math.min(...mtimes) : 0;
   const tSpan = tMax - tMin || 1;
-  // One-shot "just changed" entrance for the docs from the most recent brain
-  // commit — born (added) vs flash (modified). Only on a fresh project open.
-  // Flash on render: the open-entrance, else a live-update flash (what just changed).
-  const entrance = state._brainEntrance ? recentBrainChanges() : liveFlashMap();
+  // Flash on render: the open-entrance ring, else a live-update flash. liveChanged
+  // also drives a lingering "just changed" glow (the streaming change-signal).
+  let entrance;
+  let liveChanged = new Map();
+  if (state._brainEntrance) entrance = recentBrainChanges();
+  else { liveChanged = liveFlashMap(); entrance = liveChanged; }
   const ringMap = tt ? ttChanged : entrance; // in tt mode, rings track the selected commit
   const nodesSvg = g.nodes
     .map((n, i) => {
@@ -1259,9 +1261,15 @@ function renderCenterpiece() {
         ? `<circle class="gctrack" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${cR.toFixed(1)}" fill="none"${cHide}/>` +
           `<circle class="gcprog" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${cR.toFixed(1)}" fill="none" stroke="${pctColor(cPct)}" stroke-dasharray="${((cPct / 100) * cC).toFixed(1)} ${cC.toFixed(1)}" transform="rotate(-90 ${n.x.toFixed(1)} ${n.y.toFixed(1)})"${cHide}/>`
         : '';
+      // A live-changed node gets a lingering "just changed" glow (the streaming
+      // signal) — independent of the recency-glow toggle.
+      const liveGlow = liveChanged.has(n.name)
+        ? `<circle class="live-glow" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 9).toFixed(1)}" fill="${n.color}"/>`
+        : '';
       // Hidden nodes stay in the DOM (now opacity-faded, not display:none) so the
       // node↔group indices stay aligned and birth/death can animate.
       return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}" data-doc="${esc(n.name)}">
+        ${liveGlow}
         ${state.brainGlow ? `<circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>` : ''}
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         ${lring}${cring}
