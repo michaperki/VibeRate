@@ -481,6 +481,22 @@ pre.code {
 
 /* doc reader as a floating overlay in front of the network */
 .brain-wrap { position: relative; }
+/* hover-peek: a doc node's outline + first line, anchored beside it */
+.brain-peek {
+  position: absolute; z-index: 3; width: 248px; pointer-events: none;
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px;
+  background: rgba(18, 21, 28, 0.98); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  animation: docfade 0.1s ease;
+}
+.brain-peek .bp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.brain-peek .bp-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; color: var(--text); }
+.brain-peek .bp-meta { font-size: 10px; color: var(--dim, #6b7280); margin-left: auto; white-space: nowrap; }
+.brain-peek .bp-first { font-size: 11px; color: var(--muted); font-style: italic; margin-bottom: 6px; }
+.brain-peek .bp-sections { border-top: 1px solid var(--border); padding-top: 5px; max-height: 220px; overflow: hidden; }
+.brain-peek .bp-h { font-size: 11px; color: var(--muted); padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brain-peek .bp-h.l2 { padding-left: 10px; }
+.brain-peek .bp-h.l3 { padding-left: 20px; color: var(--dim, #6b7280); }
+.brain-peek .bp-flat { font-size: 10.5px; color: var(--dim, #6b7280); font-style: italic; }
 .doc-backdrop { position: absolute; inset: 0; background: rgba(8, 10, 14, 0.45); backdrop-filter: blur(1px); border-radius: 10px; z-index: 1; animation: docfade 0.15s ease; }
 .doc-overlay {
   position: absolute; top: 8px; right: 8px; bottom: 8px; width: min(58%, 460px);

@@ -937,7 +937,6 @@ function renderCenterpiece() {
         ? `<text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 23).toFixed(1)}" text-anchor="middle" class="gsub">${esc(fmtAgo(n.mtime))}</text>`
         : '';
       return `<g class="gnode${on}" data-doc="${esc(n.name)}">
-        <title>${esc(n.name)}</title>
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
         ${sub}
@@ -964,6 +963,7 @@ function renderCenterpiece() {
         <span class="dim-note">${files.length} docs · ${g.edges.length} links</span></div>
       <div class="brain-wrap">
         <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${edgesSvg}${nodesSvg}</svg>
+        <div class="brain-peek" id="brainPeek" hidden></div>
         ${state.docOpen ? `
         <div class="doc-backdrop" data-doc-close></div>
         <div class="doc-overlay">
@@ -980,6 +980,67 @@ function rerenderCenterpiece() {
     cp.outerHTML = renderCenterpiece();
     wireDocTabs();
   }
+}
+
+// The doc's H1–H3 outline — what hover-peek shows so a node reveals what's *inside*
+// it (its structure), not just its filename.
+function docHeadings(content, cap = 14) {
+  const out = [];
+  for (const l of String(content || '').split('\n')) {
+    const m = l.match(/^(#{1,3})\s+(.+?)\s*$/);
+    if (m) out.push({ lvl: m[1].length, text: m[2].slice(0, 70) });
+  }
+  return { all: out, shown: out.slice(0, cap) };
+}
+
+function brainPeekHtml(n) {
+  const { all, shown } = docHeadings(n.content);
+  const kb = fmtBytes(n.bytes || (n.content || '').length);
+  const first = (String(n.content || '')
+    .split('\n')
+    .find((l) => l.trim() && !/^#/.test(l) && !/^>/.test(l) && !/^[-*]\s/.test(l)) || '')
+    .trim()
+    .slice(0, 150);
+  const list = all.length
+    ? shown.map((h) => `<div class="bp-h l${h.lvl}">${h.lvl > 1 ? '§ ' : ''}${esc(h.text)}</div>`).join('') +
+      (all.length > shown.length ? `<div class="bp-h l3">+${all.length - shown.length} more</div>` : '')
+    : '<div class="bp-flat">no headings — flat doc</div>';
+  return `<div class="bp-head"><span class="bp-name">${esc(n.base)}</span><span class="bp-meta">${esc(kb)} · ${all.length} section${all.length === 1 ? '' : 's'}</span></div>
+    ${first ? `<div class="bp-first">${esc(first)}</div>` : ''}
+    <div class="bp-sections">${list}</div>`;
+}
+
+// Hover-peek: hovering a node surfaces its outline + first line in a floating card
+// anchored beside it, so you read what's inside without opening the full doc.
+// Click still opens the full reader overlay (progressive disclosure).
+function wireBrainPeek(root) {
+  const peek = root.querySelector('#brainPeek');
+  const wrap = root.querySelector('.brain-wrap');
+  if (!peek || !wrap || !state.docGraph) return;
+  const byName = new Map(state.docGraph.nodes.map((n) => [n.name, n]));
+  root.querySelectorAll('.gnode').forEach((g) => {
+    g.addEventListener('mouseenter', () => {
+      if (state.docOpen) return; // full reader is open — don't peek over it
+      const n = byName.get(g.dataset.doc);
+      if (!n) return;
+      peek.innerHTML = brainPeekHtml(n);
+      peek.hidden = false;
+      const wb = wrap.getBoundingClientRect();
+      const cb = g.querySelector('circle').getBoundingClientRect();
+      const pw = peek.offsetWidth;
+      const ph = peek.offsetHeight;
+      let left = cb.right - wb.left + 12;
+      if (left + pw > wb.width) left = cb.left - wb.left - pw - 12; // flip to the left near the edge
+      left = Math.max(6, Math.min(left, wb.width - pw - 6));
+      let top = cb.top - wb.top + cb.height / 2 - ph / 2;
+      top = Math.max(6, Math.min(top, wb.height - ph - 6));
+      peek.style.left = `${left}px`;
+      peek.style.top = `${top}px`;
+    });
+    g.addEventListener('mouseleave', () => {
+      peek.hidden = true;
+    });
+  });
 }
 
 function wireDocTabs() {
@@ -1000,6 +1061,7 @@ function wireDocTabs() {
   root.querySelectorAll('[data-layout]').forEach((b) => {
     b.onclick = () => setLayout(b.dataset.layout);
   });
+  wireBrainPeek(root);
 }
 
 // Switch layout mode and tween nodes/edges from their current spots to the new
