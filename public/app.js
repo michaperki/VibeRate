@@ -17,6 +17,7 @@ const state = {
   _liveStamp: null, // last-seen project updatedAt
   _liveLastUpdate: null, // when the last live change landed (for the readout)
   _liveFlash: null, // node names changed since the last snapshot (flash them)
+  _streamIn: null, // node names newly added this live update (fade them in)
   docHistory: null, // { capturedAt, docHistory: { path: [{hash,t,status,content}] } }
   timeTravel: false, // brain time-travel mode active
   ttIndex: 0, // selected commit index within the brain-history timeline
@@ -647,21 +648,33 @@ async function refreshLive() {
   state.docTab = state.docGraph && state.docGraph.nodes[0] ? (state.docGraph.nodes.find((n) => n.name === state.docTab)?.name || state.docGraph.nodes[0].name) : null;
   state.colorById = state.colorById || {};
   renderSessionList();
+  if (state.session) return; // reading a session — data's updated; render on return
 
-  // Smooth path: if the node set is unchanged (the common case — a doc's content
-  // changed, not a doc added/removed) and the dashboard is on screen, animate the
-  // brain in place (rings fill, changed nodes glow) and refresh the activity card,
-  // instead of re-rendering the whole dashboard (which would snap). Add/remove of
-  // a doc falls back to a full re-render with the flash.
-  const sameSet =
-    el('#conversation .brain') &&
-    before.size === newGraph.nodes.length &&
-    newGraph.nodes.every((n) => before.has(n.name));
-  if (sameSet && !state.session) {
+  // Smooth path: node set unchanged (the common case — a doc's content changed)
+  // → animate the brain in place (rings fill, changed nodes glow) + refresh the
+  // activity card, no rebuild.
+  const svg = el('#conversation .brain');
+  const sameSet = svg && before.size === newGraph.nodes.length && newGraph.nodes.every((n) => before.has(n.name));
+  if (sameSet) {
     streamUpdateBrain(newGraph, new Set(flash.keys()));
     refreshActivityCard();
+    return;
+  }
+  // Add/remove path: fade out gone nodes, then re-render with the new ones fading
+  // in (positions are pinned, so existing nodes don't jump).
+  state._liveFlash = flash.size ? flash : null;
+  const newNames = new Set(newGraph.nodes.map((n) => n.name));
+  state._streamIn = newGraph.nodes.some((n) => !before.has(n.name))
+    ? new Set(newGraph.nodes.filter((n) => !before.has(n.name)).map((n) => n.name))
+    : null;
+  const removed = svg ? [...before.keys()].filter((name) => !newNames.has(name)) : [];
+  if (removed.length) {
+    for (const name of removed) {
+      const gEl = svg.querySelector(`.gnode[data-doc="${CSS.escape(name)}"]`);
+      if (gEl) gEl.classList.add('stream-out');
+    }
+    setTimeout(() => { if (state.project && !state.session) renderTimeline(); }, 450);
   } else {
-    state._liveFlash = flash.size ? flash : null;
     renderTimeline();
   }
 }
@@ -915,6 +928,7 @@ function renderTimeline() {
   const lt = el('#conversation [data-live-toggle]');
   if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderTimeline(); };
   state._brainEntrance = false; // consumed — don't replay on layout toggles / re-renders
+  state._streamIn = null; // consumed — the new nodes have rendered with their fade-in
 }
 
 // Tier-2: this repo's cold-start context — what an agent preloads when launched
@@ -1332,7 +1346,8 @@ function renderCenterpiece() {
         : '';
       // Hidden nodes stay in the DOM (now opacity-faded, not display:none) so the
       // node↔group indices stay aligned and birth/death can animate.
-      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}" data-doc="${esc(n.name)}">
+      const streamIn = state._streamIn && state._streamIn.has(n.name) ? ' stream-in' : '';
+      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}${streamIn}" data-doc="${esc(n.name)}">
         ${liveGlow}
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         ${lring}${cring}

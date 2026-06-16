@@ -524,6 +524,10 @@ pre.code {
 /* hidden = not present as of the scrubbed moment — fade out (transitionable),
    not display:none, so births/deaths animate while scrubbing. */
 .gnode.tt-hidden, .gedge.tt-hidden { opacity: 0; pointer-events: none; }
+/* streaming add/remove: a new doc fades in, a removed one fades out */
+.gnode.stream-in { animation: streamin 0.6s ease-out; }
+@keyframes streamin { from { opacity: 0; } to { opacity: 1; } }
+.gnode.stream-out { opacity: 0 !important; transition: opacity 0.4s ease; }
 /* archived doc, scrubbed past its deletion — a faded, struck-through ghost */
 .gnode.ghost { opacity: 0.4; }
 .gnode.ghost circle { fill: #2a2f3c !important; stroke: #5a6275; stroke-dasharray: 3 2; }
