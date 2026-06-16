@@ -78,6 +78,9 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
       (new prompts/turns) triggers pushes too, not just brain edits.
 - [x] Rebundle on change — `assembleBundle` (shared with `add`/`push`) re-bundles
       and pushes; ingest upsert keeps it one project.
+- [x] **Delta push** — `vbrt watch` sends only the *changed* sessions after the
+      first full sync (server merges by id), so live pushes stay small over the
+      network (key for hosted/large repos). Docs/git stay full (they're small).
 - [x] Viewer transport — poll the project `updatedAt` stamp; refetch on change.
 - [x] **In-place reconcile** — content change → brain updates in place (completion
       rings **fill smoothly**, changed node **glows**, hover-peek stays fresh), no
@@ -91,8 +94,7 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 
 ## Later
 
-- [ ] SSE/WebSocket + delta events (drop polling) if latency/load demands it.
-- [ ] Live session-reader follow (new turns stream into the conversation view).
+- [ ] SSE/WebSocket (drop polling) — only if polling ever feels laggy.
 
 ---
 

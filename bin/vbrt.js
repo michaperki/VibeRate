@@ -108,6 +108,14 @@ async function cmdWatch(args = []) {
   let rediscoverIn = 10; // re-scan for new session files every ~20s
   const DEBOUNCE = 1500;
 
+  // Delta push: only parse + send the sessions whose log changed since the last
+  // push (the first push sends all, to sync the project). The server merges by
+  // session id, so partial bundles update in place — keeps payloads small over
+  // the network when only the active conversation is growing.
+  const sessionSig = (f) => { try { const st = fs.statSync(f); return `${st.mtimeMs}:${st.size}`; } catch { return 'gone'; } };
+  const lastMtimes = new Map();
+  let firstPush = true;
+
   const tick = async () => {
     if (busy) return;
     if (--rediscoverIn <= 0) {
@@ -122,13 +130,17 @@ async function cmdWatch(args = []) {
     busy = true;
     try {
       const sessions = await discoverSessions(cwd);
+      const toParse = firstPush ? sessions : sessions.filter((s) => sessionSig(s.file) !== lastMtimes.get(s.file));
       const parsed = [];
-      for (const s of sessions) {
+      for (const s of toParse) {
         try { parsed.push(s.source === 'claude' ? await parseClaude(s.file) : await parseCodex(s.file)); } catch { /* skip */ }
       }
       const { bundle } = await assembleBundle(cwd, sessions, parsed, { includeMemory });
       const { url } = await pushBundle(bundle, { isPublic });
-      console.log(C.dim(`  ↑ ${new Date().toLocaleTimeString()} — pushed ${parsed.length} session(s) → ${url}`));
+      const kind = firstPush ? 'full' : 'delta';
+      for (const s of sessions) lastMtimes.set(s.file, sessionSig(s.file));
+      firstPush = false;
+      console.log(C.dim(`  ↑ ${new Date().toLocaleTimeString()} — pushed ${parsed.length} session(s) [${kind}] → ${url}`));
     } catch (err) {
       console.log(C.yellow(`  ✗ push failed: ${err.message}`));
     }
