@@ -146,6 +146,9 @@ The review flagged these as the strongest parts. Don't break them while polishin
 
 ## 🧪 Experiment — plan-completion % → brain node status
 
+> **Full spec + checklist: [PLAN_COMPLETION.md](PLAN_COMPLETION.md).** Now in
+> active development (rides the just-shipped time-travel doc-history).
+
 Plan/spec docs (this file, ROADMAP, BACKLOG, *_NEXT_PASS, …) get created and
 progressively completed. Idea: surface a **completion %** per plan doc and use it
 to **annotate that doc's brain node**, so the user sees at a glance which plans are
