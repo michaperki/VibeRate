@@ -537,6 +537,7 @@ async function selectProject(slug) {
       state.colorById[s.id] = colorForIndex(i);
     });
 
+  state._brainEntrance = true; // play the "just changed" entrance once, on open
   renderSessionList();
   renderTimeline();
 }
@@ -727,6 +728,7 @@ function renderTimeline() {
     }));
   wireDocTabs();
   wireActivity();
+  state._brainEntrance = false; // consumed — don't replay on layout toggles / re-renders
 }
 
 // Tier-2: this repo's cold-start context — what an agent preloads when launched
@@ -1090,6 +1092,9 @@ function renderCenterpiece() {
   const tMax = mtimes.length ? Math.max(...mtimes) : 0;
   const tMin = mtimes.length ? Math.min(...mtimes) : 0;
   const tSpan = tMax - tMin || 1;
+  // One-shot "just changed" entrance for the docs from the most recent brain
+  // commit — born (added) vs flash (modified). Only on a fresh project open.
+  const entrance = state._brainEntrance ? recentBrainChanges() : new Map();
   const nodesSvg = g.nodes
     .map((n, i) => {
       const on = state.docOpen && n.name === active.name ? ' on' : '';
@@ -1101,9 +1106,15 @@ function renderCenterpiece() {
       const pmax = (0.16 + f * 0.26).toFixed(2); // newer → brighter halo
       const delay = ((i * 0.37) % 2.3).toFixed(2); // stagger so they don't pulse in unison
       const haloStyle = `animation-duration:${dur}s;animation-delay:${delay}s;--pmax:${pmax}`;
-      return `<g class="gnode${on}" data-doc="${esc(n.name)}">
+      const chg = entrance.get(n.name);
+      const ringCls = chg === 'added' ? 'born' : 'changed';
+      const ring = chg
+        ? `<circle class="gring ${ringCls}" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="none" stroke="${n.color}"/>`
+        : '';
+      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}" data-doc="${esc(n.name)}">
         <circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
+        ${ring}
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
         ${sub}
       </g>`;
@@ -1386,6 +1397,26 @@ function currentDocNode(name) {
   if (!g) return null;
   const base = name.split('/').pop();
   return g.nodes.find((n) => n.name === name || n.base === base) || null;
+}
+
+// The brain docs changed in the most recent brain-touching commit, mapped to
+// their current graph node + status (added/modified/…). Drives the one-shot
+// "just changed" entrance on the graph — the lifecycle birth/flash, from the
+// --name-status data we capture (no historical content needed; that's time-travel).
+function recentBrainChanges() {
+  if (!state.git || !state.git.ok) return new Map();
+  const brainSet = brainNodeSet();
+  for (const c of state.git.commits || []) { // git log is newest-first
+    const bd = brainDocsOf(c, brainSet);
+    if (!bd.length) continue;
+    const m = new Map();
+    for (const d of bd) {
+      const node = currentDocNode(docName(d));
+      if (node) m.set(node.name, docStatus(d) || 'modified');
+    }
+    if (m.size) return m;
+  }
+  return new Map();
 }
 const STATUS_GLYPH = { added: '＋', modified: '∆', deleted: '−', renamed: '→', copied: '⎘' };
 
