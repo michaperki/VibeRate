@@ -634,10 +634,77 @@ async function refreshLive() {
   }
   state.docGraph = newGraph;
   state.docTab = state.docGraph && state.docGraph.nodes[0] ? (state.docGraph.nodes.find((n) => n.name === state.docTab)?.name || state.docGraph.nodes[0].name) : null;
-  state._liveFlash = flash.size ? flash : null;
   state.colorById = state.colorById || {};
   renderSessionList();
-  renderTimeline();
+
+  // Smooth path: if the node set is unchanged (the common case — a doc's content
+  // changed, not a doc added/removed) and the dashboard is on screen, animate the
+  // brain in place (rings fill, changed nodes glow) and refresh the activity card,
+  // instead of re-rendering the whole dashboard (which would snap). Add/remove of
+  // a doc falls back to a full re-render with the flash.
+  const sameSet =
+    el('#conversation .brain') &&
+    before.size === newGraph.nodes.length &&
+    newGraph.nodes.every((n) => before.has(n.name));
+  if (sameSet && !state.session) {
+    streamUpdateBrain(newGraph, new Set(flash.keys()));
+    refreshActivityCard();
+  } else {
+    state._liveFlash = flash.size ? flash : null;
+    renderTimeline();
+  }
+}
+
+// In-place brain update for a live snapshot: fill/empty completion rings smoothly
+// (CSS transitions) and drop a "just changed" glow on changed nodes — no rebuild,
+// so transitions actually run. (The same in-place pattern as time-travel scrubbing.)
+function streamUpdateBrain(newGraph, changedNames) {
+  const svg = el('#conversation .brain');
+  if (!svg) return;
+  const byName = new Map(newGraph.nodes.map((n) => [n.name, n]));
+  svg.querySelectorAll('.gnode').forEach((gEl) => {
+    const n = byName.get(gEl.dataset.doc);
+    if (!n) return;
+    const prog = gEl.querySelector('.gcprog');
+    const track = gEl.querySelector('.gctrack');
+    if (prog && track) {
+      if (n.completion) {
+        const C = 2 * Math.PI * (n.r + 5);
+        prog.setAttribute('stroke-dasharray', `${((n.completion.pct / 100) * C).toFixed(1)} ${C.toFixed(1)}`);
+        prog.setAttribute('stroke', pctColor(n.completion.pct));
+        prog.style.opacity = track.style.opacity = '';
+      } else {
+        prog.style.opacity = track.style.opacity = '0';
+      }
+    }
+    if (changedNames.has(n.name)) {
+      const ex = gEl.querySelector('.live-glow');
+      if (ex) ex.remove();
+      const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      glow.setAttribute('class', 'live-glow');
+      glow.setAttribute('cx', n.x.toFixed(1));
+      glow.setAttribute('cy', n.y.toFixed(1));
+      glow.setAttribute('r', (n.r + 9).toFixed(1));
+      glow.setAttribute('fill', n.color);
+      gEl.insertBefore(glow, gEl.firstChild); // behind the node; animation plays on insert
+    }
+  });
+}
+
+// Re-render just the Activity card in place (so new prompts/commits show) without
+// touching the brain SVG — keeps the brain's in-flight transitions intact.
+function refreshActivityCard() {
+  const card = el('#conversation .dash-card.activity');
+  if (!card) return;
+  const sessions = timelineSessions();
+  card.outerHTML = `
+      <section class="dash-card activity">
+        <div class="dash-head"><span>📊 Activity</span></div>
+        ${overviewHeader(sessions)}
+        ${renderRibbon(sessions)}
+        ${ribbonLegend()}
+      </section>`;
+  wireActivity();
 }
 
 // Map of node→change to flash on the next render (one-shot, from a live update).

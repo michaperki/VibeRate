@@ -15,6 +15,14 @@ The delight: open the brain graph on one screen, code with Claude/Codex on
 another, and **watch the brain breathe in real time** — nodes being born, rings
 filling, the timeline growing.
 
+**It's not just the brain.** The stream is the whole live session: new **prompts
+and turns** should appear in the conversation reader and the activity timeline as
+you talk to the agent — `vbrt watch` already re-pushes on git/doc change; it
+should also watch the active session logs so live conversation streams too. This
+is co-equal with the brain, not a footnote (and it pairs with the social vision:
+watch someone work *live*, give feedback as it happens). Capture side =
+session-log watching; viewer side = the activity ribbon + reader updating live.
+
 ## The big advantage: the animation is already built
 
 `applyBrainAsOf()` (the time-travel work) is a **"diff the graph to a target
@@ -70,12 +78,13 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 - [x] Rebundle on change — `assembleBundle` (shared with `add`/`push`) re-bundles
       and pushes; ingest upsert keeps it one project.
 - [x] Viewer transport — poll the project `updatedAt` stamp; refetch on change.
-- [ ] **Structural graph diff** — reconcile new vs current docGraph (add/remove/
-      update node + edge elements) with fade-in / fade-out, reusing the in-place
-      updaters. *(v1: positions are pinned + changed nodes flash; the smooth
-      in-place fade/fill reconcile is the next chunk — needs visual tuning.)*
-- [ ] Live **activity** — new prompts / commits animate into the timeline.
-      *(v1: the timeline re-renders on refresh so new items appear; not yet animated.)*
+- [~] **In-place reconcile** — when the node *set* is unchanged (the common case:
+      a doc's content changed), the brain updates in place: completion rings
+      **fill smoothly** + the changed node **glows**, no rebuild. *(Add/remove of a
+      doc still falls back to a full re-render — the smooth add/remove fade is the
+      remaining piece.)*
+- [~] Live **activity** — the Activity card re-renders on each live update so new
+      prompts / commits appear; gliding them in (animated) is still to do.
 - [x] `● live` indicator + pause control (the `Go live` / `Live` toggle).
 - [ ] Verify by editing a brain doc while watching (node/ring updates live).
 
