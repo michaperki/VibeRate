@@ -495,9 +495,11 @@ pre.code {
 .brain { width: 100%; height: auto; max-height: 70vh; display: block; margin: 2px 0 8px; }
 .gedge { stroke: var(--border); stroke-width: 1.5; }
 .gnode { cursor: pointer; }
-.gnode circle { stroke: rgba(0, 0, 0, 0.45); stroke-width: 1; transition: stroke-width 0.1s; }
-.gnode:hover circle { stroke: var(--text); stroke-width: 2; }
-.gnode.on circle { stroke: var(--text); stroke-width: 3; }
+/* :not(rings) so the body-circle stroke rules don't clobber the completion ring's
+   own (inline, per-%) stroke colour — author CSS beats SVG presentation attrs. */
+.gnode circle:not(.gctrack):not(.gcprog) { stroke: rgba(0, 0, 0, 0.45); stroke-width: 1; transition: stroke-width 0.1s; }
+.gnode:hover circle:not(.gctrack):not(.gcprog) { stroke: var(--text); stroke-width: 2; }
+.gnode.on circle:not(.gctrack):not(.gcprog) { stroke: var(--text); stroke-width: 3; }
 /* gentle recency-modulated "breathing" halo behind each node (duration/delay/
    brightness set inline per node); the halo itself never takes a stroke.
    opacity:0 + fill-mode:both hold the 0% frame during the stagger delay, so a
@@ -562,8 +564,8 @@ pre.code {
 /* Recent view: faint vertical time axis */
 .time-axis .taxis-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
 .time-axis .taxis-lab { fill: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-/* plan-completion ring: a faint track + an amber→green progress arc */
-.gctrack { stroke: #2f3543; stroke-width: 3; }
+/* plan-completion ring: a visible track + an amber→green progress arc */
+.gctrack { stroke: #3c4658; stroke-width: 3; }
 .gcprog { stroke-width: 3; stroke-linecap: round; pointer-events: none; transition: stroke-dasharray 0.4s ease, stroke 0.4s ease; }
 .ring-key { font-size: 11px; color: var(--muted); }
 .glabel { fill: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0; transition: opacity 0.1s; pointer-events: none; }
