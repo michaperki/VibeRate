@@ -15,6 +15,7 @@ const state = {
   live: false, // streaming: poll for new snapshots and animate the diff in
   _livePoll: null,
   _liveStamp: null, // last-seen project updatedAt
+  _liveLastUpdate: null, // when the last live change landed (for the readout)
   _liveFlash: null, // node names changed since the last snapshot (flash them)
   docHistory: null, // { capturedAt, docHistory: { path: [{hash,t,status,content}] } }
   timeTravel: false, // brain time-travel mode active
@@ -603,8 +604,18 @@ async function pollLive() {
     const p = await api(`/api/projects/${slug}`);
     if (slug !== state.project) return;
     const stamp = p.updatedAt || '';
-    if (stamp && stamp !== state._liveStamp) { state._liveStamp = stamp; await refreshLive(); }
+    if (stamp && stamp !== state._liveStamp) { state._liveStamp = stamp; state._liveLastUpdate = Date.now(); await refreshLive(); }
   } catch { /* transient; try again next tick */ }
+  updateLiveReadout(); // keep the "updated Ns ago" ticking even with no change
+}
+
+// Show "· updated Ns ago" next to the Live toggle, without re-rendering.
+function updateLiveReadout() {
+  const ago = el('#conversation .live-ago');
+  if (!ago) return;
+  if (!state.live || !state._liveLastUpdate) { ago.textContent = ''; return; }
+  const secs = Math.round((Date.now() - state._liveLastUpdate) / 1000);
+  ago.textContent = ` · updated ${secs < 60 ? `${secs}s` : fmtAgo(state._liveLastUpdate).replace(' ago', '')} ago`;
 }
 
 // A new snapshot arrived: refetch the brain-relevant data, diff which docs
@@ -864,7 +875,7 @@ function renderTimeline() {
           enriched ? '' : ' · <span class="warn-inline">restart <code>vbrt serve</code> for message data</span>'
         }</div>
       </div>
-      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — poll for new pushes and animate the brain + timeline as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}</button>
+      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — poll for new pushes and animate the brain + timeline as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}<span class="live-ago"></span></button>
     </div>
     <div class="dashboard">
       <section class="dash-card activity">

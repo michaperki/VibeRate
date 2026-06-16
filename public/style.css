@@ -572,6 +572,8 @@ pre.code {
 .live-toggle .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .live-toggle.on { color: #fff; border-color: #f85149; }
 .live-toggle.on .live-dot { background: #f85149; box-shadow: 0 0 6px #f85149; animation: livepulse 1.4s ease-in-out infinite; }
+.live-toggle .live-ago { font-size: 10.5px; color: rgba(255, 255, 255, 0.6); margin-left: 2px; }
+.live-toggle:not(.on) .live-ago { display: none; }
 @keyframes livepulse { 0%, 100% { opacity: 0.45; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .live-toggle.on .live-dot { animation: none; } }
 .glabel { fill: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0; transition: opacity 0.1s; pointer-events: none; }
