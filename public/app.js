@@ -654,6 +654,7 @@ function renderTimeline() {
         ${renderRibbon(sessions)}
       </section>
       ${renderCenterpiece()}
+      ${renderBrainHistory()}
       ${renderProjectMemory()}
     </div>`;
 
@@ -667,6 +668,17 @@ function renderTimeline() {
   el('#conversation')
     .querySelectorAll('[data-pmem]')
     .forEach((b) => (b.onclick = () => openMemo((state._projMem || [])[Number(b.dataset.pmem)])));
+  // Brain-history doc → open that (still-existing) doc in the brain reader.
+  el('#conversation')
+    .querySelectorAll('[data-bh-doc]')
+    .forEach((n) => (n.onclick = () => {
+      const node = currentDocNode(n.dataset.bhDoc);
+      if (!node) return;
+      state.docTab = node.name;
+      state.docOpen = true;
+      rerenderCenterpiece();
+      el('#conversation .centerpiece')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
   wireDocTabs();
   wireActivity();
 }
@@ -712,6 +724,49 @@ function renderProjectMemory() {
           ? `<div class="ctx-bucket"><div class="ctx-bucket-head"><span class="mem-load recall">○ recalled when relevant</span><span class="dim-note">${notes.length} note${notes.length === 1 ? '' : 's'}</span></div><div class="atom-group">${recallBody}</div></div>`
           : ''
       }
+    </section>`;
+}
+
+// --- Brain history: the temporal companion to the brain graph — every commit
+// that changed a brain doc, newest first, across the whole project (not the
+// session window). Each row shows how each doc changed (added/modified/deleted).
+// Clicking a doc that still exists opens it in the reader. ---
+function renderBrainHistory() {
+  if (!state.git.ok) return '';
+  const brainSet = brainNodeSet();
+  const entries = (state.git.commits || [])
+    .map((c) => ({ c, docs: brainDocsOf(c, brainSet) }))
+    .filter((e) => e.docs.length);
+  if (!entries.length) return '';
+
+  const rows = entries
+    .map(({ c, docs }) => {
+      const docChips = docs
+        .map((d) => {
+          const st = docStatus(d) || 'modified';
+          const name = docName(d);
+          const live = currentDocNode(name);
+          const label = name.split('/').pop();
+          const code = live
+            ? `<code data-bh-doc="${esc(name)}">${esc(label)}</code>`
+            : `<code class="bh-gone" title="no longer in the brain">${esc(label)}</code>`;
+          return `<span class="bh-doc"><span class="rp-st st-${st}">${esc(st)}</span>${code}</span>`;
+        })
+        .join('');
+      return `<div class="bh-row">
+        <div class="bh-when" title="${esc(fmtShortDT(c.t))}">${esc(fmtAgo(c.t))}</div>
+        <div class="bh-body">
+          <div class="bh-docs">${docChips}</div>
+          <div class="bh-sub">${esc(c.subject || '')} <span class="bh-hash">${esc(c.hash)}</span></div>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  return `
+    <section class="dash-card brain-history">
+      <div class="dash-head"><span>🧠 Brain history</span><span class="dim-note">${entries.length} change${entries.length === 1 ? '' : 's'} · newest first</span></div>
+      <div class="bh-list">${rows}</div>
     </section>`;
 }
 
@@ -1270,8 +1325,19 @@ function brainDocsOf(c, brainSet) {
   const set = brainSet !== undefined ? brainSet : brainNodeSet();
   return c.docs.filter((d) => {
     const base = docName(d).split('/').pop().toLowerCase();
-    return set ? set.has(base) : BRAIN_FALLBACK.has(base);
+    // a current graph node OR a known agent-doc name (so an *archived* brain doc,
+    // which is no longer a node, still counts as a brain change).
+    return (set && set.has(base)) || BRAIN_FALLBACK.has(base);
   });
+}
+
+// The current brain-graph node whose name/basename matches a doc, or null (e.g.
+// the doc was since deleted — we only hold the current snapshot's content).
+function currentDocNode(name) {
+  const g = state.docGraph;
+  if (!g) return null;
+  const base = name.split('/').pop();
+  return g.nodes.find((n) => n.name === name || n.base === base) || null;
 }
 const STATUS_GLYPH = { added: '＋', modified: '∆', deleted: '−', renamed: '→', copied: '⎘' };
 

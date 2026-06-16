@@ -560,6 +560,20 @@ pre.code {
 .rp-st.st-deleted { background: rgba(248, 81, 73, 0.18); color: #f85149; }
 .rp-st.st-renamed, .rp-st.st-copied { background: rgba(143, 160, 189, 0.18); color: #8fa0bd; }
 
+/* Brain history — chronological list of brain-doc changes */
+.brain-history .bh-list { max-height: 320px; overflow: auto; margin-top: 4px; }
+.bh-row { display: flex; gap: 12px; padding: 8px 2px; border-top: 1px solid var(--border); }
+.bh-row:first-child { border-top: 0; }
+.bh-when { flex: none; width: 64px; font-size: 11px; color: var(--dim, #6b7280); padding-top: 2px; }
+.bh-body { flex: 1; min-width: 0; }
+.bh-docs { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.bh-doc { display: inline-flex; align-items: center; gap: 5px; }
+.bh-doc code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: #c7ccd8; cursor: pointer; }
+.bh-doc code:hover:not(.bh-gone) { color: var(--accent); }
+.bh-doc code.bh-gone { color: var(--dim, #6b7280); text-decoration: line-through; cursor: default; }
+.bh-sub { font-size: 12px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bh-hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: var(--dim, #6b7280); }
+
 /* ---------- Tier 1: workspace / home ---------- */
 #home { display: none; }
 body.view-home #home { display: block; }
