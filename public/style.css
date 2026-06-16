@@ -512,14 +512,6 @@ pre.code {
   100% { opacity: 0; transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) { .live-glow { animation: none; opacity: 0; } }
-/* gentle recency-modulated "breathing" halo behind each node (duration/delay/
-   brightness set inline per node); the halo itself never takes a stroke.
-   opacity:0 + fill-mode:both hold the 0% frame during the stagger delay, so a
-   repaint/layout-switch doesn't flash every halo full-strength ("bubble-wrap pop"). */
-.ghalo { opacity: 0; pointer-events: none; filter: blur(2px); animation: brainpulse 4s ease-in-out infinite both; }
-.gnode .ghalo, .gnode:hover .ghalo, .gnode.on .ghalo { stroke: none; }
-@keyframes brainpulse { 0%, 100% { opacity: 0; } 50% { opacity: var(--pmax, 0.3); } }
-@media (prefers-reduced-motion: reduce) { .ghalo { animation: none; opacity: 0; } }
 /* one-shot "just changed" entrance: a ring that expands from the node and fades.
    born (added doc) is bigger/brighter; changed (modified) is a quicker flash. */
 .gring { opacity: 0; pointer-events: none; transform-box: fill-box; transform-origin: center; }
@@ -534,7 +526,6 @@ pre.code {
 .gnode.tt-hidden, .gedge.tt-hidden { opacity: 0; pointer-events: none; }
 /* archived doc, scrubbed past its deletion — a faded, struck-through ghost */
 .gnode.ghost { opacity: 0.4; }
-.gnode.ghost .ghalo { display: none; }
 .gnode.ghost circle { fill: #2a2f3c !important; stroke: #5a6275; stroke-dasharray: 3 2; }
 .gnode.ghost .glabel { fill: var(--dim, #6b7280); text-decoration: line-through; }
 .gnode.ghost:hover { opacity: 0.75; }
@@ -568,13 +559,6 @@ pre.code {
 /* opaque power-user terms get a dotted underline + help cursor, explained on hover */
 .jargon { cursor: help; border-bottom: 1px dotted currentColor; }
 .ctx-gauge { cursor: help; }
-.brain-key { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 11px; color: var(--muted); cursor: pointer; background: none; border: 1px solid transparent; border-radius: 6px; padding: 2px 7px; }
-.brain-key:hover { color: var(--text); border-color: var(--border); }
-.brain-key .bk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: keypulse 3s ease-in-out infinite; }
-.brain-key:not(.on) { color: var(--dim, #6b7280); }
-.brain-key:not(.on) .bk-dot { animation: none; opacity: 0.35; box-shadow: none; }
-@keyframes keypulse { 0%, 100% { opacity: 0.5; transform: scale(0.82); } 50% { opacity: 1; transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { .brain-key .bk-dot { animation: none; } }
 /* Recent view: faint vertical time axis */
 .time-axis .taxis-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
 .time-axis .taxis-lab { fill: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

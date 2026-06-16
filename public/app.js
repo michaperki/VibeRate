@@ -12,7 +12,6 @@ const state = {
   docTab: null,
   docOpen: false, // doc reader overlay shown for the selected node
   docGraph: null,
-  brainGlow: (() => { try { return localStorage.getItem('vbrt_brain_glow') !== 'off'; } catch { return true; } })(),
   live: false, // streaming: poll for new snapshots and animate the diff in
   _livePoll: null,
   _liveStamp: null, // last-seen project updatedAt
@@ -1217,13 +1216,6 @@ function renderCenterpiece() {
     )
     .join('');
   const recent = state.docLayout === 'recent';
-  // Gentle "breathing" pulse, recency-modulated: each node carries a soft halo
-  // that fades in and out. Recently-touched docs breathe a touch faster and
-  // brighter, so the graph reads as alive and the fresh docs draw the eye.
-  const mtimes = g.nodes.map((n) => n.mtime || 0).filter(Boolean);
-  const tMax = mtimes.length ? Math.max(...mtimes) : 0;
-  const tMin = mtimes.length ? Math.min(...mtimes) : 0;
-  const tSpan = tMax - tMin || 1;
   // Flash on render: the open-entrance ring, else a live-update flash. liveChanged
   // also drives a lingering "just changed" glow (the streaming change-signal).
   let entrance;
@@ -1237,11 +1229,6 @@ function renderCenterpiece() {
       const sub = recent && n.mtime
         ? `<text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 23).toFixed(1)}" text-anchor="middle" class="gsub">${esc(fmtAgo(n.mtime))}</text>`
         : '';
-      const f = n.mtime ? (n.mtime - tMin) / tSpan : 0.4; // 0 oldest … 1 newest
-      const dur = (4.4 - f * 1.7).toFixed(2); // newer → faster breath
-      const pmax = (0.16 + f * 0.26).toFixed(2); // newer → brighter halo
-      const delay = ((i * 0.37) % 2.3).toFixed(2); // stagger so they don't pulse in unison
-      const haloStyle = `animation-duration:${dur}s;animation-delay:${delay}s;--pmax:${pmax}`;
       const hidden = hideOf(n);
       const ghost = ghostOf(n);
       const chg = hidden ? undefined : ringMap.get(n.name);
@@ -1261,8 +1248,7 @@ function renderCenterpiece() {
         ? `<circle class="gctrack" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${cR.toFixed(1)}" fill="none"${cHide}/>` +
           `<circle class="gcprog" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${cR.toFixed(1)}" fill="none" stroke="${pctColor(cPct)}" stroke-dasharray="${((cPct / 100) * cC).toFixed(1)} ${cC.toFixed(1)}" transform="rotate(-90 ${n.x.toFixed(1)} ${n.y.toFixed(1)})"${cHide}/>`
         : '';
-      // A live-changed node gets a lingering "just changed" glow (the streaming
-      // signal) — independent of the recency-glow toggle.
+      // A live-changed node gets a lingering "just changed" glow (the streaming signal).
       const liveGlow = liveChanged.has(n.name)
         ? `<circle class="live-glow" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 9).toFixed(1)}" fill="${n.color}"/>`
         : '';
@@ -1270,7 +1256,6 @@ function renderCenterpiece() {
       // node↔group indices stay aligned and birth/death can animate.
       return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}" data-doc="${esc(n.name)}">
         ${liveGlow}
-        ${state.brainGlow ? `<circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>` : ''}
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         ${lring}${cring}
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
@@ -1306,7 +1291,6 @@ function renderCenterpiece() {
       <div class="dash-head"><span class="jargon" title="Your agent/brain docs (SOUL, AGENTS, CLAUDE, README, plans…) as a graph — edges mean one doc references another. Hover a node to peek inside.">🧠 AI architecture</span>
         <span class="lay-toggle">${toggle}</span>
         ${state.docHistory ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
-        <button class="brain-key${state.brainGlow ? ' on' : ''}" data-glow-toggle title="Toggle the recency glow — each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow ${state.brainGlow ? '= recency' : 'off'}</button>
         ${g.nodes.some((n) => n.completion) ? '<span class="ring-key jargon" title="Ring around a node = its checklist completion (amber → green). Checklist/plan docs only.">◔ ring = % done</span>' : ''}
         <span class="dim-note">${files.length} docs · ${g.edges.filter((e) => !g.nodes[e.i].archived && !g.nodes[e.j].archived).length} links</span></div>
       <div class="brain-wrap">
@@ -1455,12 +1439,6 @@ function wireDocTabs() {
   root.querySelectorAll('[data-layout]').forEach((b) => {
     b.onclick = () => setLayout(b.dataset.layout);
   });
-  const glowBtn = root.querySelector('[data-glow-toggle]');
-  if (glowBtn) glowBtn.onclick = () => {
-    state.brainGlow = !state.brainGlow;
-    try { localStorage.setItem('vbrt_brain_glow', state.brainGlow ? 'on' : 'off'); } catch { /* ignore */ }
-    rerenderCenterpiece();
-  };
   wireBrainPeek(root);
   wireTimeTravel(root);
 }
