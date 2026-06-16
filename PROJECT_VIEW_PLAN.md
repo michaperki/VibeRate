@@ -1,175 +1,138 @@
 # VibeRate — Project View Plan
 
-Synthesis of two independent research passes (Claude + Codex) and Mike's own
-notes. Focus: the **internal Project view** — the AI Brain, the Chat Display,
-and the Prompt Display. Supersedes the now-deleted `CLAUDE_SUGGESTIONS.md` and
-`CODEX_SUGGESTIONS.md`.
+Focus: the internal Project view — the AI Brain, the Chat Display, and the Prompt
+Display. Synthesis of two research passes (Claude + Codex) plus Mike's direction.
 
-## Positioning (the frame, corrected)
+## Positioning (the frame)
 
 VibeRate is **not** "GitHub for agent conversations" (that's version control;
-wrong). It is about: **getting feedback / collaborating** on agent work,
-**managing your project's AI brain** (the constitution + docs + memory the agent
-runs on), and **seeing how others manage theirs**. The internal product's
-strongest potential, per both passes: *a living history of how a person and
-their agents understood, discussed, and changed a project* — with every claim
-traceable to the work that created it.
+wrong). It's about **getting feedback / collaborating** on agent work, **managing
+your project's AI brain** (the constitution + docs + memory the agent runs on),
+and **seeing how others manage theirs**. The internal product's potential: *a
+living history of how a person and their agents understood, discussed, and
+changed a project* — every claim traceable to the work that created it.
 
 ## Core organizing principle
 
-Two parallel tracks, joined at the seam:
+Two tracks joined at the seam: the **prompt unit** (`before → prompt → after`) is
+how you read your own sessions, with an **outcome/evidence rail** per prompt; the
+**Brain** is the project's evolving model. The rail links a prompt to the Brain
+concept it changed — that link is the "living history."
 
-1. **The prompt unit becomes the internal reading unit.** `before → prompt →
-   after`, the atom that today only renders on the public surfaces (`/explore`,
-   `/c/:id`), becomes how you read your *own* sessions. Around each prompt hangs
-   an **outcome / evidence rail**: files changed, diffs, tests, commits, context
-   fullness, screenshots, and whether the follow-up was a correction or an
-   approval. (Both passes' #1; Mike agreed to give it a shot.)
-2. **The Brain becomes the project's evolving model**, not a filename map — with
-   organization, motion, and history.
+## Architecture note (decided)
 
-The seam: the rail links a prompt to *which Brain concept it changed*. That link
-is the "living history."
-
-Both passes independently recommended unifying the prompt unit into the reader.
-That convergence is why it's first.
-
----
-
-## Workstream A — Unified prompt-unit reader
-
-Make `selectSession` render the prompt-card chain (consume the orphaned
-`GET /api/projects/:slug/sessions/:id/prompts` endpoint), instead of the legacy
-`renderTurn` / `renderTurnItems` path.
-
-- **[DECISION — toggle]** Reading density. Build a live toggle:
-  - **Narrative** — prompts + meaningful replies + outcomes (prompt cards).
-  - **Worklog** — adds summarized tool activity + files changed.
-  - **Raw** — the exact normalized transcript (today's view).
-- Keep acks ("go ahead") *inside* the reader as styled connectors (the
-  `↳ you: …` tail from the mid-convo prototype), even though the public feed
-  drops them.
-- Deep-link + restore state: each session / turn / card gets a stable URL;
-  returning restores scroll + expansion. (Prereq for "open session →" from a
-  card actually landing on the right turn.)
-
-## Workstream B — Outcome / evidence rail
-
-A compact rail beside each prompt showing observable consequences (not an
-AI-generated "score"):
-
-- Files changed · **real diffs** (we have `file_path` + old/new; today edits
-  render as raw JSON) · tests run + result · commits produced · Brain/docs
-  changed · interrupted? · follow-up = correction / continuation / approval.
-- **Context fullness ("dumb zone") — confirmed buildable.** The raw logs carry
-  it; `src/parsers.js` currently drops it:
-  - Claude: assistant `message.usage` → `input + cache_read + cache_creation` =
-    effective context at that turn; `message.model` gives the window.
-  - Codex: `token_count` events → `info.total_token_usage`,
-    `info.model_context_window`, rate-limit `used_percent`.
-  - Show a per-prompt **context gauge** ("62% full · 124k/200k") + a dumb-zone
-    flag past a threshold, and a per-session **context-growth sparkline**.
-- **[DECISION — mock]** Rail placement/shape: right-side rail vs. under-prompt
-  chip-row vs. an expandable footer. Mock 2–3 on real data.
-
-## Workstream C — Brain organization (no more "3 READMEs you click into")
-
-Ladder, cheap → rich:
-
-1. **Hover peek** — hover a node → card with the doc's heading outline + first
-   line. See inside without clicking.
-2. **Heading explosion** — render large docs as a small cluster of their H2/H3
-   sections, so topics ("Architecture › Data model") are first-class nodes.
-3. **Role grouping** — cluster/color constitution (SOUL/CLAUDE/AGENTS) vs
-   reference (README/ROADMAP) vs memory. (`ARCHITECTURE.md` names
-   constitution-vs-memory as *the* split.)
-4. **Concepts (later)** — extract goals / decisions / constraints / open
-   questions as nodes; files become *evidence* attached to concepts. Heuristic
-   (doc headings) first; LLM-assisted later. Keep Web / Tree / Recent layouts,
-   applied to this semantic layer.
-
-- **[DECISION — toggle/mock]** Whether heading-explosion is always on, a zoom
-  level, or a toggle alongside Web/Tree/Recent. Mock it.
-
-## Workstream D — Brain motion & lifecycle
-
-Make the graph feel alive *and* encode meaning.
-
-- **Pulse — [DECISION, mock the encoding]:**
-  - rate ∝ recency (recently-touched docs breathe faster), and/or
-  - intensity ∝ load-bearing-ness (how often the agent actually `Read` it in
-    sessions — from tool_use).
-  Mock both encodings (and a plain ambient pulse) so Mike picks.
-- **Lifecycle effects (Mike's add: what happens on add / delete / modify):**
-  - **Added** — node "births": scale/fade in with an expanding ring + brief
-    glow; edges draw in. In Recent/time-travel, tagged "new."
-  - **Modified** — a flash / ripple on the node; edge set re-settles.
-  - **Deleted / retired** — node "dies": shrink + fade; **[DECISION — mock]**
-    does it vanish, or leave a faint **ghost/tombstone** so the brain's history
-    stays visible? (Leaning ghost, because Brain *evolution* is a core story.)
-- **Brain time travel (the distinctive feature)** — a timeline slider: "what did
-  the agent believe on May 20?" Scrubbing births/flashes/kills nodes per the git
-  history of doc changes, and shows the responsible prompt + the actual doc diff.
-  The existing brain-edit ribbon lane is the seed (today it only knows a named
-  file changed — needs doc diffs preserved at capture).
-
-## Workstream E — Evidence-capture skill (needs its own design doc)
-
-Generalize "screenshots" → **outcome evidence**, where screenshot is the
-*frontend* specialization and the backend equivalents are test output / diff /
-curl-or-API response / a benchmark number. An agent skill captures evidence at
-**prompt boundaries** (before = state when prompt sent; after = state when agent
-yields).
-
-Open questions to pin down before code (write `EVIDENCE.md`):
-- Manual trigger vs. automatic at turn boundaries.
-- Where the target comes from (dev-server URL for screenshots; command for
-  tests/curl).
-- Storage in the bundle + size budget + redaction of screenshots.
-- How "before/after" is anchored to a specific turn/card id.
-
-## Workstream F — Supporting (as needed, not blocking)
-
-- **Parser:** retain `usage` on assistant turns; attach to the preceding prompt.
-  (Prereq for B's context gauge.)
-- **Scale:** the dataset is large (286 sessions, ~92k messages, sessions up to
-  1,357 msgs / 1.68 MB). Summary-first + progressive/chunked loading is a
-  requirement, not polish.
-- **Search / filters:** prompt+response text, files, commands, Brain concepts,
-  commit subjects, agent, date, outcome. Filters: only-prompts, failed work,
-  brain-changing turns, high-churn, interrupted.
-- **Episodes (later):** group related sessions/agents into work episodes
-  ("Redesign IA", "Fix auth", "Abandoned mobile nav") with status
-  completed/ongoing/abandoned/superseded — makes hundreds of sessions browsable.
-- **Editable intent-based session titles** (first prompts make poor titles).
-- **Tests** around parsers / prompt extraction / redaction / activity
-  attribution (no suite today).
+- **Topology:** hosted product. `vbrt push` runs locally and uploads a bundle;
+  users **view at a hosted URL**. `vbrt serve` is a dev/local-viewer mode, *not*
+  where product users live — so the hosted web app has only the uploaded bundle,
+  never a live repo. (GitHub can edit-in-browser because it *is* the git host;
+  VibeRate is not.)
+- **Scope for now: READ-ONLY.** No editing the brain from the UI. Git stays the
+  brain's ledger; VibeRate captures and visualizes.
+- **Editing — deferred (Mike's call):** when revisited, via **git-provider
+  integration** (commits/PRs through a GitHub App — the clean hosted answer) or a
+  **host-native brain** (flip source of truth, repo syncs via `vbrt pull`).
+  *Not* a separate diverging store reconciled to git (that's the sync mess). The
+  agent-as-bridge ("VibeRate surfaces the edit, your agent applies it") is the
+  near-free option when we want it.
 
 ---
 
-## Decision points (resolved via toggle or mock, per Mike's method)
+## ✅ Done
 
-For every fork below, build a live **toggle** or a **mockup** (à la
-`prototypes/prompt-unit*.html`) — don't pick unilaterally.
+- **Slice 1 — prompt-unit reader + context gauge.** Session reader renders the
+  prompt-unit chain (Narrative only; toggle/Worklog/Raw removed). Parser retains
+  Claude token usage → per-prompt **context-fullness gauge** ("dumb zone" past 75%).
+- **Slice 2a — hover-peek.** Hovering a brain node floats its heading outline +
+  first line; click still opens the full reader.
+- **Slice 2b — brain motion + organization.** Gentle recency-modulated breathing
+  halo (+ jank fix, reduced-motion); "glow = recency" legend; Recent time-axis;
+  **role clustering** (web only); **web fit-to-canvas** so it fills the frame.
 
-| # | Decision | Method |
-|---|----------|--------|
-| 1 | Reader density: Narrative / Worklog / Raw | live toggle |
-| 2 | Outcome-rail placement (side rail / chip row / footer) | mock 2–3 |
-| 3 | Brain heading-explosion: always-on / zoom / toggle | mock + toggle |
-| 4 | Pulse encoding: recency / load-bearing / ambient | mock all three |
-| 5 | Deleted-node effect: vanish vs. ghost/tombstone | mock |
+## ❌ Dropped
 
-## Sequencing
+- **Heading-explosion** — overengineered; hard to read the exploded ideas. The
+  existing graph + hover-peek is sufficient.
 
-1. **Slice 1 — Unified reader + context gauge.** Parser keeps `usage` (F) →
-   prompt-card reader (A) with the density toggle (decision 1) → context gauge
-   on each card (B). Highest convergence, immediate "this is *mine*" payoff.
-2. **Slice 2 — Brain organization.** Hover peek + heading-explosion + role
-   grouping (C), with mocks for decisions 3.
-3. **Slice 3 — Brain motion & lifecycle.** Pulse + add/delete/modify effects
-   (D), mocks for decisions 4–5.
-4. **Slice 4 — Outcome rail in depth.** Real diffs + test/commit signals (B),
-   mock decision 2.
-5. **Slice 5 — Evidence-capture skill.** After `EVIDENCE.md` (E).
-6. **Ongoing — scale, search, episodes** (F) as the data demands.
+---
+
+## Remaining (read-only)
+
+### A. Activity timeline + Brain history — *cheap, no new capture* ← NEXT
+- [ ] Make **commits / brain / code lanes clickable** (today only convos + the
+  message brush are wired; the rest are tooltip-only).
+- [ ] **Brain diamond → detail** (which brain docs that commit changed + subject/
+  date/hash).
+- [ ] A dedicated **Brain history view** from the git data already in the bundle.
+- [ ] git capture → `--name-status` for **add / modify / delete / rename**
+  (one-line change; unlocks lifecycle).
+- [ ] **Unify "what is the brain"** — timeline uses a fixed filename allowlist
+  (`git.js` `BRAIN_DOCS`); the graph uses a broader doc set (`docs.js`). Reconcile.
+
+### B. Brain lifecycle & time-travel
+- [ ] Cheap **"just-changed" entrance flash** (docs touched in the latest commit
+  glow on first draw).
+- [ ] **Time-travel scrubber** (brain state / diffs on date X) — needs richer
+  capture: historical doc content/diffs at push time.
+
+### C. Prompt reader / outcome rail (Slice 4)
+- [ ] **Real diffs** per edit in the reader.
+- [ ] **Outcome signals** beside each prompt: files changed, tests run + result,
+  commits produced, brain changed.
+- [ ] **Follow-up classification** — correction / continuation / approval.
+- [ ] **Prompt intent auto-tagging** (design / debug / refactor / ask / fix).
+- [ ] **Prompt-quality-through-consequences** signals (needed clarification?
+  caused rework? referenced docs? survived later commits?).
+- [ ] *Decision (mock):* outcome-rail placement — side rail / chip row / footer.
+
+### D. Scale & navigation
+- [ ] **Progressive / summary-first loading** (sessions up to ~1,300 msgs / 1.6 MB).
+- [ ] **Search + filters** (prompt/response text, files, commands, outcome, …).
+- [ ] **Conversation minimap.**
+- [ ] **Deep links + state restoration** (stable URLs per session/turn/card).
+- [ ] **Work episodes** — group related sessions into named efforts.
+- [ ] **Auto intent-based session titles.**
+
+### E. Capture enrichment — *bigger build*
+- [ ] **Evidence-capture skill** (Slice 5): screenshots for frontend, test/diff/
+  curl output for backend; captured at push, viewed read-only. Needs `EVIDENCE.md`.
+
+### F. Hygiene
+- [ ] **Tests** around parsers / prompt extraction / redaction / activity attribution.
+
+---
+
+## 🧪 Experiment — plan-completion % → brain node status
+
+Plan/spec docs (this file, ROADMAP, BACKLOG, *_NEXT_PASS, …) get created and
+progressively completed. Idea: surface a **completion %** per plan doc and use it
+to **annotate that doc's brain node**, so the user sees at a glance which plans are
+fresh, in-progress, or done. Read-only — we visualize status, we don't
+archive/complete from the UI.
+
+Two sources for the number (use both; marker wins):
+- **Semantic marker (authoritative).** The coding agent, when it updates a plan,
+  writes a completion line at the **bottom** of the doc (LLMs estimate a number
+  more accurately *after* reading the whole doc than before). Convention TBD, e.g.
+  a trailing `<!-- completion: 45% -->` or `**Completion: 45%**`. Parsed at push.
+- **Checkbox parser (fallback, nearly free).** Ratio of `- [x]` to `- [ ]` in the
+  doc. Works on any checklist-style plan with no marker.
+
+Visualization (don't overload existing encodings): node **color already = doc
+type/role**, so layer completion as a **progress ring/arc around the node** (empty
+→ full) rather than recoloring — a donut of doneness. Only "plan-type" docs get a
+ring (heuristic: has a completion marker or checkboxes, or filename matches
+PLAN/ROADMAP/BACKLOG/TASKS). Capture step extracts `completion` per doc into the
+bundle; the brain renderer draws the ring.
+
+*Status: idea to prototype — fits read-only, no editing required.*
+
+---
+
+## Decisions resolved via toggle/mock (Mike's method)
+
+For any fork with >1 viable UI path, build a live **toggle** or a **mock** (à la
+the prompt-unit / brain prototypes) — don't pick unilaterally.
+- Reader density → resolved: **Narrative** (others removed).
+- Brain organization → resolved: hover-peek + role-clustering + fit-to-canvas;
+  heading-explosion dropped; recoloring not pursued (clustering sufficed).
+- Still open: outcome-rail placement (C); completion-ring visual (experiment).
