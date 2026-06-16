@@ -22,6 +22,7 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 - **Publish the marketplace** — push repo to GitHub; verify `/plugin marketplace add` → `/plugin install`.
 - **Default endpoint** — point the skill at the deployed URL so the localhost step disappears.
 - **Identity (gist → claim)** — anonymous push returns an unlisted link; optional "claim your account" attaches projects to an owner (token flow).
+- **Live read-only monitor (`vbrt watch`)** — a long-running local client that watches the repo's Claude/Codex session logs, brain docs, and git commits, then debounces and re-pushes refreshed snapshots so the hosted dashboard updates within seconds while agents work. Start with near-real-time bundle upserts/polling; graduate to delta events + SSE/WebSocket only if the UX needs it. **Spec + checklist: `STREAMING.md`** (the viewer-side animation reuses the time-travel `applyBrainAsOf` layer).
 
 ## Phase 2 — Social / sharing (the core product)
 
