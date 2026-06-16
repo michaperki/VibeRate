@@ -559,11 +559,6 @@ pre.code {
 .rp-st.st-modified { background: rgba(124, 92, 255, 0.18); color: #a78bff; }
 .rp-st.st-deleted { background: rgba(248, 81, 73, 0.18); color: #f85149; }
 .rp-st.st-renamed, .rp-st.st-copied { background: rgba(143, 160, 189, 0.18); color: #8fa0bd; }
-.rp-files { margin-top: 7px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 132px; overflow: auto; font-size: 11px; color: #8fa0bd; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.rp-files div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rp-more { color: var(--dim, #6b7280); }
-.rp-open { margin-top: 9px; font: inherit; font-size: 11.5px; color: var(--accent); background: none; border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; cursor: pointer; }
-.rp-open:hover { border-color: var(--accent); }
 
 /* ---------- Tier 1: workspace / home ---------- */
 #home { display: none; }

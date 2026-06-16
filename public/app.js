@@ -1417,10 +1417,13 @@ function wireActivity() {
     const c = lookupCommit(b.dataset.brain);
     if (c) openRibDetail(b, brainDetailHtml(c));
   }));
-  el('#conversation').querySelectorAll('[data-code]').forEach((b) => (b.onclick = (e) => {
-    e.stopPropagation();
-    const s = (state._tlSessions || []).find((x) => x.id === b.dataset.code);
-    if (s) openRibDetail(b, codeDetailHtml(s));
+  // The code lane is per-session — selecting it behaves like the convos lane:
+  // highlight + scroll to that session in the sidebar.
+  el('#conversation').querySelectorAll('[data-code]').forEach((b) => (b.onclick = () => {
+    state.selectedConvo = b.dataset.code;
+    renderSessionList();
+    renderTimeline();
+    scrollConvoIntoList(b.dataset.code);
   }));
 
   const brush = document.getElementById('ribBrush');
@@ -1484,8 +1487,6 @@ function openRibDetail(anchorEl, html) {
   pop.style.left = `${left}px`;
   pop.style.top = `${Math.max(8, top)}px`;
   pop.querySelector('.rib-pop-x').onclick = closeRibDetail;
-  const openBtn = pop.querySelector('[data-open-sess]');
-  if (openBtn) openBtn.onclick = () => { const id = openBtn.dataset.openSess; closeRibDetail(); selectSession(state.project, id); };
   // Defer the dismiss listeners so the opening click doesn't immediately close it.
   setTimeout(() => {
     document.addEventListener('keydown', ribEsc, true);
@@ -1512,14 +1513,6 @@ function brainDetailHtml(c) {
     <div class="rp-docs">${bd.map(statusRow).join('')}</div>
     <div class="rp-sub">${esc(c.subject || '')}</div>
     <div class="rp-meta">${esc(fmtShortDT(c.t))} · <code>${esc(c.hash)}</code></div>`;
-}
-function codeDetailHtml(s) {
-  const files = (s.files || []).slice(0, 8);
-  const more = (s.fileCount || 0) > files.length ? `<div class="rp-more">+${s.fileCount - files.length} more</div>` : '';
-  return `<div class="rp-head">${esc(s.title || 'session')}</div>
-    <div class="rp-meta"><b class="diff-add">+${s.added || 0}</b>/<b class="diff-del">−${s.removed || 0}</b> lines · ${s.fileCount || 0} file${s.fileCount === 1 ? '' : 's'}</div>
-    ${files.length ? `<div class="rp-files">${files.map((f) => `<div>${esc(f)}</div>`).join('')}${more}</div>` : ''}
-    <button class="rp-open" data-open-sess="${esc(s.id)}">open session →</button>`;
 }
 
 // ---------- conversation rendering ----------
