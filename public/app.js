@@ -728,6 +728,16 @@ function docColor(base) {
   return '#5aa9e6';
 }
 
+// Coarse role for a doc, used to cluster the web layout: the agent's
+// "constitution" (SOUL/AGENTS/CLAUDE/SEED), its evolving memory, or everything
+// else (reference: READMEs, plans, ADRs, design docs…).
+function docRole(base) {
+  const b = base.toUpperCase();
+  if (b === 'MEMORY.MD') return 'memory';
+  if (/SOUL/.test(b) || ['AGENTS.MD', 'AGENT.MD', 'CLAUDE.MD', 'CLAUDE.LOCAL.MD', 'SEED.MD', 'SEED_V2.MD'].includes(b)) return 'constitution';
+  return 'reference';
+}
+
 // Build nodes (docs) + edges (one doc references another's filename) and lay
 // them out with a small force simulation. Cached per project so it's stable.
 function buildDocGraph(files) {
@@ -757,6 +767,7 @@ function buildDocGraph(files) {
   nodes.forEach((n) => {
     n.r = 9 + Math.round(Math.sqrt(n.bytes / maxB) * 14);
     n.color = docColor(n.base);
+    n.role = docRole(n.base);
   });
   const W = 760;
   const H = Math.round(Math.max(220, Math.min(760, 80 + nodes.length * 15)));
@@ -775,9 +786,24 @@ function applyLayout(g, mode) {
 function layoutGraph(nodes, edges, W, H) {
   let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  // Role clustering: give each present role a region (anchor point) around the
+  // center and gently pull its docs there, so constitution / reference / memory
+  // settle into their own neighborhoods. Only kicks in with ≥2 roles, and only
+  // here (the web layout) — Tree and Recent keep their own axes.
+  const ROLE_ORDER = ['constitution', 'reference', 'memory'];
+  const present = ROLE_ORDER.filter((r) => nodes.some((n) => n.role === r));
+  const cluster = present.length > 1;
+  const AR = Math.min(W, H) * 0.27;
+  const anchors = {};
+  present.forEach((r, k) => {
+    const a = -Math.PI / 2 + (k / present.length) * Math.PI * 2;
+    anchors[r] = { x: W / 2 + Math.cos(a) * AR, y: H / 2 + Math.sin(a) * AR };
+  });
+  const anchorOf = (n) => (cluster ? anchors[n.role] : { x: W / 2, y: H / 2 });
   nodes.forEach((n, i) => {
-    n.x = W / 2 + Math.cos(i * 2.4) * 90 + (rnd() - 0.5) * 30;
-    n.y = H / 2 + Math.sin(i * 2.4) * 70 + (rnd() - 0.5) * 30;
+    const an = anchorOf(n);
+    n.x = an.x + Math.cos(i * 2.4) * 46 + (rnd() - 0.5) * 30;
+    n.y = an.y + Math.sin(i * 2.4) * 40 + (rnd() - 0.5) * 30;
     n.vx = 0;
     n.vy = 0;
   });
@@ -812,18 +838,44 @@ function layoutGraph(nodes, edges, W, H) {
       b.vy -= fy;
     }
     for (const n of nodes) {
-      n.vx += (W / 2 - n.x) * 0.003;
-      n.vy += (H / 2 - n.y) * 0.003;
+      if (cluster) {
+        const an = anchorOf(n);
+        n.vx += (an.x - n.x) * 0.013; // pull toward this doc's role region
+        n.vy += (an.y - n.y) * 0.013;
+      }
+      n.vx += (W / 2 - n.x) * 0.001; // weak overall centering keeps it on canvas
+      n.vy += (H / 2 - n.y) * 0.001;
       n.x += n.vx * 0.85;
       n.y += n.vy * 0.85;
       n.vx *= 0.84;
       n.vy *= 0.84;
     }
   }
-  const pad = 46;
+  // Fit the settled cloud to the canvas: center it and scale up to fill the
+  // frame like Tree/Recent do. Without this the organic sim can leave the graph
+  // small and off-center (e.g. a dominant role's mass bunched in one quadrant).
+  const padX = 52;
+  const padY = 34;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.y > maxY) maxY = n.y;
+  }
+  const bw = maxX - minX || 1;
+  const bh = maxY - minY || 1;
+  const base = Math.min((W - 2 * padX) / bw, (H - 2 * padY) / bh); // uniform fit
+  const sx = Math.min((W - 2 * padX) / bw, base * 1.6); // mild anisotropy to fill the wider axis
+  const sy = Math.min((H - 2 * padY) / bh, base * 1.6);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
   nodes.forEach((n) => {
-    n.x = Math.max(pad, Math.min(W - pad, n.x));
-    n.y = Math.max(28, Math.min(H - 28, n.y));
+    n.x = Math.max(padX, Math.min(W - padX, W / 2 + (n.x - cx) * sx));
+    n.y = Math.max(padY, Math.min(H - padY, H / 2 + (n.y - cy) * sy));
   });
 }
 
@@ -930,13 +982,26 @@ function renderCenterpiece() {
     )
     .join('');
   const recent = state.docLayout === 'recent';
+  // Gentle "breathing" pulse, recency-modulated: each node carries a soft halo
+  // that fades in and out. Recently-touched docs breathe a touch faster and
+  // brighter, so the graph reads as alive and the fresh docs draw the eye.
+  const mtimes = g.nodes.map((n) => n.mtime || 0).filter(Boolean);
+  const tMax = mtimes.length ? Math.max(...mtimes) : 0;
+  const tMin = mtimes.length ? Math.min(...mtimes) : 0;
+  const tSpan = tMax - tMin || 1;
   const nodesSvg = g.nodes
-    .map((n) => {
+    .map((n, i) => {
       const on = state.docOpen && n.name === active.name ? ' on' : '';
       const sub = recent && n.mtime
         ? `<text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 23).toFixed(1)}" text-anchor="middle" class="gsub">${esc(fmtAgo(n.mtime))}</text>`
         : '';
+      const f = n.mtime ? (n.mtime - tMin) / tSpan : 0.4; // 0 oldest … 1 newest
+      const dur = (4.4 - f * 1.7).toFixed(2); // newer → faster breath
+      const pmax = (0.16 + f * 0.26).toFixed(2); // newer → brighter halo
+      const delay = ((i * 0.37) % 2.3).toFixed(2); // stagger so they don't pulse in unison
+      const haloStyle = `animation-duration:${dur}s;animation-delay:${delay}s;--pmax:${pmax}`;
       return `<g class="gnode${on}" data-doc="${esc(n.name)}">
+        <circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
         ${sub}
@@ -956,13 +1021,24 @@ function renderCenterpiece() {
     )
     .join('');
 
+  // Recent view: a faint vertical time axis so it's obvious which end is newer
+  // (layoutRecent puts the most-recently-edited docs at the top).
+  const timeAxis = recent
+    ? `<g class="time-axis">
+        <line x1="13" y1="20" x2="13" y2="${g.H - 16}" class="taxis-line"/>
+        <text x="18" y="22" class="taxis-lab">newer ↑</text>
+        <text x="18" y="${g.H - 18}" class="taxis-lab">older ↓</text>
+      </g>`
+    : '';
+
   return `
     <section class="dash-card centerpiece">
       <div class="dash-head"><span>🧠 AI architecture</span>
         <span class="lay-toggle">${toggle}</span>
+        <span class="brain-key" title="Each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow = recency</span>
         <span class="dim-note">${files.length} docs · ${g.edges.length} links</span></div>
       <div class="brain-wrap">
-        <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${edgesSvg}${nodesSvg}</svg>
+        <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${timeAxis}${edgesSvg}${nodesSvg}</svg>
         <div class="brain-peek" id="brainPeek" hidden></div>
         ${state.docOpen ? `
         <div class="doc-backdrop" data-doc-close></div>
@@ -1098,9 +1174,10 @@ function animateGraph(g, from, to) {
       n.y = from[i].y + (to[i].y - from[i].y) * e;
       const grp = groups[i];
       if (!grp) return;
-      const c = grp.querySelector('circle');
-      c.setAttribute('cx', n.x.toFixed(1));
-      c.setAttribute('cy', n.y.toFixed(1));
+      grp.querySelectorAll('circle').forEach((c) => { // halo + node both follow
+        c.setAttribute('cx', n.x.toFixed(1));
+        c.setAttribute('cy', n.y.toFixed(1));
+      });
       const lab = grp.querySelector('.glabel');
       if (lab) {
         lab.setAttribute('x', n.x.toFixed(1));
