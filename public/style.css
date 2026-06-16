@@ -330,12 +330,13 @@ pre.code {
 .ov-split .sw2 { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 /* ribbon ---------- */
 .ribbon { margin-top: 12px; }
-.rib-axis, .rib-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 10px; }
+.rib-axis, .rib-row { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 10px; }
 .rib-axis { height: 16px; margin-bottom: 6px; }
-.rib-lab { font-size: 10px; color: var(--muted); text-align: right; }
+.rib-row { padding: 2px 0; }
+.rib-lab { font-size: 11px; font-weight: 500; color: #aeb6c6; text-align: right; letter-spacing: 0.02em; }
 .rib-track { position: relative; }
 .rib-row .rib-track { overflow: hidden; }
-.rib-axis .tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--muted); white-space: nowrap; }
+.rib-axis .tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: #aeb6c6; white-space: nowrap; }
 .rib-commits { height: 14px; }
 .rib-c { position: absolute; top: 2px; width: 2px; height: 10px; margin-left: -1px; background: var(--muted); cursor: pointer; }
 .rib-c.revert { background: #ff7a59; }
