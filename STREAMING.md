@@ -85,16 +85,22 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 - [x] **In-place reconcile** — content change → brain updates in place (completion
       rings **fill smoothly**, changed node **glows**, hover-peek stays fresh), no
       rebuild. Doc **add/remove** fades nodes in/out (pinned positions, no reshuffle).
-- [~] Live **activity** — the Activity card re-renders each live update so new
-      prompts / commits appear; gliding them in (granular ribbon animation) is still
-      to do.
-- [x] `● live` indicator + pause control + **"updated Ns ago"** readout.
+- [x] Live **activity** — the Activity card re-renders each live update, and a
+      new/grown convo, new commit, or new brain diamond **pulses** so live items
+      visibly land (baseline captured at Go-live so the first update isn't all-lit).
+- [x] **Live session-reader follow** — reading a session no longer stops streaming;
+      live, the reader refetches and new turns **stream in** (outlined), following
+      the conversation (scrolls to new turns only if you were near the bottom).
+- [x] `● live` indicator + pause control + **"updated Ns ago"** readout (dashboard
+      and reader).
 - [x] Verify by editing a brain doc while watching (Mike confirmed: rings fill /
       nodes glow live).
 
 ## Later
 
 - [ ] SSE/WebSocket (drop polling) — only if polling ever feels laggy.
+- [ ] Reader refinement — append new turns instead of full re-render (preserve
+      expanded `<details>` while following).
 
 ---
 
