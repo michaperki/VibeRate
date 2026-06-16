@@ -445,6 +445,10 @@ pre.code {
 
 /* session reader: prompt-unit cards */
 .conv-body .rcard { margin: 0 0 14px; }
+/* a turn that just streamed in (live follow) briefly outlines */
+.card-fresh { animation: cardfresh 1.1s ease-out; }
+@keyframes cardfresh { 0% { box-shadow: 0 0 0 2px var(--accent); } 70% { box-shadow: 0 0 0 2px var(--accent); } 100% { box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .card-fresh { animation: none; } }
 .conv-body .rcard .pc-prompt { font-size: 15px; }
 /* ack prompts collapse to a slim connector between cards */
 .rcard-ack {

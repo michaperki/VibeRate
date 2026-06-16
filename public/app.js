@@ -22,6 +22,8 @@ const state = {
   _liveSeenCommits: null, // commit hashes seen, to detect new commits
   _liveFreshConvos: null, // convos new/grown this update (highlight in the ribbon)
   _liveFreshCommits: null, // commits new this update
+  _readerFresh: null, // ordinals of new reader cards on a live session update
+  _unitsSig: null, // signature of the open session's prompt units (skip no-op refreshes)
   docHistory: null, // { capturedAt, docHistory: { path: [{hash,t,status,content}] } }
   timeTravel: false, // brain time-travel mode active
   ttIndex: 0, // selected commit index within the brain-history timeline
@@ -635,7 +637,11 @@ async function pollLive() {
     const p = await api(`/api/projects/${slug}`);
     if (slug !== state.project) return;
     const stamp = p.updatedAt || '';
-    if (stamp && stamp !== state._liveStamp) { state._liveStamp = stamp; state._liveLastUpdate = Date.now(); await refreshLive(); }
+    if (stamp && stamp !== state._liveStamp) {
+      state._liveStamp = stamp;
+      state._liveLastUpdate = Date.now();
+      await (state.session ? refreshLiveSession() : refreshLive());
+    }
   } catch { /* transient; try again next tick */ }
   updateLiveReadout(); // keep the "updated Ns ago" ticking even with no change
 }
@@ -2214,7 +2220,7 @@ function brainDetailHtml(c) {
 // ---------- conversation rendering ----------
 
 async function selectSession(slug, id) {
-  stopLive(); // reading a session — pause streaming (it re-renders the dashboard)
+  // Keep streaming on (if it was) so the reader can *follow* a live conversation.
   state.session = id;
   document.querySelectorAll('.sess').forEach((n) => n.classList.toggle('active', n.dataset.id === id));
   const s = await api(`/api/projects/${slug}/sessions/${id}`);
@@ -2231,6 +2237,7 @@ async function selectSession(slug, id) {
   }
   state._session = s;
   state._units = units;
+  state._unitsSig = null; // fresh session — let the first live refresh render
   renderSessionReader();
 }
 
@@ -2266,6 +2273,7 @@ function renderSessionReader() {
         <div class="files-list" id="files-list" hidden>${filesList.map((f) => `<div>${esc(f)}</div>`).join('')}</div>
       </div>
       <div class="nav">
+        <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — follow this conversation's turns as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}<span class="live-ago"></span></button>
         <span class="spacer"></span>
         <button id="nav-prev" title="Previous prompt (k)">◀ prev</button>
         <span id="nav-counter" class="counter"></span>
@@ -2279,6 +2287,41 @@ function renderSessionReader() {
 
   el('#conversation').scrollTop = 0;
   wireConversation(units.length);
+  const lt = el('#conversation [data-live-toggle]');
+  if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderSessionReader(); };
+  updateLiveReadout();
+}
+
+// A live update while reading a session: refetch its prompt units and re-render,
+// flashing any new cards and following the conversation (scroll to the new turns
+// if you were already near the bottom — like a live chat).
+async function refreshLiveSession() {
+  const slug = state.project;
+  const id = state.session;
+  let s;
+  let units;
+  try {
+    s = await api(`/api/projects/${slug}/sessions/${id}`);
+    units = await api(`/api/projects/${slug}/sessions/${id}/prompts`);
+  } catch { return; }
+  if (state.session !== id) return;
+  const oldCount = (state._units || []).length;
+  // Skip a pointless re-render when this session didn't actually change (e.g. the
+  // push was a brain-doc edit).
+  const sig = units.map((u) => `${u.id}:${u.after ? u.after.stepCount : 0}:${(u.after && u.after.verdict || '').length}`).join('|');
+  if (sig === state._unitsSig) return;
+  state._unitsSig = sig;
+  state._session = s;
+  state._units = units;
+  const pane = el('#conversation');
+  const oldScroll = pane ? pane.scrollTop : 0;
+  const nearBottom = pane ? pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 160 : true;
+  state._readerFresh = units.length > oldCount
+    ? new Set(Array.from({ length: units.length - oldCount }, (_, k) => oldCount + k))
+    : null;
+  renderSessionReader(); // (resets scroll to top)
+  state._readerFresh = null;
+  if (pane) pane.scrollTop = nearBottom ? pane.scrollHeight : oldScroll; // follow, else hold position
 }
 
 // A prompt-time context-fullness gauge — how full the model's window was when the
@@ -2298,8 +2341,9 @@ function contextGauge(ctx) {
 // connector so the chain stays legible without giving filler a full card.
 function renderReaderCard(u, i) {
   const anchor = `turn-${i}`;
+  const fresh = state._readerFresh && state._readerFresh.has(i) ? ' card-fresh' : '';
   if (u.isAck) {
-    return `<div class="turn rcard-ack" id="${anchor}"><span class="ack-arrow">↳ you:</span> <span class="ack-text">${esc(u.prompt)}</span>${contextGauge(u.context)}</div>`;
+    return `<div class="turn rcard-ack${fresh}" id="${anchor}"><span class="ack-arrow">↳ you:</span> <span class="ack-text">${esc(u.prompt)}</span>${contextGauge(u.context)}</div>`;
   }
   const b = u.before;
   const before = b && (b.agent || b.prompt)
@@ -2320,7 +2364,7 @@ function renderReaderCard(u, i) {
     : '';
   const when = u.ts ? `<span class="pc-when">${fmtTime(u.ts)}</span>` : '';
   const link = u.cardId ? `<a class="pc-link" href="/c/${esc(u.cardId)}" title="permalink" target="_blank" rel="noopener">🔗</a>` : '';
-  return `<article class="turn pcard rcard" id="${anchor}">
+  return `<article class="turn pcard rcard${fresh}" id="${anchor}">
     <div class="pc-head">${docs}${contextGauge(u.context)}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(u.prompt)}</div>
