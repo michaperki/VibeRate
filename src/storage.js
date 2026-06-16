@@ -24,11 +24,12 @@ function readJson(file, fallback) {
 // behavior-compatible. `opts.slug` overrides the cwd-derived slug (used for
 // hosted projects keyed by a random id); `opts.name` sets the display name.
 export function saveBundle(bundle, opts = {}) {
-  const { project, sessions, git, docs, memory } = bundle;
+  const { project, sessions, git, docs, memory, docHistory } = bundle;
   const cwd = project.cwd;
   const result = saveSessions(cwd, sessions, opts);
   if (git) saveGit(cwd, git, opts.slug);
   if (docs && docs.docs) saveDocs(cwd, docs.docs, opts.slug);
+  if (docHistory) saveDocHistory(cwd, docHistory, opts.slug);
   if (memory && memory.ok) saveMemory(cwd, memory, opts.slug);
   return result;
 }
@@ -184,6 +185,18 @@ export function saveDocs(cwd, docs, slug = slugify(cwd)) {
 
 export function getDocs(slug) {
   return readJson(path.join(projectDir(slug), 'docs.json'), null);
+}
+
+// Per-brain-doc version history (content at each changing commit) for time-travel.
+export function saveDocHistory(cwd, docHistory, slug = slugify(cwd)) {
+  if (!docHistory || !Object.keys(docHistory).length) return;
+  const dir = projectDir(slug);
+  ensureDir(dir);
+  fs.writeFileSync(path.join(dir, 'history.json'), JSON.stringify({ capturedAt: new Date().toISOString(), docHistory }));
+}
+
+export function getDocHistory(slug) {
+  return readJson(path.join(projectDir(slug), 'history.json'), null);
 }
 
 // This repo's cold-start memory snapshot, captured at add/push-time. Read by the

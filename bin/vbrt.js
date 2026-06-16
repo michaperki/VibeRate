@@ -5,7 +5,7 @@
 import { discoverSessions } from '../src/discover.js';
 import { parseClaude, parseCodex } from '../src/parsers.js';
 import { saveBundle } from '../src/storage.js';
-import { extractGit } from '../src/git.js';
+import { extractGit, extractDocHistory } from '../src/git.js';
 import { extractDocsMulti } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
 import { buildBundle } from '../src/bundle.js';
@@ -115,9 +115,11 @@ async function cmdAdd(args = []) {
   const repoPaths = [...new Set([cwd, ...sessions.map((s) => s.cwd).filter(Boolean)])];
   const seen = new Set();
   const commits = [];
+  let gitCwd = null;
   for (const p of repoPaths) {
     const g = await extractGit(p);
     if (!g) continue;
+    if (!gitCwd) gitCwd = g.cwd; // the repo path that owns these commits (for git show)
     for (const c of g.commits) {
       if (!seen.has(c.hash)) {
         seen.add(c.hash);
@@ -130,6 +132,12 @@ async function cmdAdd(args = []) {
   // Capture the project's agent/AI-architecture markdown (the "centerpiece").
   const docs = extractDocsMulti(repoPaths);
 
+  // Per-brain-doc version history for time-travel. "Brain" = the captured docs'
+  // basenames ∪ the known agent-doc names, so archived agent docs are tracked too.
+  const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
+  const brainBasenames = new Set([...docs.map((d) => d.name.split('/').pop().toLowerCase()), ...AGENT_DOCS]);
+  const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames) : null;
+
   // Capture this repo's cold-start memory (its own notes + adopted project notes),
   // unless suppressed. Scoped to the repo; redacted before any upload.
   const includeMemory = !args.includes('--no-memory');
@@ -141,6 +149,7 @@ async function cmdAdd(args = []) {
     sessions: parsed,
     git: commits.length ? { cwd, capturedAt: new Date().toISOString(), commits } : null,
     docs,
+    docHistory,
     memory,
   });
   console.log(

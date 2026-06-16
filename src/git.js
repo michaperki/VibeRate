@@ -61,3 +61,39 @@ export async function extractGit(cwd, max = 4000) {
     return null;
   }
 }
+
+// Per-doc version history for the brain time-travel view: for each brain doc,
+// its content at each commit that changed it (so the viewer can show the brain
+// "as of" any point, diff consecutive versions, and render birth/archive).
+// `brainBasenames` is the lowercased set deciding which changed .md count as
+// brain (current graph nodes ∪ agent-doc names). Bounded by caps; runs at capture
+// time only. Returns { '<repo/rel/path.md>': [{ hash, t, status, content }, …newest-first] }.
+const MAX_VER_BYTES = 256 * 1024;
+export async function extractDocHistory(cwd, commits, brainBasenames, { maxPerDoc = 40, maxTotal = 400 } = {}) {
+  if (!cwd || !commits || !brainBasenames || !brainBasenames.size) return null;
+  const history = {};
+  const perDoc = {};
+  let total = 0;
+  for (const c of commits) { // newest-first (matches the log order)
+    if (total >= maxTotal) break;
+    for (const d of c.docs || []) {
+      const path = d && d.name;
+      if (!path) continue;
+      if (!brainBasenames.has(path.split('/').pop().toLowerCase())) continue;
+      if ((perDoc[path] || 0) >= maxPerDoc) continue;
+      let content = null;
+      if (d.status !== 'deleted') {
+        try {
+          const { stdout } = await exec('git', ['-C', cwd, 'show', `${c.hash}:${path}`], { maxBuffer: 64 * 1024 * 1024 });
+          content = stdout.length > MAX_VER_BYTES ? stdout.slice(0, MAX_VER_BYTES) : stdout;
+        } catch {
+          content = null; // path may not exist at that commit (rename edge cases)
+        }
+      }
+      (history[path] = history[path] || []).push({ hash: c.hash, t: c.t, status: d.status, content });
+      perDoc[path] = (perDoc[path] || 0) + 1;
+      if (++total >= maxTotal) break;
+    }
+  }
+  return Object.keys(history).length ? history : null;
+}
