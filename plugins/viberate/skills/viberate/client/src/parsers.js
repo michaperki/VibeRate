@@ -13,6 +13,36 @@ function truncate(s, n = 100) {
   return flat.length > n ? flat.slice(0, n - 1) + '…' : flat;
 }
 
+// Known model context windows. Default to the 200k standard; the [1m] beta
+// models advertise a million-token window. Used to turn raw token counts into a
+// "how full was the window" percentage (the prompt-time "dumb zone" signal).
+function contextWindow(model) {
+  const m = String(model || '').toLowerCase();
+  if (m.includes('[1m]') || m.includes('-1m')) return 1_000_000;
+  return 200_000;
+}
+
+// Normalize a Claude assistant message's `usage` block into the context size the
+// model actually saw on that turn: fresh input + cache reads + cache creation.
+// (output_tokens is the reply, not context.) Returns null when usage is absent.
+function claudeUsage(msg) {
+  const u = msg && msg.usage;
+  if (!u) return null;
+  const input = u.input_tokens || 0;
+  const cacheRead = u.cache_read_input_tokens || 0;
+  const cacheCreate = u.cache_creation_input_tokens || 0;
+  const context = input + cacheRead + cacheCreate;
+  return {
+    input,
+    cacheRead,
+    cacheCreate,
+    output: u.output_tokens || 0,
+    context,
+    model: msg.model || null,
+    window: contextWindow(msg.model),
+  };
+}
+
 async function* readLines(file) {
   const rl = readline.createInterface({
     input: fs.createReadStream(file, { encoding: 'utf8' }),
@@ -84,8 +114,10 @@ export async function parseClaude(file) {
       if (!startedAt) startedAt = ts;
       endedAt = ts;
     }
+    const usage = role === 'assistant' ? claudeUsage(msg) : null;
     for (const part of claudeContentToParts(msg.content, role)) {
       part.ts = ts;
+      if (usage) part.usage = usage;
       if (part.kind === 'text' && role === 'user' && !firstUserText) {
         firstUserText = part.text;
       }

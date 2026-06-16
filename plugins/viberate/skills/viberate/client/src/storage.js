@@ -24,23 +24,43 @@ function readJson(file, fallback) {
 // behavior-compatible. `opts.slug` overrides the cwd-derived slug (used for
 // hosted projects keyed by a random id); `opts.name` sets the display name.
 export function saveBundle(bundle, opts = {}) {
-  const { project, sessions, git, docs, memory } = bundle;
+  const { project, sessions, git, docs, memory, docHistory } = bundle;
   const cwd = project.cwd;
   const result = saveSessions(cwd, sessions, opts);
   if (git) saveGit(cwd, git, opts.slug);
   if (docs && docs.docs) saveDocs(cwd, docs.docs, opts.slug);
+  if (docHistory) saveDocHistory(cwd, docHistory, opts.slug);
   if (memory && memory.ok) saveMemory(cwd, memory, opts.slug);
   return result;
 }
 
-// Server-side ingest: store a pushed bundle under a fresh unguessable id and
-// return { id }. The id doubles as the project slug, so every existing read
-// endpoint (`/api/projects/:slug/...`) serves hosted projects unchanged. `owner`
-// (a hashed token) scopes the project to its pusher for list enumeration.
+// Normalized repo identity for upsert matching (path-spelling/trailing-slash
+// insensitive). Same repo re-pushed → same key → same hosted project.
+function repoKey(cwd) {
+  return String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+// Find an existing project owned by `owner` that came from the same repo path,
+// so a re-push updates it instead of minting a duplicate. Only matches within the
+// owner's own projects (never across owners).
+function findOwnedProjectByCwd(owner, cwd) {
+  const key = repoKey(cwd);
+  if (!owner || !key) return null;
+  return listProjects(owner).find((m) => repoKey(m.cwd) === key) || null;
+}
+
+// Server-side ingest: store a pushed bundle under an unguessable id and return
+// { id }. The id doubles as the project slug, so every read endpoint
+// (`/api/projects/:slug/...`) serves hosted projects unchanged. `owner` (a hashed
+// token) scopes the project to its pusher. Re-pushing the *same repo* as the same
+// owner **upserts** — it reuses the existing id (stable share link) and merges
+// sessions, rather than creating a second copy.
 export function ingestBundle(bundle, { owner = null, visibility = null } = {}) {
-  const id = crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars, unlisted
+  const cwd = bundle.project && bundle.project.cwd;
+  const existing = findOwnedProjectByCwd(owner, cwd);
+  const id = existing ? existing.slug : crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars, unlisted
   saveBundle(bundle, { slug: id, name: (bundle.project && bundle.project.name) || id, owner, visibility });
-  return { id };
+  return { id, updated: !!existing };
 }
 
 // Flip a project public/private (the "publish" action). Returns the manifest.
@@ -165,6 +185,18 @@ export function saveDocs(cwd, docs, slug = slugify(cwd)) {
 
 export function getDocs(slug) {
   return readJson(path.join(projectDir(slug), 'docs.json'), null);
+}
+
+// Per-brain-doc version history (content at each changing commit) for time-travel.
+export function saveDocHistory(cwd, docHistory, slug = slugify(cwd)) {
+  if (!docHistory || !Object.keys(docHistory).length) return;
+  const dir = projectDir(slug);
+  ensureDir(dir);
+  fs.writeFileSync(path.join(dir, 'history.json'), JSON.stringify({ capturedAt: new Date().toISOString(), docHistory }));
+}
+
+export function getDocHistory(slug) {
+  return readJson(path.join(projectDir(slug), 'history.json'), null);
 }
 
 // This repo's cold-start memory snapshot, captured at add/push-time. Read by the

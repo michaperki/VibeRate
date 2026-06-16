@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getMemory, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
+import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getDocHistory, getMemory, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { extractPromptUnits, buildFeed, parseCardId } from './prompts.js';
@@ -191,6 +191,15 @@ export function startServer(port = 4317) {
     res.json(docs);
   });
 
+  // Per-brain-doc version history (brain time-travel). Optional — 404 when the
+  // capture predates it or the repo had no brain-doc changes.
+  app.get('/api/projects/:slug/dochistory', (req, res) => {
+    if (!guardRead(req, res)) return;
+    const hist = getDocHistory(req.params.slug);
+    if (!hist) return res.status(404).json({ error: 'not found' });
+    res.json(hist);
+  });
+
   app.get('/api/projects/:slug/sessions/:id', (req, res) => {
     if (!guardRead(req, res)) return;
     const session = getSession(req.params.slug, req.params.id);
@@ -203,7 +212,7 @@ export function startServer(port = 4317) {
     if (!guardRead(req, res)) return;
     const session = getSession(req.params.slug, req.params.id);
     if (!session) return res.status(404).json({ error: 'not found' });
-    res.json(extractPromptUnits(session, req.params.id));
+    res.json(extractPromptUnits(session, req.params.id, req.params.slug));
   });
 
   // Discover feed: substantive prompt cards across published projects. Public —
