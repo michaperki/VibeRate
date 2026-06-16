@@ -347,6 +347,12 @@ pre.code {
 .rib-blocks { height: 18px; }
 .rib-b { position: absolute; top: 3px; height: 12px; min-width: 5px; border-radius: 2px; opacity: 0.7; cursor: pointer; border: 1px solid rgba(0, 0, 0, 0.35); }
 .rib-b:hover { opacity: 1; box-shadow: 0 0 0 2px var(--text); z-index: 5; }
+/* streaming: a just-arrived convo/commit/brain mark pulses bright */
+.rib-fresh { animation: ribfresh 0.9s ease-out; }
+.rib-b.rib-fresh { animation: ribfreshb 0.9s ease-out; z-index: 6; }
+@keyframes ribfresh { 0% { filter: brightness(2.6); } 55% { filter: brightness(1.6); } 100% { filter: brightness(1); } }
+@keyframes ribfreshb { 0% { filter: brightness(2.2); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.65); } 100% { filter: brightness(1); box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .rib-fresh, .rib-b.rib-fresh { animation: none; } }
 
 /* ---------- interactive ribbon: brush + convo detail ---------- */
 .rib-b.sel { box-shadow: 0 0 0 2px var(--text); opacity: 1; z-index: 6; }

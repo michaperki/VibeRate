@@ -18,6 +18,10 @@ const state = {
   _liveLastUpdate: null, // when the last live change landed (for the readout)
   _liveFlash: null, // node names changed since the last snapshot (flash them)
   _streamIn: null, // node names newly added this live update (fade them in)
+  _liveSeenConvos: null, // id → userCount, to detect new/grown convos on a live update
+  _liveSeenCommits: null, // commit hashes seen, to detect new commits
+  _liveFreshConvos: null, // convos new/grown this update (highlight in the ribbon)
+  _liveFreshCommits: null, // commits new this update
   docHistory: null, // { capturedAt, docHistory: { path: [{hash,t,status,content}] } }
   timeTravel: false, // brain time-travel mode active
   ttIndex: 0, // selected commit index within the brain-history timeline
@@ -590,7 +594,33 @@ function buildDocGraphPinned(files, oldGraph) {
 function startLive() {
   if (state._livePoll) return;
   state.live = true;
+  // Baseline what's already here so the first live update only highlights what's
+  // genuinely new/grown since you went live (not the whole existing timeline).
+  const sessions = timelineSessions();
+  state._liveSeenConvos = new Map(sessions.map((s) => [s.id, s.userCount]));
+  state._liveSeenCommits = new Set(windowCommits(sessions).map((c) => c.hash));
   state._livePoll = setInterval(pollLive, 4000);
+}
+
+// Compute which convos are new/grown and which commits are new since the last
+// live update, for the ribbon's "just arrived" highlight; advance the seen state.
+function computeFreshActivity(sessions) {
+  const seenC = state._liveSeenConvos || new Map();
+  const freshConvos = new Set();
+  for (const s of sessions) {
+    const prev = seenC.get(s.id);
+    if (prev === undefined || s.userCount > prev) freshConvos.add(s.id);
+    seenC.set(s.id, s.userCount);
+  }
+  const seenK = state._liveSeenCommits || new Set();
+  const freshCommits = new Set();
+  for (const c of windowCommits(sessions)) {
+    if (!seenK.has(c.hash)) { freshCommits.add(c.hash); seenK.add(c.hash); }
+  }
+  state._liveSeenConvos = seenC;
+  state._liveSeenCommits = seenK;
+  state._liveFreshConvos = freshConvos;
+  state._liveFreshCommits = freshCommits;
 }
 function stopLive() {
   state.live = false;
@@ -721,6 +751,7 @@ function refreshActivityCard() {
   const card = el('#conversation .dash-card.activity');
   if (!card) return;
   const sessions = timelineSessions();
+  computeFreshActivity(sessions); // mark just-arrived convos/commits for the ribbon
   card.outerHTML = `
       <section class="dash-card activity">
         <div class="dash-head"><span>📊 Activity</span></div>
@@ -728,6 +759,7 @@ function refreshActivityCard() {
         ${renderRibbon(sessions)}
         ${ribbonLegend()}
       </section>`;
+  state._liveFreshConvos = state._liveFreshCommits = null; // consumed
   wireActivity();
 }
 
@@ -1979,7 +2011,7 @@ function renderRibbon(sessions) {
   const ctick = commits
     .map(
       (c) =>
-        `<span class="rib-c ${c.isRevert ? 'revert' : ''}" data-commit="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · ${esc(c.hash)} · ${esc(c.subject)}"></span>`,
+        `<span class="rib-c ${c.isRevert ? 'revert' : ''}${state._liveFreshCommits?.has(c.hash) ? ' rib-fresh' : ''}" data-commit="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · ${esc(c.hash)} · ${esc(c.subject)}"></span>`,
     )
     .join('');
 
@@ -2002,7 +2034,7 @@ function renderRibbon(sessions) {
     .map((s) => {
       const sel = state.selectedConvo === s.id ? ' sel' : '';
       const dl = diffLabel(s);
-      return `<span class="rib-b${sel}" data-convo="${esc(s.id)}" style="left:${pct(s.start)}%;width:${wpx(s.userCount)}px;background:${SRC_COLOR[s.source] || 'var(--accent)'}"
+      return `<span class="rib-b${sel}${state._liveFreshConvos?.has(s.id) ? ' rib-fresh' : ''}" data-convo="${esc(s.id)}" style="left:${pct(s.start)}%;width:${wpx(s.userCount)}px;background:${SRC_COLOR[s.source] || 'var(--accent)'}"
            title="${esc(fmtShortDT(s.start))} · ${s.source} · ${plural(s.userCount, 'msg')}${dl ? ' · ' + dl : ''} · ${esc(s.title)}"></span>`;
     })
     .join('');
@@ -2032,7 +2064,7 @@ function renderRibbon(sessions) {
       const bd = brainDocsOf(c, brainSet);
       if (!bd.length) return '';
       const list = bd.map((d) => `${docStatus(d) ? (STATUS_GLYPH[docStatus(d)] || '') + ' ' : ''}${docName(d).split('/').pop()}`).join(', ');
-      return `<span class="rib-d" data-brain="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · 🧠 ${esc(list)} · ${esc(c.subject)}"></span>`;
+      return `<span class="rib-d${state._liveFreshCommits?.has(c.hash) ? ' rib-fresh' : ''}" data-brain="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · 🧠 ${esc(list)} · ${esc(c.subject)}"></span>`;
     })
     .join('');
   const brainRow = state.git.ok
