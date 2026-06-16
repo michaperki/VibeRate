@@ -2,6 +2,8 @@
 // Heavy deps (@inquirer/prompts, express) are loaded lazily inside the commands
 // that need them, so `vbrt push` runs with only Node builtins + fetch — which is
 // what lets the skill bundle ship without node_modules.
+import fs from 'node:fs';
+import path from 'node:path';
 import { discoverSessions } from '../src/discover.js';
 import { parseClaude, parseCodex } from '../src/parsers.js';
 import { saveBundle } from '../src/storage.js';
@@ -23,6 +25,105 @@ const C = {
 function fmtDate(iso) {
   if (!iso) return '????-??-??';
   return iso.slice(0, 16).replace('T', ' ');
+}
+
+const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
+const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|_next_pass/i;
+
+// Assemble the full capture bundle from a cwd + its (already-parsed) sessions:
+// git history, agent docs, per-brain-doc version history, and memory. Shared by
+// `vbrt add`/`push` and `vbrt watch`.
+async function assembleBundle(cwd, sessions, parsed, { includeMemory = true } = {}) {
+  // The repo may live at a different path than cwd (/home vs /mnt/c); merge git
+  // across every cwd seen in the sessions, deduping commits by hash.
+  const repoPaths = [...new Set([cwd, ...sessions.map((s) => s.cwd).filter(Boolean)])];
+  const seen = new Set();
+  const commits = [];
+  let gitCwd = null;
+  for (const p of repoPaths) {
+    const g = await extractGit(p);
+    if (!g) continue;
+    if (!gitCwd) gitCwd = g.cwd;
+    for (const c of g.commits) if (!seen.has(c.hash)) { seen.add(c.hash); commits.push(c); }
+  }
+  commits.sort((a, b) => b.t - a.t);
+
+  const docs = extractDocsMulti(repoPaths);
+  const brainBasenames = new Set([...docs.map((d) => d.name.split('/').pop().toLowerCase()), ...AGENT_DOCS]);
+  for (const c of commits) for (const d of c.docs || []) {
+    const base = d.name.split('/').pop();
+    if (d.status === 'deleted' && BRAINISH.test(base)) brainBasenames.add(base.toLowerCase());
+  }
+  const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames) : null;
+  const memory = includeMemory ? extractMemory(cwd) : null;
+
+  const bundle = buildBundle(cwd, {
+    sessions: parsed,
+    git: commits.length ? { cwd, capturedAt: new Date().toISOString(), commits } : null,
+    docs,
+    docHistory,
+    memory,
+  });
+  return { bundle, commits, docs, memory, repoPaths };
+}
+
+// A cheap fingerprint of the repo's brain inputs — mtimes/sizes of the agent docs
+// plus git HEAD/index — so `vbrt watch` can tell when something changed.
+function watchSignature(repoPaths) {
+  const parts = [];
+  for (const d of extractDocsMulti(repoPaths)) parts.push(`${d.name}:${Math.floor(d.mtime || 0)}:${d.bytes || 0}`);
+  for (const p of repoPaths) {
+    for (const f of ['HEAD', 'index']) {
+      try { parts.push(`${f}:${Math.floor(fs.statSync(path.join(p, '.git', f)).mtimeMs)}`); } catch { /* not a repo / no file */ }
+    }
+  }
+  return parts.sort().join('|');
+}
+
+// `vbrt watch`: poll the repo's brain inputs and re-push (debounced) when they
+// change, so the live dashboard updates while you/the agent edit. Read-only.
+async function cmdWatch(args = []) {
+  const cwd = process.cwd();
+  const apiUrl = apiBase();
+  if (!apiUrl) {
+    console.log(C.yellow('No endpoint configured. Set VBRT_API_URL=… or run `vbrt login` first.'));
+    process.exitCode = 1;
+    return;
+  }
+  const includeMemory = !args.includes('--no-memory');
+  const isPublic = args.includes('--public');
+  const sessions0 = await discoverSessions(cwd);
+  const repoPaths = [...new Set([cwd, ...sessions0.map((s) => s.cwd).filter(Boolean)])];
+  console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim('(Ctrl-C to stop)')}`);
+
+  let lastSig = watchSignature(repoPaths); // baseline; don't push on startup
+  let pendingSince = 0;
+  let busy = false;
+  const DEBOUNCE = 1500;
+
+  const tick = async () => {
+    if (busy) return;
+    let sig;
+    try { sig = watchSignature(repoPaths); } catch { return; }
+    if (sig !== lastSig) { lastSig = sig; pendingSince = Date.now(); return; } // changed — wait to settle
+    if (!pendingSince || Date.now() - pendingSince < DEBOUNCE) return;
+    pendingSince = 0;
+    busy = true;
+    try {
+      const sessions = await discoverSessions(cwd);
+      const parsed = [];
+      for (const s of sessions) {
+        try { parsed.push(s.source === 'claude' ? await parseClaude(s.file) : await parseCodex(s.file)); } catch { /* skip */ }
+      }
+      const { bundle } = await assembleBundle(cwd, sessions, parsed, { includeMemory });
+      const { url } = await pushBundle(bundle, { isPublic });
+      console.log(C.dim(`  ↑ ${new Date().toLocaleTimeString()} — pushed ${parsed.length} session(s) → ${url}`));
+    } catch (err) {
+      console.log(C.yellow(`  ✗ push failed: ${err.message}`));
+    }
+    busy = false;
+  };
+  setInterval(tick, 2000);
 }
 
 async function cmdAdd(args = []) {
@@ -109,56 +210,9 @@ async function cmdAdd(args = []) {
     }
   }
 
-  // Capture git history for the timeline overlay. The repo may live at a
-  // different path than cwd (e.g. /home vs /mnt/c), so try every cwd seen in
-  // the discovered sessions and merge, deduping commits by hash.
-  const repoPaths = [...new Set([cwd, ...sessions.map((s) => s.cwd).filter(Boolean)])];
-  const seen = new Set();
-  const commits = [];
-  let gitCwd = null;
-  for (const p of repoPaths) {
-    const g = await extractGit(p);
-    if (!g) continue;
-    if (!gitCwd) gitCwd = g.cwd; // the repo path that owns these commits (for git show)
-    for (const c of g.commits) {
-      if (!seen.has(c.hash)) {
-        seen.add(c.hash);
-        commits.push(c);
-      }
-    }
-  }
-  commits.sort((a, b) => b.t - a.t);
-
-  // Capture the project's agent/AI-architecture markdown (the "centerpiece").
-  const docs = extractDocsMulti(repoPaths);
-
-  // Per-brain-doc version history for time-travel. "Brain" = the captured docs'
-  // basenames ∪ known agent-doc names ∪ any *deleted* plan/brain-ish doc (so an
-  // archived doc that's no longer a current node still gets a tracked history →
-  // shows up as a ghost in the graveyard).
-  const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
-  const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|_next_pass/i;
-  const brainBasenames = new Set([...docs.map((d) => d.name.split('/').pop().toLowerCase()), ...AGENT_DOCS]);
-  for (const c of commits) for (const d of c.docs || []) {
-    const base = d.name.split('/').pop();
-    if (d.status === 'deleted' && BRAINISH.test(base)) brainBasenames.add(base.toLowerCase());
-  }
-  const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames) : null;
-
-  // Capture this repo's cold-start memory (its own notes + adopted project notes),
-  // unless suppressed. Scoped to the repo; redacted before any upload.
   const includeMemory = !args.includes('--no-memory');
-  const memory = includeMemory ? extractMemory(cwd) : null;
+  const { bundle, commits, docs, memory } = await assembleBundle(cwd, sessions, parsed, { includeMemory });
   const memNoteCount = memory && memory.ok ? memory.notes.length : 0;
-
-  // One bundle, then route to a sink. Same payload either way.
-  const bundle = buildBundle(cwd, {
-    sessions: parsed,
-    git: commits.length ? { cwd, capturedAt: new Date().toISOString(), commits } : null,
-    docs,
-    docHistory,
-    memory,
-  });
   console.log(
     C.dim(
       `Captured ${commits.length} git commit(s); ${docs.length} agent doc(s)${docs.length ? `: ${docs.map((d) => d.name).join(', ')}` : ''}; ` +
@@ -248,6 +302,7 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt push')}          Upload to your private dashboard (needs VBRT_API_URL)
   ${C.cyan('vbrt push --public')}   Publish on push (share a link immediately; default is private)
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
+  ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port
   ${C.cyan('vbrt help')}          Show this help
@@ -263,6 +318,9 @@ async function main() {
       break;
     case 'push':
       await cmdAdd(['push', ...rest]);
+      break;
+    case 'watch':
+      await cmdWatch(rest);
       break;
     case 'login':
       await cmdLogin(rest);

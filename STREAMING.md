@@ -65,8 +65,10 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 
 ## Implementation checklist
 
-- [ ] `vbrt watch` CLI — watch session logs + brain docs + git, debounce, re-push.
-- [ ] Incremental rebundle on change (reuse `buildBundle`; ingest upsert exists).
+- [x] `vbrt watch` CLI — poll brain docs + git (`watchSignature`), debounce,
+      re-push (upsert). *(Watches docs/git; live session-log watching is a follow-up.)*
+- [x] Rebundle on change — `assembleBundle` (shared with `add`/`push`) re-bundles
+      and pushes; ingest upsert keeps it one project.
 - [x] Viewer transport — poll the project `updatedAt` stamp; refetch on change.
 - [ ] **Structural graph diff** — reconcile new vs current docGraph (add/remove/
       update node + edge elements) with fade-in / fade-out, reusing the in-place
