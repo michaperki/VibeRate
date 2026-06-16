@@ -79,15 +79,15 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 - [x] Rebundle on change — `assembleBundle` (shared with `add`/`push`) re-bundles
       and pushes; ingest upsert keeps it one project.
 - [x] Viewer transport — poll the project `updatedAt` stamp; refetch on change.
-- [~] **In-place reconcile** — when the node *set* is unchanged (the common case:
-      a doc's content changed), the brain updates in place: completion rings
-      **fill smoothly** + the changed node **glows**, no rebuild. *(Add/remove of a
-      doc still falls back to a full re-render — the smooth add/remove fade is the
-      remaining piece.)*
-- [~] Live **activity** — the Activity card re-renders on each live update so new
-      prompts / commits appear; gliding them in (animated) is still to do.
-- [x] `● live` indicator + pause control (the `Go live` / `Live` toggle).
-- [ ] Verify by editing a brain doc while watching (node/ring updates live).
+- [x] **In-place reconcile** — content change → brain updates in place (completion
+      rings **fill smoothly**, changed node **glows**, hover-peek stays fresh), no
+      rebuild. Doc **add/remove** fades nodes in/out (pinned positions, no reshuffle).
+- [~] Live **activity** — the Activity card re-renders each live update so new
+      prompts / commits appear; gliding them in (granular ribbon animation) is still
+      to do.
+- [x] `● live` indicator + pause control + **"updated Ns ago"** readout.
+- [x] Verify by editing a brain doc while watching (Mike confirmed: rings fill /
+      nodes glow live).
 
 ## Later
 
