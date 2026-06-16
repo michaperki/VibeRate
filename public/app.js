@@ -13,6 +13,10 @@ const state = {
   docOpen: false, // doc reader overlay shown for the selected node
   docGraph: null,
   brainGlow: (() => { try { return localStorage.getItem('vbrt_brain_glow') !== 'off'; } catch { return true; } })(),
+  live: false, // streaming: poll for new snapshots and animate the diff in
+  _livePoll: null,
+  _liveStamp: null, // last-seen project updatedAt
+  _liveFlash: null, // node names changed since the last snapshot (flash them)
   docHistory: null, // { capturedAt, docHistory: { path: [{hash,t,status,content}] } }
   timeTravel: false, // brain time-travel mode active
   ttIndex: 0, // selected commit index within the brain-history timeline
@@ -480,12 +484,14 @@ function openMemo(file) {
 
 async function selectProject(slug) {
   showProject();
+  stopLive(); // don't keep polling a project you've navigated away from
   state.project = slug;
   state.session = null;
   document.querySelectorAll('.proj').forEach((n) =>
     n.classList.toggle('active', n.dataset.slug === slug),
   );
   state.projectData = await api(`/api/projects/${slug}`);
+  state._liveStamp = state.projectData.updatedAt || null;
 
   // Fetch per-session user-message activity once; shared by list + timeline.
   // Degrades gracefully if the running server lacks the endpoint.
@@ -564,6 +570,82 @@ async function selectProject(slug) {
   state._brainEntrance = true; // play the "just changed" entrance once, on open
   renderSessionList();
   renderTimeline();
+}
+
+// ---------- streaming (live) ----------
+
+// Build the graph for a refreshed snapshot but PIN existing nodes to their
+// current positions, so a live update doesn't reshuffle the whole brain — only
+// new docs need placing. (Foundation; the smooth structural tween is a follow-up.)
+function buildDocGraphPinned(files, oldGraph) {
+  const g = buildDocGraph(files);
+  if (oldGraph) {
+    const old = new Map(oldGraph.nodes.map((n) => [n.name, n]));
+    g.nodes.forEach((n) => { const o = old.get(n.name); if (o) { n.x = o.x; n.y = o.y; } });
+  }
+  return g;
+}
+
+function startLive() {
+  if (state._livePoll) return;
+  state.live = true;
+  state._livePoll = setInterval(pollLive, 4000);
+}
+function stopLive() {
+  state.live = false;
+  if (state._livePoll) { clearInterval(state._livePoll); state._livePoll = null; }
+}
+
+// Cheap change-detection: poll the project manifest and compare updatedAt.
+async function pollLive() {
+  const slug = state.project;
+  if (!slug) return;
+  try {
+    const p = await api(`/api/projects/${slug}`);
+    if (slug !== state.project) return;
+    const stamp = p.updatedAt || '';
+    if (stamp && stamp !== state._liveStamp) { state._liveStamp = stamp; await refreshLive(); }
+  } catch { /* transient; try again next tick */ }
+}
+
+// A new snapshot arrived: refetch the brain-relevant data, diff which docs
+// changed, rebuild the graph with pinned positions, and re-render — flashing the
+// changed nodes so the eye catches what just happened.
+async function refreshLive() {
+  const slug = state.project;
+  const before = new Map((state.docGraph?.nodes || []).map((n) => [n.name, (n.content || '').length + ':' + (n.content || '').slice(0, 64)]));
+  try {
+    state.projectData = await api(`/api/projects/${slug}`);
+    try { const act = await api(`/api/projects/${slug}/activity`); if (slug === state.project) state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) }; } catch { /* keep old */ }
+    try { const gg = await api(`/api/projects/${slug}/git`); if (slug === state.project && gg && Array.isArray(gg.commits)) state.git = { ok: true, commits: gg.commits }; } catch { /* keep old */ }
+    try { const h = await api(`/api/projects/${slug}/dochistory`); if (slug === state.project) state.docHistory = (h && h.docHistory) || null; } catch { /* keep old */ }
+    let docs = state.docs;
+    try { const d = await api(`/api/projects/${slug}/docs`); if (slug === state.project && d && Array.isArray(d.docs)) docs = { ok: true, files: d.docs }; } catch { /* keep old */ }
+    if (slug !== state.project) return;
+    state.docs = docs;
+  } catch { return; }
+
+  const newGraph = state.docs.ok ? buildDocGraphPinned([...state.docs.files, ...archivedPseudoFiles()], state.docGraph) : state.docGraph;
+  // changed = nodes new or with different content since the last snapshot
+  const flash = new Map();
+  for (const n of newGraph?.nodes || []) {
+    const sig = (n.content || '').length + ':' + (n.content || '').slice(0, 64);
+    if (!before.has(n.name)) flash.set(n.name, 'added');
+    else if (before.get(n.name) !== sig) flash.set(n.name, 'modified');
+  }
+  state.docGraph = newGraph;
+  state.docTab = state.docGraph && state.docGraph.nodes[0] ? (state.docGraph.nodes.find((n) => n.name === state.docTab)?.name || state.docGraph.nodes[0].name) : null;
+  state._liveFlash = flash.size ? flash : null;
+  state.colorById = state.colorById || {};
+  renderSessionList();
+  renderTimeline();
+}
+
+// Map of node→change to flash on the next render (one-shot, from a live update).
+function liveFlashMap() {
+  const m = state._liveFlash || new Map();
+  state._liveFlash = null; // consume
+  return m;
 }
 
 function filteredSessions() {
@@ -709,13 +791,14 @@ function renderTimeline() {
   const tMax = Math.max(...sessions.map((s) => s.end));
 
   el('#conversation').innerHTML = `
-    <div class="conv-toolbar">
+    <div class="conv-toolbar dash-toolbar">
       <div class="conv-head">
         <h2>${esc(state.projectData.name)}</h2>
         <div class="meta">${plural(sessions.length, 'conversation')} · ${fmtShort(tMin)} → ${fmtShort(tMax)}${
           enriched ? '' : ' · <span class="warn-inline">restart <code>vbrt serve</code> for message data</span>'
         }</div>
       </div>
+      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — poll for new pushes and animate the brain + timeline as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}</button>
     </div>
     <div class="dashboard">
       <section class="dash-card activity">
@@ -752,6 +835,8 @@ function renderTimeline() {
     }));
   wireDocTabs();
   wireActivity();
+  const lt = el('#conversation [data-live-toggle]');
+  if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderTimeline(); };
   state._brainEntrance = false; // consumed — don't replay on layout toggles / re-renders
 }
 
@@ -1141,7 +1226,8 @@ function renderCenterpiece() {
   const tSpan = tMax - tMin || 1;
   // One-shot "just changed" entrance for the docs from the most recent brain
   // commit — born (added) vs flash (modified). Only on a fresh project open.
-  const entrance = state._brainEntrance ? recentBrainChanges() : new Map();
+  // Flash on render: the open-entrance, else a live-update flash (what just changed).
+  const entrance = state._brainEntrance ? recentBrainChanges() : liveFlashMap();
   const ringMap = tt ? ttChanged : entrance; // in tt mode, rings track the selected commit
   const nodesSvg = g.nodes
     .map((n, i) => {
@@ -2014,6 +2100,7 @@ function brainDetailHtml(c) {
 // ---------- conversation rendering ----------
 
 async function selectSession(slug, id) {
+  stopLive(); // reading a session — pause streaming (it re-renders the dashboard)
   state.session = id;
   document.querySelectorAll('.sess').forEach((n) => n.classList.toggle('active', n.dataset.id === id));
   const s = await api(`/api/projects/${slug}/sessions/${id}`);

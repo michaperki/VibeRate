@@ -67,12 +67,14 @@ agent edits repo  →  vbrt watch (local)  →  upsert push  →  host  →  vie
 
 - [ ] `vbrt watch` CLI — watch session logs + brain docs + git, debounce, re-push.
 - [ ] Incremental rebundle on change (reuse `buildBundle`; ingest upsert exists).
-- [ ] Viewer transport — poll a project version stamp; refetch on change.
+- [x] Viewer transport — poll the project `updatedAt` stamp; refetch on change.
 - [ ] **Structural graph diff** — reconcile new vs current docGraph (add/remove/
       update node + edge elements) with fade-in / fade-out, reusing the in-place
-      updaters.
+      updaters. *(v1: positions are pinned + changed nodes flash; the smooth
+      in-place fade/fill reconcile is the next chunk — needs visual tuning.)*
 - [ ] Live **activity** — new prompts / commits animate into the timeline.
-- [ ] `● live` indicator + pause control.
+      *(v1: the timeline re-renders on refresh so new items appear; not yet animated.)*
+- [x] `● live` indicator + pause control (the `Go live` / `Live` toggle).
 - [ ] Verify by editing a brain doc while watching (node/ring updates live).
 
 ## Later
