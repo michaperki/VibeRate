@@ -12,6 +12,10 @@ const state = {
   docTab: null,
   docOpen: false, // doc reader overlay shown for the selected node
   docGraph: null,
+  docHistory: null, // { capturedAt, docHistory: { path: [{hash,t,status,content}] } }
+  timeTravel: false, // brain time-travel mode active
+  ttIndex: 0, // selected commit index within the brain-history timeline
+  ttFocus: null, // doc path whose diff is shown in the panel
   docLayout: 'web', // 'web' | 'tree' | 'recent'
   sourceFilter: 'all',
   colorById: {},
@@ -515,6 +519,21 @@ async function selectProject(slug) {
     }
   } catch {
     /* no agent docs captured for this project */
+  }
+
+  // Per-brain-doc version history (brain time-travel). Optional; absent on older
+  // captures or repos with no brain-doc changes.
+  state.docHistory = null;
+  state.timeTravel = false;
+  state.ttIndex = 0;
+  state.ttFocus = null;
+  if (state._ttPlay) { clearInterval(state._ttPlay); state._ttPlay = null; }
+  try {
+    const h = await api(`/api/projects/${slug}/dochistory`);
+    if (slug !== state.project) return;
+    if (h && h.docHistory) state.docHistory = h.docHistory;
+  } catch {
+    /* no history captured */
   }
 
   // Agent memory scoped to this project (Tier-2). Recall-only; index always loads.
@@ -1078,10 +1097,27 @@ function renderCenterpiece() {
   const files = state.docs.files;
   const active = files.find((f) => f.name === state.docTab) || files[0];
 
+  // Time-travel: render the graph "as of" the selected brain commit. Nodes born
+  // after that point are hidden; the docs changed *at* that commit get a ring.
+  const tt = state.timeTravel && state.docHistory;
+  const ttLine = tt ? ttTimeline() : [];
+  let ttAsof = Infinity;
+  const ttChanged = new Map();
+  if (tt && ttLine.length) {
+    state.ttIndex = Math.max(0, Math.min(ttLine.length - 1, state.ttIndex));
+    const cm = ttLine[state.ttIndex];
+    ttAsof = cm.t;
+    for (const d of brainDocsOf(cm, brainNodeSet())) {
+      const node = currentDocNode(docName(d));
+      if (node) ttChanged.set(node.name, docStatus(d) || 'modified');
+    }
+  }
+  const ttHidden = (name) => tt && docBirthT(name) > ttAsof;
+
   const edgesSvg = g.edges
     .map(
       (e) =>
-        `<line x1="${g.nodes[e.i].x.toFixed(1)}" y1="${g.nodes[e.i].y.toFixed(1)}" x2="${g.nodes[e.j].x.toFixed(1)}" y2="${g.nodes[e.j].y.toFixed(1)}" class="gedge"/>`,
+        `<line x1="${g.nodes[e.i].x.toFixed(1)}" y1="${g.nodes[e.i].y.toFixed(1)}" x2="${g.nodes[e.j].x.toFixed(1)}" y2="${g.nodes[e.j].y.toFixed(1)}" class="gedge${tt && (ttHidden(g.nodes[e.i].name) || ttHidden(g.nodes[e.j].name)) ? ' tt-hidden' : ''}"/>`,
     )
     .join('');
   const recent = state.docLayout === 'recent';
@@ -1095,6 +1131,7 @@ function renderCenterpiece() {
   // One-shot "just changed" entrance for the docs from the most recent brain
   // commit — born (added) vs flash (modified). Only on a fresh project open.
   const entrance = state._brainEntrance ? recentBrainChanges() : new Map();
+  const ringMap = tt ? ttChanged : entrance; // in tt mode, rings track the selected commit
   const nodesSvg = g.nodes
     .map((n, i) => {
       const on = state.docOpen && n.name === active.name ? ' on' : '';
@@ -1106,12 +1143,14 @@ function renderCenterpiece() {
       const pmax = (0.16 + f * 0.26).toFixed(2); // newer → brighter halo
       const delay = ((i * 0.37) % 2.3).toFixed(2); // stagger so they don't pulse in unison
       const haloStyle = `animation-duration:${dur}s;animation-delay:${delay}s;--pmax:${pmax}`;
-      const chg = entrance.get(n.name);
+      const chg = ringMap.get(n.name);
       const ringCls = chg === 'added' ? 'born' : 'changed';
       const ring = chg
         ? `<circle class="gring ${ringCls}" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="none" stroke="${n.color}"/>`
         : '';
-      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}" data-doc="${esc(n.name)}">
+      // Keep hidden nodes in the DOM (display:none) so node↔group indices stay
+      // aligned for the layout-morph tween.
+      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${ttHidden(n.name) ? ' tt-hidden' : ''}" data-doc="${esc(n.name)}">
         <circle class="ghalo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 7).toFixed(1)}" fill="${n.color}" style="${haloStyle}"/>
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         ${ring}
@@ -1147,6 +1186,7 @@ function renderCenterpiece() {
     <section class="dash-card centerpiece">
       <div class="dash-head"><span class="jargon" title="Your agent/brain docs (SOUL, AGENTS, CLAUDE, README, plans…) as a graph — edges mean one doc references another. Hover a node to peek inside.">🧠 AI architecture</span>
         <span class="lay-toggle">${toggle}</span>
+        ${state.docHistory ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
         <span class="brain-key" title="Each node breathes; brighter/faster = more recently edited."><span class="bk-dot"></span>glow = recency</span>
         <span class="dim-note">${files.length} docs · ${g.edges.length} links</span></div>
       <div class="brain-wrap">
@@ -1159,7 +1199,49 @@ function renderCenterpiece() {
           <div class="docview markdown">${renderMarkdown(active.content)}</div>
         </div>` : ''}
       </div>
+      ${tt ? renderTimeTravel(ttLine) : ''}
     </section>`;
+}
+
+// The time-travel control strip + diff panel below the graph.
+function renderTimeTravel(line) {
+  if (!line.length) return '<div class="tt-controls"><span class="dim-note">No brain-doc changes captured to travel through.</span></div>';
+  const i = Math.max(0, Math.min(line.length - 1, state.ttIndex));
+  const cm = line[i];
+  const ticks = line
+    .map((c, k) => `<span class="tt-tick${k === i ? ' on' : ''}" style="left:${line.length > 1 ? (k / (line.length - 1)) * 100 : 50}%" title="${esc(fmtShortDT(c.t))} · ${esc(c.subject || '')}"></span>`)
+    .join('');
+  const changes = brainDocsOf(cm, brainNodeSet());
+  const focusable = changes.map((d) => docName(d));
+  const focus = state.ttFocus && focusable.includes(state.ttFocus) ? state.ttFocus : focusable[0];
+  const chips = changes
+    .map((d) => {
+      const st = docStatus(d) || 'modified';
+      const nm = docName(d);
+      return `<span class="tt-chg${nm === focus ? ' on' : ''}"><span class="rp-st st-${st}">${st}</span><code data-tt-focus="${esc(nm)}">${esc(nm.split('/').pop())}</code></span>`;
+    })
+    .join('');
+  const rows = focus ? ttDiffRows(focus, cm.hash) : null;
+  const diff = rows
+    ? `<div class="tt-diff"><div class="tt-diff-name">${esc(focus)}</div><pre>${rows.map(([cls, l]) => `<span class="${cls}">${esc(l)}</span>`).join('\n')}</pre></div>`
+    : '<div class="dim-note">No diff for this doc at this commit.</div>';
+  return `
+    <div class="tt-controls">
+      <div class="tt-scrub">
+        <button class="tt-btn" data-tt="prev" title="Previous change">◀</button>
+        <button class="tt-btn" data-tt="play" title="Play">${state._ttPlay ? '⏸' : '▶'}</button>
+        <input class="tt-range" type="range" min="0" max="${line.length - 1}" step="1" value="${i}" data-tt="range" />
+        <button class="tt-btn" data-tt="next" title="Next change">▶</button>
+        <button class="tt-btn" data-tt="now" title="Jump to latest">Now</button>
+        <span class="tt-asof">as of <b>${esc(fmtShort(cm.t))}</b> · ${i + 1}/${line.length}</span>
+      </div>
+      <div class="tt-ticks">${ticks}</div>
+      <div class="tt-panel">
+        <div class="tt-commit">${esc(cm.subject || '(no subject)')} <span class="tt-hash">${esc(cm.hash)}</span></div>
+        <div class="tt-changes">${chips}</div>
+        ${diff}
+      </div>
+    </div>`;
 }
 
 function rerenderCenterpiece() {
@@ -1250,6 +1332,45 @@ function wireDocTabs() {
     b.onclick = () => setLayout(b.dataset.layout);
   });
   wireBrainPeek(root);
+  wireTimeTravel(root);
+}
+
+// Wire the time-travel toggle, scrubber, play, and per-doc diff focus.
+function wireTimeTravel(root) {
+  const len = (state.timeTravel && state.docHistory) ? ttTimeline().length : 0;
+  const go = (idx) => {
+    state.ttIndex = Math.max(0, Math.min(len - 1, idx));
+    state.ttFocus = null; // re-focus the first changed doc at the new commit
+    rerenderCenterpiece();
+  };
+  const stopPlay = () => { if (state._ttPlay) { clearInterval(state._ttPlay); state._ttPlay = null; } };
+  root.querySelectorAll('[data-tt]').forEach((b) => {
+    const act = b.dataset.tt;
+    if (act === 'toggle') b.onclick = () => {
+      stopPlay();
+      state.timeTravel = !state.timeTravel;
+      if (state.timeTravel) { state.ttIndex = Math.max(0, ttTimeline().length - 1); state.ttFocus = null; } // start at "now"
+      rerenderCenterpiece();
+    };
+    else if (act === 'prev') b.onclick = () => { stopPlay(); go(state.ttIndex - 1); };
+    else if (act === 'next') b.onclick = () => { stopPlay(); go(state.ttIndex + 1); };
+    else if (act === 'now') b.onclick = () => { stopPlay(); go(len - 1); };
+    else if (act === 'range') b.oninput = () => { stopPlay(); go(Number(b.value)); };
+    else if (act === 'play') b.onclick = () => {
+      if (state._ttPlay) { stopPlay(); rerenderCenterpiece(); return; }
+      if (state.ttIndex >= len - 1) state.ttIndex = 0;
+      state._ttPlay = setInterval(() => {
+        if (state.ttIndex >= len - 1) { stopPlay(); rerenderCenterpiece(); return; }
+        state.ttIndex += 1;
+        state.ttFocus = null;
+        rerenderCenterpiece();
+      }, 1400);
+      rerenderCenterpiece();
+    };
+  });
+  root.querySelectorAll('[data-tt-focus]').forEach((b) => {
+    b.onclick = () => { state.ttFocus = b.dataset.ttFocus; rerenderCenterpiece(); };
+  });
 }
 
 // Switch layout mode and tween nodes/edges from their current spots to the new
@@ -1417,6 +1538,71 @@ function recentBrainChanges() {
     if (m.size) return m;
   }
   return new Map();
+}
+
+// ---------- brain time travel ----------
+
+// Version list for a doc path (exact, else by basename), newest-first.
+function histFor(path) {
+  const h = state.docHistory;
+  if (!h) return null;
+  if (h[path]) return h[path];
+  const base = path.split('/').pop();
+  const key = Object.keys(h).find((k) => k.split('/').pop() === base);
+  return key ? h[key] : null;
+}
+// When a doc first appears in history (its birth). -Infinity = predates the
+// captured history, so it's treated as always-present.
+function docBirthT(name) {
+  const v = histFor(name);
+  if (!v || !v.length) return -Infinity;
+  return v[v.length - 1].t;
+}
+// The brain-history commits, oldest→newest — the scrubber's stops.
+function ttTimeline() {
+  if (!state.git || !state.git.ok) return [];
+  const brainSet = brainNodeSet();
+  return (state.git.commits || []).filter((c) => brainDocsOf(c, brainSet).length).slice().reverse();
+}
+
+// Compact LCS line diff (capped so a huge doc can't blow up the DP).
+function lineDiff(oldText, newText) {
+  const CAP = 800;
+  let a = String(oldText || '').split('\n');
+  let b = String(newText || '').split('\n');
+  const truncated = a.length > CAP || b.length > CAP;
+  a = a.slice(0, CAP);
+  b = b.slice(0, CAP);
+  const n = a.length;
+  const m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const rows = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { rows.push(['ctx', a[i]]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { rows.push(['del', a[i]]); i++; }
+    else { rows.push(['add', b[j]]); j++; }
+  }
+  while (i < n) rows.push(['del', a[i++]]);
+  while (j < m) rows.push(['add', b[j++]]);
+  if (truncated) rows.push(['ctx', '… (diff truncated)']);
+  return rows;
+}
+// Diff rows for a doc at a given commit (vs its previous version). Handles
+// added (all-add), deleted (all-del from the prior content), and modified.
+function ttDiffRows(name, hash) {
+  const v = histFor(name);
+  if (!v) return null;
+  const idx = v.findIndex((x) => x.hash === hash);
+  if (idx === -1) return null;
+  const cur = v[idx];
+  const prev = v[idx + 1]; // older
+  if (cur.status === 'deleted') return lineDiff(prev ? prev.content : '', '');
+  return lineDiff(prev ? prev.content : '', cur.content || '');
 }
 const STATUS_GLYPH = { added: '＋', modified: '∆', deleted: '−', renamed: '→', copied: '⎘' };
 

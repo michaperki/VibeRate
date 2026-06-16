@@ -514,6 +514,34 @@ pre.code {
 @keyframes gringborn { 0% { transform: scale(1); opacity: 0.9; } 100% { transform: scale(2.8); opacity: 0; } }
 @keyframes gringchanged { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(1.9); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .gring { display: none; } }
+/* time travel: hidden (not-yet-born) nodes/edges as of the scrubbed moment */
+.gnode.tt-hidden, .gedge.tt-hidden { display: none; }
+.tt-toggle.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+/* time-travel control strip + diff panel under the graph */
+.tt-controls { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 11px; }
+.tt-scrub { display: flex; align-items: center; gap: 8px; }
+.tt-btn { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; cursor: pointer; }
+.tt-btn:hover { color: var(--text); }
+.tt-range { flex: 1; accent-color: var(--accent); }
+.tt-asof { font-size: 11.5px; color: var(--text); white-space: nowrap; }
+.tt-asof b { color: var(--accent); }
+.tt-ticks { position: relative; height: 12px; margin: 5px 24px 0; }
+.tt-tick { position: absolute; top: 0; width: 7px; height: 7px; margin-left: -3.5px; background: #ffd166; transform: rotate(45deg); border-radius: 1px; opacity: 0.55; }
+.tt-tick.on { opacity: 1; box-shadow: 0 0 5px rgba(255, 209, 102, 0.7); }
+.tt-panel { margin-top: 10px; }
+.tt-commit { font-size: 12.5px; color: #cdd2de; margin-bottom: 6px; }
+.tt-commit .tt-hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: var(--dim, #6b7280); }
+.tt-changes { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 9px; }
+.tt-chg { display: inline-flex; align-items: center; gap: 5px; }
+.tt-chg code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: #c7ccd8; cursor: pointer; }
+.tt-chg.on code { color: var(--accent); }
+.tt-chg code:hover { color: var(--accent); }
+.tt-diff-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+.tt-diff pre { margin: 0; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; background: var(--panel2, #12151c); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; max-height: 280px; overflow: auto; }
+.tt-diff pre .add { color: #3fb950; }
+.tt-diff pre .del { color: #f85149; }
+.tt-diff pre .ctx { color: #7d889c; }
 /* "glow = recency" legend dot — breathes between dim and bright (never vanishes) */
 /* opaque power-user terms get a dotted underline + help cursor, explained on hover */
 .jargon { cursor: help; border-bottom: 1px dotted currentColor; }
