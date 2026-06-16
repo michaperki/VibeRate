@@ -133,9 +133,16 @@ async function cmdAdd(args = []) {
   const docs = extractDocsMulti(repoPaths);
 
   // Per-brain-doc version history for time-travel. "Brain" = the captured docs'
-  // basenames ∪ the known agent-doc names, so archived agent docs are tracked too.
+  // basenames ∪ known agent-doc names ∪ any *deleted* plan/brain-ish doc (so an
+  // archived doc that's no longer a current node still gets a tracked history →
+  // shows up as a ghost in the graveyard).
   const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
+  const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|_next_pass/i;
   const brainBasenames = new Set([...docs.map((d) => d.name.split('/').pop().toLowerCase()), ...AGENT_DOCS]);
+  for (const c of commits) for (const d of c.docs || []) {
+    const base = d.name.split('/').pop();
+    if (d.status === 'deleted' && BRAINISH.test(base)) brainBasenames.add(base.toLowerCase());
+  }
   const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames) : null;
 
   // Capture this repo's cold-start memory (its own notes + adopted project notes),
