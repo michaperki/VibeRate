@@ -97,21 +97,39 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   URL pattern **landed without the seed forcing them**. The bottleneck is no longer
   agent confusion — it's **VibeRate state/status clarity**: the agent should always know
   *is watch live, where is the project URL, what's queued, is a manual push needed*.
-  Remaining gaps → next priorities:
-  - **`vbrt status`** ☐ — one command that answers the above: watch live?, project URL,
-    evidence captured/uploaded, outbox count, "manual push needed?". The single
-    highest-leverage fix — removes most remaining waste.
-  - **Enrich `watch.lock`** ☐ — currently just `{pid,cwd,ts}`; the agent read it, found
-    no share URL, and searched `~/.vbrt` then `/tmp`. Add: project **URL**, last
-    successful upload time, queued count. Feeds `status` and `shot`.
-  - **`shot` under live watch prints the project URL** ☐ — the agent only ran manual
-    `push` to *get a URL* (then hit 429). If watch is live, `shot` should print the URL
-    from `watch.lock` so there's no reason to push.
-  - **"No commit yet" guidance** ☐ — `vbrt shot` before the first commit leaked
-    `fatal: Needed a single revision` and bound evidence to no checkpoint. Detect it,
-    suppress the git stderr, and recommend commit-then-capture.
-  - **`.gitignore` default** ☐ — ignore the whole `.vbrt/` dir (not just `watch.lock`);
-    have `shot` ensure it on first capture so runtime evidence never lands in git.
+  Status-clarity gaps → all shipped:
+  - **`vbrt status`** ✅ — one local-only glance: watch live?, project URL, evidence
+    captured, outbox count, "manual push needed?".
+  - **Enrich `watch.lock`** ✅ — now carries project **URL** + last-upload + queued; the
+    watcher writes the share URL after each stream. No more searching `~/.vbrt` / `/tmp`.
+  - **`shot` under live watch prints the project URL** ✅ — from the lock, so there's no
+    reason to push just for a link.
+  - **"No commit yet" guidance** ✅ — `gitHead` suppresses the leaked `fatal:` stderr;
+    `shot` nudges commit-then-capture.
+  - **`.gitignore` default** ✅ — `shot` ensures the whole `.vbrt/` dir is ignored on
+    first capture.
+- **Iteration-4 (Game of Life, status-clarity build)** — first run where it feels like a
+  real product loop: *build → test → capture → get share link → push public → done.*
+  4m16s (fastest yet), overhead ~8–15%. The **reward moment worked** — `shot` surfaced
+  `Share/view: …/p/…` so the agent never hunted for the URL; **no 429**; the no-commit
+  nudge worked (committed, then recaptured). Remaining friction is now **polish-level
+  workflow defaults**, not tool friction → next priorities:
+  - **Lean docs, harder default** ☐ — it still made `ROADMAP.md` + `PLAN_life.md` for a
+    toy (the ROADMAP just pointed at the PLAN — pure ceremony). Tighten SKILL.md: small
+    experiments are **`DEVLOG.md` + `README.md` only**; no `ROADMAP.md`/`PLAN_*` unless
+    multi-session or asked.
+  - **Public/private clarity** ☐ — it pushed (private), realized, then re-pushed
+    `--public`. When a link already exists, say its visibility and the exact next command
+    (e.g. a `vbrt publish --public` that flips visibility without re-sending the bundle).
+  - **Require a clip for animated apps** ☐ — the final capture was a still
+    (`✓ Captured artifact`), not a clip, on a motion-first app. SKILL.md: for animated
+    work, capture at least one `--clip` after the first commit.
+  - **Commit-before-first-capture, stated** ☐ — handled reactively now; make it the
+    explicit default in SKILL.md (commit the first working version before capturing,
+    unless the user wants a pre/post comparison).
+  - **`vbrt status` as the natural finish** ☐ — it succeeded *without* `status`/`doctor`,
+    inferring state from push output. Nudge agents to **end with `vbrt status`** so the
+    tool, not the output log, is the source of truth.
   - Later, if needed: `doctor --fix`, SSE/WebSocket streaming, coalescing watch deltas.
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
 - **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)

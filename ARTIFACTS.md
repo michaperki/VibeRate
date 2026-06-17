@@ -112,6 +112,12 @@ side. (Lone shots stand alone.)
       live, where's the project URL, what's queued, is a push needed) + the still-open
       **429** blocking the share-URL "reward moment" — both tracked in `ROADMAP.md`
       Phase 3 (`vbrt status`, enriched `watch.lock`, `shot` prints URL under watch).
+- [x] **Re-run (iteration 4, status-clarity build)** — the artifact + publish loop is
+      effectively closed: 4m16s, capture worked, **share URL surfaced during capture**
+      (no hunting), **no 429**, final public link shipped. Overhead ~8–15%. Remaining
+      issues are polish-level **workflow defaults** (lean docs harder, public/private
+      clarity, require a clip on animated apps, commit-before-capture, end with
+      `vbrt status`) — tracked in `ROADMAP.md` Phase 3, not artifact-capture problems.
 - [ ] *Then:* viewport set / multi-shot; the other artifact families (diff,
       test-status, provenance) — mostly auto-derived, tracked in §C.
 
