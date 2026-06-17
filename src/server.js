@@ -19,6 +19,15 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 // ownership. Local `vbrt serve` leaves this off and behaves single-user: `/` is
 // your workspace home and the list shows every project on the machine.
 const HOSTED = process.env.VBRT_HOSTED === '1';
+const JSON_LIMIT = process.env.VBRT_JSON_LIMIT || (HOSTED ? '25mb' : '50mb');
+const MAX_SESSIONS = Number(process.env.VBRT_MAX_SESSIONS || 300);
+const MAX_MESSAGES = Number(process.env.VBRT_MAX_MESSAGES || 20000);
+const MAX_EVIDENCE = Number(process.env.VBRT_MAX_EVIDENCE || 100);
+const MAX_IMAGE_BYTES = Number(process.env.VBRT_MAX_IMAGE_BYTES || 1536 * 1024);
+const MAX_CLIP_BYTES = Number(process.env.VBRT_MAX_CLIP_BYTES || 6 * 1024 * 1024);
+const RATE_WINDOW_MS = Number(process.env.VBRT_RATE_WINDOW_MS || 10 * 60 * 1000);
+const RATE_MAX = Number(process.env.VBRT_RATE_MAX || 20);
+const ingestHits = new Map();
 
 // The owner hashes a request can act as: a signed-in account's linked tokens, or
 // a single machine token via Bearer. null = unauthenticated (hosted), or local
@@ -42,12 +51,52 @@ function canRead(project, req) {
   return !!owners && owners.includes(project.owner);
 }
 
+function rateLimitIngest(req, res, next) {
+  if (!HOSTED) return next();
+  const key = req.ip || req.get('x-forwarded-for') || 'unknown';
+  const now = Date.now();
+  const hits = (ingestHits.get(key) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (hits.length >= RATE_MAX) return res.status(429).json({ error: 'too many uploads; try again later' });
+  hits.push(now);
+  ingestHits.set(key, hits);
+  next();
+}
+
+function imageBytes(dataUrl) {
+  const s = String(dataUrl || '');
+  const b64 = s.includes(',') ? s.split(',').pop() : s;
+  return Math.floor((b64.length * 3) / 4);
+}
+
+function validateBundle(bundle) {
+  if (!bundle || typeof bundle !== 'object') return 'invalid bundle';
+  if (!bundle.project || typeof bundle.project !== 'object') return 'missing project';
+  if (typeof bundle.project.cwd !== 'string' || !bundle.project.cwd) return 'missing project cwd';
+  if (!Array.isArray(bundle.sessions)) return 'missing sessions';
+  if (bundle.sessions.length > MAX_SESSIONS) return `too many sessions; max ${MAX_SESSIONS}`;
+  let messages = 0;
+  for (const s of bundle.sessions) {
+    if (!s || typeof s !== 'object' || !Array.isArray(s.messages)) return 'invalid session payload';
+    messages += s.messages.length;
+    if (messages > MAX_MESSAGES) return `too many messages; max ${MAX_MESSAGES}`;
+  }
+  const evidence = Array.isArray(bundle.evidence) ? bundle.evidence : [];
+  if (evidence.length > MAX_EVIDENCE) return `too much evidence; max ${MAX_EVIDENCE}`;
+  for (const e of evidence) {
+    if (!e || !e.image) continue;
+    const isClip = e.media === 'video' || /^data:(video\/|image\/gif)/i.test(e.image);
+    const cap = isClip ? MAX_CLIP_BYTES : MAX_IMAGE_BYTES;
+    if (imageBytes(e.image) > cap) return `evidence ${isClip ? 'clip' : 'image'} too large; max ${cap} bytes`;
+  }
+  return null;
+}
+
 export function startServer(port = 4317) {
   const app = express();
   // Behind Fly's (or any) TLS-terminating proxy, honor X-Forwarded-Proto so
   // req.protocol is 'https' — otherwise minted share links come out as http://.
   app.set('trust proxy', true);
-  app.use(express.json({ limit: '50mb' })); // bundles carry full conversations
+  app.use(express.json({ limit: JSON_LIMIT })); // bundles carry full conversations
 
   if (HOSTED) mountAuth(app); // /auth/* sign-in, /api/me, /api/auth/providers
 
@@ -104,11 +153,13 @@ export function startServer(port = 4317) {
   // return the shareable URL. Gist-style ownership: a bundle pushed with a bearer
   // token is owned by it; without one (hosted), we mint a token and return it so
   // the client can save it and see all its projects later.
-  app.post('/api/projects', (req, res) => {
+  app.post('/api/projects', rateLimitIngest, (req, res) => {
     const bundle = req.body;
     if (!bundle || typeof bundle !== 'object' || !bundle.project || !Array.isArray(bundle.sessions)) {
       return res.status(400).json({ error: 'invalid bundle' });
     }
+    const invalid = HOSTED ? validateBundle(bundle) : null;
+    if (invalid) return res.status(413).json({ error: invalid });
     if (bundle.schema !== BUNDLE_SCHEMA) {
       return res.status(409).json({ error: `unsupported schema ${bundle.schema}; expected ${BUNDLE_SCHEMA}` });
     }
@@ -212,7 +263,33 @@ export function startServer(port = 4317) {
     if (!guardRead(req, res)) return;
     const session = getSession(req.params.slug, req.params.id);
     if (!session) return res.status(404).json({ error: 'not found' });
-    res.json(extractPromptUnits(session, req.params.id, req.params.slug, { evidence: getEvidence(req.params.slug) }));
+    res.json(extractPromptUnits(session, req.params.id, req.params.slug, { evidence: getEvidence(req.params.slug), git: getGit(req.params.slug) }));
+  });
+
+  // Project-level prompt-unit rail: all prompts across sessions, newest first.
+  app.get('/api/projects/:slug/prompts', (req, res) => {
+    const project = guardRead(req, res);
+    if (!project) return;
+    const evidence = getEvidence(req.params.slug);
+    const git = getGit(req.params.slug);
+    const units = [];
+    for (const summary of project.sessions || []) {
+      const session = getSession(req.params.slug, summary.id);
+      if (!session) continue;
+      for (const unit of extractPromptUnits(session, summary.id, req.params.slug, { evidence, git })) {
+        if (unit.isNoise) continue;
+        units.push({
+          ...unit,
+          source: summary.source,
+          sessionId: summary.id,
+          sessionTitle: summary.title,
+          sessionStartedAt: summary.startedAt,
+          sessionEndedAt: summary.endedAt,
+        });
+      }
+    }
+    units.sort((a, b) => Date.parse(b.ts || b.sessionEndedAt || 0) - Date.parse(a.ts || a.sessionEndedAt || 0));
+    res.json(units);
   });
 
   // Discover feed: substantive prompt cards across published projects. Public —
@@ -230,7 +307,7 @@ export function startServer(port = 4317) {
     if (!project || !canRead(project, req)) return res.status(404).json({ error: 'not found' });
     const session = getSession(slug, sessionId);
     if (!session) return res.status(404).json({ error: 'not found' });
-    const unit = extractPromptUnits(session, sessionId, slug, { evidence: getEvidence(slug) }).find((u) => u.index === index);
+    const unit = extractPromptUnits(session, sessionId, slug, { evidence: getEvidence(slug), git: getGit(slug) }).find((u) => u.index === index);
     if (!unit) return res.status(404).json({ error: 'not found' });
     const summary = (project.sessions || []).find((s) => s.id === sessionId) || {};
     const user = currentUser(req);

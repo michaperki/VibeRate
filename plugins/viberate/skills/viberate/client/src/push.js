@@ -71,7 +71,7 @@ function saveToken(apiUrl, token) {
   }
 }
 
-export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadToken(resolveApi()), isPublic = false } = {}) {
+export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadToken(apiUrl), isPublic = false } = {}) {
   if (!apiUrl) {
     throw new Error(
       'No hosted endpoint configured. Set VBRT_API_URL (e.g. https://vbrt.fly.dev) to push.',

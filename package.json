@@ -1,7 +1,7 @@
 {
   "name": "viberate",
   "version": "0.1.0",
-  "description": "Browse old Codex & Claude Code coding sessions as projects",
+  "description": "Publish and review terminal-agent work as shareable project dashboards",
   "type": "module",
   "bin": {
     "vbrt": "bin/vbrt.js"

@@ -36,6 +36,11 @@ const state = {
   turnAnchors: [],
   currentTurn: 0,
   token: null, // hosted dashboard: owner token, sent as Bearer on API calls
+  railMode: 'prompts',
+  promptUnits: [],
+  _liveSeenPrompts: null,
+  _liveFreshPrompts: null,
+  _pendingTurn: null,
 };
 
 // ---------- helpers ----------
@@ -284,10 +289,10 @@ function endState(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.kind === 'text' && m.role === 'user') {
-      return { cls: 'warn', text: '⚠ Ended on your message — the agent never replied (likely interrupted / Ctrl-C)' };
+      return { cls: 'pending', text: 'Agent response pending' };
     }
     if (m.kind === 'tool_use' || m.kind === 'tool_result') {
-      return { cls: 'warn', text: '⚠ Ended mid-action — cut off during a tool call (likely interrupted)' };
+      return { cls: 'paused', text: 'Stopped while agent work was in progress' };
     }
     if (m.kind === 'text' && m.role === 'assistant') {
       return { cls: 'ok', text: '■ End of conversation' };
@@ -499,6 +504,8 @@ async function selectProject(slug) {
   );
   state.projectData = await api(`/api/projects/${slug}`);
   state._liveStamp = state.projectData.updatedAt || null;
+  state.promptUnits = [];
+  state._liveSeenPrompts = null;
 
   // Fetch per-session user-message activity once; shared by list + timeline.
   // Degrades gracefully if the running server lacks the endpoint.
@@ -509,6 +516,14 @@ async function selectProject(slug) {
     state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) };
   } catch {
     /* old server: fall back to manifest counts */
+  }
+
+  try {
+    const units = await api(`/api/projects/${slug}/prompts`);
+    if (slug !== state.project) return;
+    state.promptUnits = units;
+  } catch {
+    state.promptUnits = [];
   }
 
   state.git = { ok: false, commits: [] };
@@ -601,6 +616,7 @@ function startLive() {
   const sessions = timelineSessions();
   state._liveSeenConvos = new Map(sessions.map((s) => [s.id, s.userCount]));
   state._liveSeenCommits = new Set(windowCommits(sessions).map((c) => c.hash));
+  state._liveSeenPrompts = new Set((state.promptUnits || []).map((u) => u.cardId || u.id));
   state._livePoll = setInterval(pollLive, 4000);
 }
 
@@ -623,6 +639,19 @@ function computeFreshActivity(sessions) {
   state._liveSeenCommits = seenK;
   state._liveFreshConvos = freshConvos;
   state._liveFreshCommits = freshCommits;
+}
+
+function computeFreshPrompts(units) {
+  const seen = state._liveSeenPrompts || new Set();
+  const fresh = new Set();
+  for (const u of units || []) {
+    const id = u.cardId || u.id;
+    if (!id) continue;
+    if (!seen.has(id)) fresh.add(id);
+    seen.add(id);
+  }
+  state._liveSeenPrompts = seen;
+  state._liveFreshPrompts = fresh;
 }
 function stopLive() {
   state.live = false;
@@ -664,6 +693,7 @@ async function refreshLive() {
   try {
     state.projectData = await api(`/api/projects/${slug}`);
     try { const act = await api(`/api/projects/${slug}/activity`); if (slug === state.project) state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) }; } catch { /* keep old */ }
+    try { const units = await api(`/api/projects/${slug}/prompts`); if (slug === state.project) { computeFreshPrompts(units); state.promptUnits = units; } } catch { /* keep old */ }
     try { const gg = await api(`/api/projects/${slug}/git`); if (slug === state.project && gg && Array.isArray(gg.commits)) state.git = { ok: true, commits: gg.commits }; } catch { /* keep old */ }
     try { const h = await api(`/api/projects/${slug}/dochistory`); if (slug === state.project) state.docHistory = (h && h.docHistory) || null; } catch { /* keep old */ }
     let docs = state.docs;
@@ -789,6 +819,19 @@ function filteredSessions() {
   return all;
 }
 
+function filteredPromptUnits() {
+  let all = state.promptUnits || [];
+  if (state.sourceFilter !== 'all') all = all.filter((u) => u.source === state.sourceFilter);
+  if (state.brush) {
+    const [a, b] = state.brush;
+    all = all.filter((u) => {
+      const t = Date.parse(u.ts || u.sessionStartedAt || '');
+      return !Number.isNaN(t) && t >= a && t <= b;
+    });
+  }
+  return all;
+}
+
 function renderSessionList() {
   const p = state.projectData;
   const counts = p.sessions.reduce((a, s) => ((a[s.source] = (a[s.source] || 0) + 1), a), {});
@@ -842,9 +885,35 @@ function renderSessionList() {
   const brushBanner = state.brush
     ? `<div class="list-brush">▭ filtered to ${fmtShort(state.brush[0])} – ${fmtShort(state.brush[1])} <button class="linkbtn" data-list-brush-clear>clear</button></div>`
     : '';
+  const railToggle = `
+    <div class="rail-toggle" role="tablist" aria-label="Project rail">
+      <button class="${state.railMode === 'prompts' ? 'on' : ''}" data-rail="prompts">Prompts</button>
+      <button class="${state.railMode === 'sessions' ? 'on' : ''}" data-rail="sessions">Sessions</button>
+    </div>`;
+
+  const promptRows = () => {
+    const fresh = state._liveFreshPrompts || new Set();
+    const units = filteredPromptUnits().filter((u) => !u.isNoise);
+    const row = (u) => {
+      const color = (state.colorById || {})[u.sessionId] || 'var(--muted)';
+      const id = u.cardId || u.id;
+      const active = state.session === u.sessionId && state.currentTurn === u.index ? ' active' : '';
+      return `<div class="prompt-row${fresh.has(id) ? ' fresh' : ''}${active}" data-session="${esc(u.sessionId)}" data-turn="${u.index}">
+        <div class="row">
+          <span class="sw" style="background:${color}"></span>
+          <span class="badge ${esc(u.source)}">${esc(u.source)}</span>
+          <span class="meta">${fmtDate(u.ts || u.sessionStartedAt)}</span>
+        </div>
+        <div class="sess-preview">${esc(u.prompt || '')}</div>
+        ${outcomeChips(u, { compact: true })}
+      </div>`;
+    };
+    return units.length ? units.map(row).join('') : '<div class="empty">No prompts in this range.</div>';
+  };
 
   el('#sessions').innerHTML = `
-    <div class="pane-title">${esc(p.name || p.slug)} · ${plural(p.sessions.length, 'session')}</div>
+    <div class="pane-title">${esc(p.name || p.slug)} · ${plural((state.promptUnits || []).length, 'prompt')} · ${plural(p.sessions.length, 'session')}</div>
+    ${railToggle}
     <div class="filters">
       ${chip('all', `all ${p.sessions.length}`)}
       ${counts.claude ? chip('claude', `claude ${counts.claude}`) : ''}
@@ -852,8 +921,7 @@ function renderSessionList() {
     </div>
     <div class="list-legend"><span class="sw legend-rainbow"></span> a colour per session · <span class="badge claude">claude</span> / <span class="badge codex">codex</span> = agent</div>
     ${brushBanner}
-    ${list || (empties.length ? '' : '<div class="empty">No sessions in this range.</div>')}
-    ${emptyBlock}`;
+    ${state.railMode === 'prompts' ? promptRows() : `${list || (empties.length ? '' : '<div class="empty">No sessions in this range.</div>')}${emptyBlock}`}`;
 
   const bc = el('#sessions').querySelector('[data-list-brush-clear]');
   if (bc) bc.addEventListener('click', () => {
@@ -868,8 +936,18 @@ function renderSessionList() {
       renderSessionList();
     }));
   el('#sessions')
+    .querySelectorAll('[data-rail]')
+    .forEach((b) => b.addEventListener('click', () => {
+      state.railMode = b.dataset.rail;
+      renderSessionList();
+    }));
+  el('#sessions')
     .querySelectorAll('.sess')
     .forEach((node) => node.addEventListener('click', () => selectSession(state.project, node.dataset.id)));
+  el('#sessions')
+    .querySelectorAll('.prompt-row')
+    .forEach((node) => node.addEventListener('click', () => selectSession(state.project, node.dataset.session, Number(node.dataset.turn))));
+  state._liveFreshPrompts = null;
 }
 
 // Scroll the left session list to the convo picked from the timeline ribbon.
@@ -2228,10 +2306,12 @@ function brainDetailHtml(c) {
 
 // ---------- conversation rendering ----------
 
-async function selectSession(slug, id) {
+async function selectSession(slug, id, turnIndex = null) {
   // Keep streaming on (if it was) so the reader can *follow* a live conversation.
   state.session = id;
+  state._pendingTurn = Number.isFinite(turnIndex) ? turnIndex : null;
   document.querySelectorAll('.sess').forEach((n) => n.classList.toggle('active', n.dataset.id === id));
+  document.querySelectorAll('.prompt-row').forEach((n) => n.classList.toggle('active', n.dataset.session === id && Number(n.dataset.turn) === state._pendingTurn));
   const s = await api(`/api/projects/${slug}/sessions/${id}`);
   if (state.session !== id) return; // a newer click won the race
   // Prompt units carry before/prompt/after + the context-fullness gauge — the
@@ -2256,12 +2336,14 @@ function renderSessionReader() {
   const stats = statsFor(s.messages);
   // Nav follows the prompt cards: one stop per unit, anchored by card ordinal.
   state.turnAnchors = units.map((_, i) => `turn-${i}`);
-  state.currentTurn = 0;
+  const pendingTurn = state._pendingTurn;
+  state.currentTurn = Number.isFinite(pendingTurn) && units.length ? Math.max(0, Math.min(units.length - 1, pendingTurn)) : 0;
   const end = endState(s.messages);
   const dur = fmtDuration(new Date(s.endedAt) - new Date(s.startedAt));
   const filesList = [...stats.files].slice(0, 40);
 
-  const endMarker = `<div class="end-marker ${end.cls}">${end.text}</div>`;
+  const endIcon = end.cls === 'pending' ? '<span class="work-dot" aria-hidden="true"></span>' : '';
+  const endMarker = `<div class="end-marker ${end.cls}">${endIcon}${end.text}</div>`;
   const body = units.length
     ? units.map(renderReaderCard).join('') + endMarker
     : '<div class="empty">No prompts in this session.</div>';
@@ -2296,6 +2378,13 @@ function renderSessionReader() {
 
   el('#conversation').scrollTop = 0;
   wireConversation(units.length);
+  if (Number.isFinite(pendingTurn)) {
+    requestAnimationFrame(() => {
+      const node = document.getElementById(`turn-${state.currentTurn}`);
+      if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      state._pendingTurn = null;
+    });
+  }
   const lt = el('#conversation [data-live-toggle]');
   if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderSessionReader(); };
   updateLiveReadout();
@@ -2346,6 +2435,22 @@ function contextGauge(ctx) {
   </span>`;
 }
 
+function outcomeChips(u, { compact = false } = {}) {
+  const o = (u && u.outcomes) || {};
+  const chips = [];
+  if (o.filesChanged) chips.push(['files', `${o.filesChanged} ${plw(o.filesChanged, 'file')}`, 'files changed by edit tools']);
+  if (o.commitsProduced) chips.push(['commit', `${o.commitsProduced} ${plw(o.commitsProduced, 'commit')}`, 'commits produced near this prompt']);
+  const brain = Math.max(o.brainDocsChanged || 0, o.brainCommits || 0);
+  if (brain) chips.push(['brain', `🧠 ${brain}`, 'brain docs referenced or changed']);
+  if (o.commandsRun) chips.push(['cmd', `${o.commandsRun} ${plw(o.commandsRun, 'cmd')}`, 'commands the agent ran']);
+  if (o.screenshots) chips.push(['shot', `${o.screenshots} ${plw(o.screenshots, 'shot')}`, 'screenshot evidence attached']);
+  if (o.contextPct != null) chips.push([o.contextPct >= 75 ? 'hot' : 'ctx', `${o.contextPct}% ctx`, 'context window fullness when the prompt was sent']);
+  const max = compact ? 4 : chips.length;
+  return chips.length
+    ? `<div class="outcome-chips${compact ? ' compact' : ''}">${chips.slice(0, max).map(([cls, label, title]) => `<span class="out-chip ${cls}" title="${esc(title)}">${esc(label)}</span>`).join('')}${chips.length > max ? `<span class="out-chip more">+${chips.length - max}</span>` : ''}</div>`
+    : '';
+}
+
 // One prompt unit as an internal reader card. Acks ("go ahead") collapse to a slim
 // connector so the chain stays legible without giving filler a full card.
 function renderReaderCard(u, i) {
@@ -2377,6 +2482,7 @@ function renderReaderCard(u, i) {
     <div class="pc-head">${docs}${contextGauge(u.context)}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(u.prompt)}</div>
+    ${outcomeChips(u)}
     ${renderArtifacts(u.evidence)}
     ${played}
     ${link ? `<div class="pc-bar">${link}</div>` : ''}
@@ -2387,10 +2493,14 @@ function renderReaderCard(u, i) {
 // captured. before/after pairs sit side by side; lone shots stand alone.
 function renderArtifacts(evs) {
   if (!evs || !evs.length) return '';
+  const isVideo = (e) => e.media === 'video' || /^data:video\//i.test(e.image || '');
   const fig = (e) => {
     const cap = [e.label, e.note, e.viewport].filter(Boolean).join(' · ');
+    const media = isVideo(e)
+      ? `<video class="art-img" src="${e.image}" autoplay loop muted playsinline data-lightbox="${e.image}" data-media="video" data-cap="${esc(cap)}"></video>`
+      : `<img loading="lazy" class="art-img" src="${e.image}" data-lightbox="${e.image}" data-cap="${esc(cap)}" alt="${esc(e.note || e.label || 'screenshot')}">`;
     return `<figure class="art-shot art-${esc(e.label || 'shot')}">
-      <img loading="lazy" class="art-img" src="${e.image}" data-lightbox="${e.image}" data-cap="${esc(cap)}" alt="${esc(e.note || e.label || 'screenshot')}">
+      ${media}
       <figcaption>${e.label ? `<span class="art-tag">${esc(e.label)}</span>` : ''}${e.note ? esc(e.note) : ''}${e.viewport ? `<span class="art-vp">${esc(e.viewport)}</span>` : ''}</figcaption>
     </figure>`;
   };
@@ -2398,20 +2508,28 @@ function renderArtifacts(evs) {
 }
 
 // ---------- media lightbox ----------
-// Click any evidence image to view it in-page (instead of a raw new tab). Built to
-// extend to video/gif later: swap the <img> for a <video> by data-type.
-function openLightbox(src, caption) {
+// Click any evidence artifact to view it in-page (instead of a raw new tab).
+// Images (incl. animated gif) show in <img>; webm clips show in a looping <video>.
+function openLightbox(src, caption, media = 'image') {
   let box = el('#lightbox');
   if (!box) {
     box = document.createElement('div');
     box.id = 'lightbox';
-    box.innerHTML = `<button class="lb-close" title="Close (Esc)" aria-label="Close">✕</button><figure class="lb-fig"><img alt=""><figcaption></figcaption></figure>`;
+    box.innerHTML = `<button class="lb-close" title="Close (Esc)" aria-label="Close">✕</button><figure class="lb-fig"><img alt=""><video style="display:none" controls autoplay loop muted playsinline></video><figcaption></figcaption></figure>`;
     box.addEventListener('click', (ev) => {
       if (ev.target === box || ev.target.classList.contains('lb-close')) closeLightbox();
     });
     document.body.appendChild(box);
   }
-  box.querySelector('img').src = src;
+  const img = box.querySelector('img');
+  const vid = box.querySelector('video');
+  if (media === 'video') {
+    img.style.display = 'none'; img.removeAttribute('src');
+    vid.style.display = ''; vid.src = src;
+  } else {
+    vid.style.display = 'none'; vid.removeAttribute('src');
+    img.style.display = ''; img.src = src;
+  }
   const cap = box.querySelector('figcaption');
   cap.textContent = caption || '';
   cap.style.display = caption ? '' : 'none';
@@ -2419,12 +2537,19 @@ function openLightbox(src, caption) {
 }
 function closeLightbox() {
   const b = el('#lightbox');
-  if (b) b.classList.remove('open');
+  if (!b) return;
+  const vid = b.querySelector('video');
+  if (vid) { vid.pause(); }
+  b.classList.remove('open');
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
 document.addEventListener('click', (e) => {
-  const img = e.target.closest && e.target.closest('[data-lightbox]');
-  if (img) { e.preventDefault(); openLightbox(img.getAttribute('data-lightbox'), img.getAttribute('data-cap') || ''); }
+  const node = e.target.closest && e.target.closest('[data-lightbox]');
+  if (node) {
+    e.preventDefault();
+    const media = node.getAttribute('data-media') === 'video' || /^data:video\//i.test(node.getAttribute('data-lightbox') || '') ? 'video' : 'image';
+    openLightbox(node.getAttribute('data-lightbox'), node.getAttribute('data-cap') || '', media);
+  }
 });
 
 function wireConversation(turnCount) {
@@ -2682,6 +2807,7 @@ function renderPromptCard(c) {
     <div class="pc-head">${proj}${docs}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(c.prompt)}</div>
+    ${outcomeChips(c)}
     ${renderArtifacts(c.evidence)}
     ${played}
     <div class="pc-bar">${vote}${link}${open}</div>

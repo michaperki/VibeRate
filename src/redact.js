@@ -22,7 +22,7 @@ const PATTERNS = [
 ];
 
 function scrubString(s) {
-  if (s.startsWith('data:image/')) return s; // inline evidence images: not text, don't scan
+  if (/^data:(image|video)\//.test(s)) return s; // inline evidence (images/gifs/clips): not text, don't scan
   let out = s;
   for (const [re, rep] of PATTERNS) out = out.replace(re, rep);
   return out;

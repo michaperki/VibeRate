@@ -1,12 +1,12 @@
 ---
 name: viberate
-description: Capture this repository's Claude Code / Codex sessions and publish them to VibeRate — an interactive, link-shareable dashboard of the user's prompts, file changes, git timeline, and agent docs (a "GitHub for agent conversations"). Use this whenever the user wants to share, review, visualize, publish, or get feedback on their agent session(s) or coding history, asks to "push to viberate" or "vbrt", or wants a shareable link to what they just built — even if they don't say "viberate" explicitly.
+description: Capture this repository's Claude Code / Codex sessions and publish them to VibeRate — an interactive, link-shareable dashboard of the user's prompts, file changes, git timeline, evidence, and agent docs. Use this whenever the user wants to share, review, visualize, publish, watch, or get feedback on their agent work or coding history, asks to "push to viberate" or "vbrt", or wants a shareable link to what they just built — even if they don't say "viberate" explicitly.
 allowed-tools: Bash(node *)
 ---
 
 # VibeRate
 
-Publish this repository's agent sessions to the hosted VibeRate viewer and hand the user a shareable link. The skill is a thin push client — it never runs a local server.
+Publish this repository's agent sessions to the hosted VibeRate viewer and hand the user a shareable link. The skill is a thin push client — it never runs a local server. VibeRate is the viewer and feedback layer for terminal-agent development: prompts, file changes, git history, evidence, and brain docs in one readable project dashboard.
 
 ## When to use
 
@@ -40,8 +40,17 @@ node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot https://<your-app>.fly.dev --
 
 - `--label before` before editing, `--label after` once it's live; they render side by side on the prompt card.
 - **Don't point `shot` at VibeRate itself** — `push` already sends there. `shot` captures *your app*.
-- Already have an image? Register it instead of a URL: `shot ./screenshot.png --label after`.
+- Already have an image (or gif/clip)? Register it instead of a URL: `shot ./screenshot.png --label after` (also accepts `.gif` / `.webm`).
 - Stored locally, uploaded on the next `push` (or live under `vbrt watch`). UI/visual work only — backend changes don't need it.
+
+**Motion: capture a clip** when the change is only legible animated (transitions, easing, a sort/animation running, hover/drag feedback). Records a few seconds of the URL:
+
+```bash
+node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot http://localhost:5173 --clip 4 --label after --note "merge animation"
+```
+
+- `--clip [seconds]` (default 4, max 15). Produces an animated **gif** if `ffmpeg` is installed, otherwise a **webm** — both render and loop in the reader, no difference to you.
+- Keep clips short and the `--viewport` modest (e.g. `960x600`); they inline into the bundle, so smaller is better. Prefer a clip only when a still wouldn't show the point.
 
 ## Making your work legible in VibeRate (brain conventions)
 

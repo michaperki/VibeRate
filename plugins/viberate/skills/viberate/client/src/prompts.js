@@ -1,4 +1,4 @@
-import { listProjects, getSession } from './storage.js';
+import { listProjects, getSession, getGit, getEvidence } from './storage.js';
 import { getRatingSummary, getUserVote } from './ratings.js';
 import { attachEvidence } from './evidence.js';
 
@@ -38,6 +38,16 @@ const clip = (s, n, tail = false) => {
   return tail ? '…' + s.slice(-n) : s.slice(0, n) + '…';
 };
 const firstLine = (s) => String(s || '').split('\n').find((l) => l.trim()) || '';
+
+function classifyTool(name) {
+  const n = (name || '').toLowerCase();
+  if (/write|edit|apply_patch|create|notebook|patch|update_plan/.test(n)) return 'edit';
+  if (/bash|exec|shell|command|run|terminal/.test(n)) return 'cmd';
+  if (/read|cat|view|open/.test(n)) return 'read';
+  if (/grep|glob|search|find|^ls|list/.test(n)) return 'search';
+  if (/fetch|web|browser|http/.test(n)) return 'web';
+  return 'other';
+}
 
 function toolCmd(m) {
   const inp = m.input;
@@ -121,7 +131,72 @@ function summarizeAfter(items, cap = 6) {
   return { steps: steps.slice(0, cap), stepCount: steps.length, verdict: verdict ? clip(verdict, 400) : null };
 }
 
-export function extractPromptUnits(session, sessionId, slug = null, { evidence = null } = {}) {
+function deriveOutcomes(items, prompt, ctx) {
+  const files = new Set();
+  const brainDocs = new Set();
+  let edits = 0;
+  let commands = 0;
+  let tools = 0;
+  for (const m of items || []) {
+    if (m.kind === 'tool_use') {
+      tools++;
+      const cat = classifyTool(m.name);
+      if (cat === 'edit') edits++;
+      if (cat === 'cmd' || toolCmd(m)) commands++;
+      const f = toolFile(m);
+      if (f) {
+        files.add(f);
+        if (/\.md$/i.test(f)) brainDocs.add(f);
+      }
+    }
+  }
+  for (const d of docRefs(prompt)) brainDocs.add(d);
+  return {
+    filesChanged: files.size,
+    commandsRun: commands,
+    brainDocsChanged: brainDocs.size,
+    screenshots: 0,
+    commitsProduced: 0,
+    brainCommits: 0,
+    contextPct: ctx ? ctx.pct : null,
+    tools,
+    edits,
+  };
+}
+
+function attachGitOutcomes(units, session, git) {
+  const commits = (git && git.commits) || [];
+  if (!commits.length || !units.length) return;
+  const start = Date.parse(session.startedAt || '') - 5 * 60 * 1000;
+  const end = Date.parse(session.endedAt || '') + 30 * 60 * 1000;
+  for (const c of commits) {
+    if (!c || Number.isNaN(c.t)) continue;
+    if (!Number.isNaN(start) && c.t < start) continue;
+    if (!Number.isNaN(end) && c.t > end) continue;
+    let target = null;
+    for (let i = 0; i < units.length; i++) {
+      const t = Date.parse(units[i].ts || '');
+      if (Number.isNaN(t) || c.t < t) continue;
+      const nextT = Date.parse((units[i + 1] && units[i + 1].ts) || '');
+      if (Number.isNaN(nextT) || c.t < nextT) {
+        target = units[i];
+        break;
+      }
+    }
+    if (!target) continue;
+    target.outcomes.commitsProduced++;
+    if ((c.docs || []).length) target.outcomes.brainCommits++;
+  }
+}
+
+function finalizeEvidenceOutcomes(units) {
+  for (const u of units) {
+    if (!u.outcomes) continue;
+    u.outcomes.screenshots = (u.evidence || []).length;
+  }
+}
+
+export function extractPromptUnits(session, sessionId, slug = null, { evidence = null, git = null } = {}) {
   const turns = buildTurns(session.messages);
   const out = [];
   for (let i = 0; i < turns.length; i++) {
@@ -135,6 +210,7 @@ export function extractPromptUnits(session, sessionId, slug = null, { evidence =
       const pu = prev.user ? prev.user.text : null;
       if (agent || pu) before = { prompt: pu ? clip(pu, 200) : null, agent: agent ? clip(agent, 320, true) : null };
     }
+    const context = contextAt(t.items);
     out.push({
       id: `${sessionId}#${i}`,
       cardId: slug ? makeCardId(slug, sessionId, i) : null,
@@ -146,11 +222,14 @@ export function extractPromptUnits(session, sessionId, slug = null, { evidence =
       before,
       after: summarizeAfter(t.items),
       docRefs: docRefs(prompt),
-      context: contextAt(t.items),
+      context,
+      outcomes: deriveOutcomes(t.items, prompt, context),
       chars: prompt.length,
     });
   }
   if (evidence) attachEvidence(out, evidence, sessionId);
+  if (git) attachGitOutcomes(out, session, git);
+  finalizeEvidenceOutcomes(out);
   return out;
 }
 
@@ -163,7 +242,7 @@ export function buildFeed(limit = 60, { publicOnly = true, userId = null } = {})
     for (const s of p.sessions || []) {
       const sess = getSession(p.slug, s.id);
       if (!sess) continue;
-      for (const u of extractPromptUnits(sess, s.id, p.slug)) {
+      for (const u of extractPromptUnits(sess, s.id, p.slug, { evidence: getEvidence(p.slug), git: getGit(p.slug) })) {
         if (u.isAck || u.isNoise || u.chars < 20) continue;
         cards.push({
           ...u,

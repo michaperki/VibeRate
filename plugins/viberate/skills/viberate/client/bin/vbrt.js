@@ -13,6 +13,7 @@ import { extractMemory } from '../src/workspace.js';
 import { readEvidence, recordShot } from '../src/evidence.js';
 import { buildBundle } from '../src/bundle.js';
 import { pushBundle, apiBase, resolveApi, login } from '../src/push.js';
+import { redactBundle } from '../src/redact.js';
 import { slugify, claudeRoots, codexRoots, canonicalKey } from '../src/paths.js';
 
 const C = {
@@ -30,6 +31,36 @@ function fmtDate(iso) {
 
 const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
 const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|stream|_next_pass/i;
+
+function bytesOf(obj) {
+  return Buffer.byteLength(JSON.stringify(obj), 'utf8');
+}
+
+function mb(n) {
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function printDryRun(bundle, { includeMemory, isPublic }) {
+  const safe = redactBundle(bundle);
+  const docs = safe.docs && safe.docs.docs ? safe.docs.docs : [];
+  const evidence = safe.evidence || [];
+  const imageBytes = evidence.reduce((sum, e) => {
+    const img = String((e && e.image) || '');
+    const b64 = img.includes(',') ? img.split(',').pop() : img;
+    return sum + Math.floor((b64.length * 3) / 4);
+  }, 0);
+  const messages = safe.sessions.reduce((n, s) => n + ((s.messages && s.messages.length) || 0), 0);
+  const memoryNotes = safe.memory && Array.isArray(safe.memory.notes) ? safe.memory.notes.length : 0;
+  console.log(C.green('\n✓ Dry run complete — nothing uploaded.'));
+  console.log(`  Visibility: ${isPublic ? C.yellow('public on push') : 'private by default'}`);
+  console.log(`  Redacted payload: ${mb(bytesOf(safe))}`);
+  console.log(`  Sessions: ${safe.sessions.length} (${messages} message(s))`);
+  console.log(`  Git commits: ${safe.git && safe.git.commits ? safe.git.commits.length : 0}`);
+  console.log(`  Brain docs/files included: ${docs.length}${docs.length ? ` — ${docs.map((d) => d.name).slice(0, 12).join(', ')}${docs.length > 12 ? ', …' : ''}` : ''}`);
+  console.log(`  Memory: ${includeMemory ? `${memoryNotes} note(s)` : 'excluded (--no-memory)'}`);
+  console.log(`  Evidence: ${evidence.length} item(s), ${mb(imageBytes)} image data`);
+  console.log(C.dim('  Review the counts above before publishing. Re-run without --dry-run to upload.'));
+}
 
 // Assemble the full capture bundle from a cwd + its (already-parsed) sessions:
 // git history, agent docs, per-brain-doc version history, and memory. Shared by
@@ -244,6 +275,10 @@ async function cmdAdd(args = []) {
   if (push) {
     try {
       const isPublic = args.includes('--public');
+      if (args.includes('--dry-run')) {
+        printDryRun(bundle, { includeMemory, isPublic });
+        return;
+      }
       const { url, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
       if (visibility === 'public') {
         console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (public) — view & share at:`));
@@ -299,11 +334,17 @@ async function cmdShot(args = []) {
     return;
   }
   if (!target && !opts.image) {
-    console.log(C.yellow('Usage: vbrt shot <url|image.png> [--image <file>] [--label before|after] [--note "…"] [--viewport 1280x800]'));
+    console.log(C.yellow('Usage: vbrt shot <url|image.png> [--image <file>] [--label before|after] [--note "…"] [--viewport 1280x800] [--clip [seconds]]'));
     console.log(C.dim('  Pass a local dev URL (captured via Playwright if installed) or an image the agent already took.'));
+    console.log(C.dim('  --clip records a short motion clip of a URL (gif if ffmpeg is installed, else webm).'));
     process.exitCode = 1;
     return;
   }
+  // --clip / --gif both mean "record motion"; an explicit --seconds N sets length.
+  const clipOpt = opts.clip ?? opts.gif;
+  const clip = clipOpt === undefined ? null
+    : opts.seconds && opts.seconds !== true ? Number(opts.seconds)
+    : clipOpt; // true (default length) or a number passed as `--clip 6`
   const cwd = process.cwd();
   try {
     const rec = await recordShot(cwd, {
@@ -314,8 +355,10 @@ async function cmdShot(args = []) {
       viewport: opts.viewport === true ? null : opts.viewport || null,
       session: opts.session === true ? null : opts.session || null,
       pair: opts.pair === true ? null : opts.pair || null,
+      clip,
     });
-    console.log(C.green(`\n✓ Captured artifact${rec.label ? ` (${rec.label})` : ''} → ${path.relative(cwd, rec.file)}`));
+    const kind = rec.media === 'video' ? 'clip (webm)' : clip ? 'clip (gif)' : 'artifact';
+    console.log(C.green(`\n✓ Captured ${kind}${rec.label ? ` (${rec.label})` : ''} → ${path.relative(cwd, rec.file)}`));
     console.log(C.dim(`  bound to ${rec.session ? `session ${rec.session.id}` : '(no active session found — will attach by time)'}${rec.note ? ` · "${rec.note}"` : ''}`));
     console.log(C.dim('  Uploaded on your next `vbrt push` (or live, if `vbrt watch` is running).\n'));
   } catch (err) {
@@ -370,9 +413,11 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt login <token>')}  Connect this machine to your account (token from the dashboard)
   ${C.cyan('vbrt push')}          Upload to your dashboard at vbrt.fly.dev (set VBRT_API_URL for a local host)
   ${C.cyan('vbrt push --public')}   Publish on push (share a link immediately; default is private)
+  ${C.cyan('vbrt push --dry-run')}  Preview the redacted payload and visibility without uploading
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
   ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)
+  ${C.cyan('vbrt shot <url> --clip [s]')} Record a short motion clip (gif if ffmpeg, else webm)
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port
   ${C.cyan('vbrt help')}          Show this help
