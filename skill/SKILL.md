@@ -20,7 +20,8 @@ Run from the **repository root** (the folder whose sessions should be published 
 VBRT_API_URL="${VBRT_API_URL:-https://vbrt.fly.dev}" node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" push --all
 ```
 
-- `push --all` selects every session discovered for this folder, non-interactively (no prompts).
+- `push --all` selects every session discovered for this folder, non-interactively (no prompts). **Always pass `--all`** — bare `vbrt push` opens an interactive session picker you can't drive.
+- If `vbrt` is on your `PATH` (a global install, or running under **Codex**), drop the `node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js"` prefix and just run `vbrt push --all` / `vbrt shot …` / `vbrt watch`. Same commands, agent-agnostic.
 - On success the command prints `✓ Pushed project ... view & share at:` followed by a URL like `https://vbrt.fly.dev/p/<id>`. **Give that full URL to the user** — that's their shareable dashboard.
 - Conversations are scrubbed for obvious secrets (API keys, tokens, private keys) before upload. The link is unlisted but anyone who has it can view it — remind the user of that.
 
@@ -41,6 +42,15 @@ node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot https://<your-app>.fly.dev --
 - **Don't point `shot` at VibeRate itself** — `push` already sends there. `shot` captures *your app*.
 - Already have an image? Register it instead of a URL: `shot ./screenshot.png --label after`.
 - Stored locally, uploaded on the next `push` (or live under `vbrt watch`). UI/visual work only — backend changes don't need it.
+
+## Making your work legible in VibeRate (brain conventions)
+
+VibeRate renders this repo's **brain** — the agent/architecture docs — as a live graph, and its `.md` plan docs as completion rings on a timeline. A few zero-cost conventions make your work show up well, in any project:
+
+- **The graph is built by reachability.** A markdown doc becomes a brain node only if it has a known name (`SOUL`/`AGENTS`/`CLAUDE`/`SEED`/`CONTEXT`/`MEMORY`/`ROADMAP`/`DECISIONS`/`README`/…) **or** is **linked by name** from a doc already in the brain. So when you create a new brain doc, **reference it by its filename** from a seed (e.g. add `PLAN_x.md` to `ROADMAP.md`). An unlinked "orphan" doc won't appear in the live graph — it only surfaces once committed, via git history.
+- **Plan docs get a completion ring.** Name them `PLAN_<name>.md`, give them a `- [ ]` checklist, and **link them from `ROADMAP.md` at creation**. VibeRate draws a ring from the checked ratio. **Check the boxes as you go** and the ring fills live; write-then-complete-then-commit and it just snaps to done at the commit.
+- **Commits are the brain's checkpoints.** The live graph updates on save for reachable docs and on commit for git-derived history — so commit at meaningful boundaries (per plan / per phase). That's the timeline the viewer shows.
+- **Keep a dev journal.** A dated `DEVLOG.md` plus a `DECISIONS.md` (one line + the *why* per decision) give the brain a narrative spine and make choices traceable — the heart of "a living history of how you and your agents changed this project."
 
 ## Local / self-hosted testing
 
