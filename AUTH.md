@@ -1,7 +1,9 @@
 # Accounts & auth — design + setup checklist
 
-Status: **not built yet.** Private-by-default + publish ships first (done). This
-doc is the spec for the account layer and the external setup it needs from you.
+Status: **partly built.** Private-by-default push, machine tokens, signed-in
+dashboard, OAuth provider wiring, `/link` claim flow, and publish/unpublish are
+implemented. This doc is now the account-layer reference plus the remaining
+external provider setup.
 
 ## The model (why it's shaped this way)
 
@@ -54,13 +56,12 @@ fly secrets set \
 
 ## What I build once the secrets exist
 
-- Accounts store (user = provider identities + a stable id) and signed-cookie
+- [x] Accounts store (user = provider identities + a stable id) and signed-cookie
   sessions (`SESSION_SECRET`).
-- Routes: `/auth/{github,google}/start` + `/callback`; `/auth/email/{start,callback}`
-  for magic-link; `/auth/logout`.
-- Claim flow: `/link` binds a machine-token owner-hash to the signed-in account;
-  the dashboard then lists projects across all linked machine tokens.
-- Frontend: sign-in buttons on the landing page; `/app` uses the session instead
-  of a pasted token (token paste stays as a fallback).
-- The machine-token push path is untouched, so the skill keeps working with zero
-  interactive auth.
+- [x] Routes: `/auth/{github,google}/start` + `/callback`; `/auth/logout`.
+- [x] Claim flow: `/link` binds a machine-token owner-hash to the signed-in
+  account; the dashboard lists projects across linked machine tokens.
+- [x] Frontend: sign-in buttons on `/app`; token paste remains as a fallback.
+- [x] Machine-token push path stays non-interactive.
+- [ ] Email magic-link routes, if we decide email auth is worth shipping.
+- [ ] Production provider secrets on Fly for whichever providers we launch.

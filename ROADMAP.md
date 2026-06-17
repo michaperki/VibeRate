@@ -1,8 +1,15 @@
 # VibeRate — Roadmap
 
-> "GitHub for agent conversations." A downloadable agent skill (push client) plus
-> hosted infra where vibe coders publish, view, and share their Claude Code /
-> Codex sessions as interactive dashboards.
+Canonical frame: see `PRODUCT_STRATEGY.md`.
+
+VibeRate is the hosted viewer and feedback layer for terminal-agent development:
+agents publish the work behind a repo — prompts, decisions, screenshots, diffs,
+commits, and brain docs — so developers and reviewers can watch, understand, and
+discuss how the project was built.
+
+Working category remains open. "Agentic Code Viewer" and "Agentic Work
+Environment" are useful probes, but the current product copy should stay concrete:
+publish, watch, review, and understand agent work.
 
 ## Done (v0 — local + push foundations)
 
@@ -26,15 +33,41 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   - SSE/WebSocket (drop polling) if polling ever feels laggy.
   - Reader refinement — append new turns instead of full re-render (preserve expanded `<details>` while following).
 
-## Phase 2 — Social / sharing (the core product)
+## Next priorities (accepted order)
+
+1. **Prompt-unit navigation + deep links** — make individual prompts the default
+   navigation object, with sessions as a secondary view. ✅ Shipped: project-level
+   prompt rail API, `Prompts | Sessions` rail, prompt-row click into the exact card.
+2. **Auto-derived outcome chips** — files changed, commits produced, brain docs
+   changed, commands run, screenshot attached, context fullness, and follow-up
+   type. ✅ First pass shipped: files, commits, brain docs, command count,
+   screenshots, and context fullness. (Command pass/fail was removed — the cheap
+   heuristic was meaningless; real result tracking belongs to the diff/test family.)
+3. **Hosted hardening + privacy preview** — upload limits, validation, quotas,
+   admin/delete tools, backups/export, and `push --dry-run` / hosted visibility
+   preview before broader social. ◐ First pass shipped: hosted JSON/session/message/
+   evidence/image caps, in-memory upload rate limiting, server-side bundle checks,
+   and `vbrt push --dry-run`.
+
+## Phase 2 — Feedback / sharing (the core product)
 
 - **Feedback** — comment / give feedback on a shared project or a specific prompt/turn.
-- **Fork** — copy someone's prompt(s)/session into your own space to adapt and re-run.
-- **Discovery** — popular / trending "repos", profiles, browse by tag.
 - **Sharing controls** — unlisted vs public; what conversation data is exposed (pairs with redaction).
+- **Notifications** — "someone reviewed this" once prompt/project comments exist.
+- **Fork** — copy someone's prompt(s)/session into your own space to adapt and re-run. Defer until the fork unit is clear.
+- **Discovery** — popular / trending projects, profiles, browse by tag. Defer until feedback is useful.
 
 ## Phase 3 — Viewer UX polish
 
+- **Prompt-unit rail** — `Sessions | Prompts` toggle, default Prompts; prompt rows
+  show source, session color, timestamp, intent tag, and outcome chips; live mode
+  slides new prompt-units into the rail. ✅ Shipped first pass.
+- **Prompt-card permalinks** — stable URLs to a specific prompt card / turn. ✅ Existing `/c/<cardId>` now pairs with exact-card rail navigation.
+- **Outcome chips** — cheap summaries from captured data before building more
+  artifact families. ✅ First pass shipped.
+- **Evidence artifacts** — `vbrt shot` before/after screenshots ✅ + motion clips
+  (`--clip`, gif via ffmpeg or webm fallback) ✅ shipped; diff/test/provenance
+  families still tracked in `PROJECT_VIEW_PLAN.md §C`.
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
 - **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)
 - **Legibility pass (external review, 2026-06)** — first-contact gaps on an otherwise polished UI; full breakdown + ranking in `PROJECT_VIEW_PLAN.md` §G:
@@ -47,6 +80,8 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 
 ## Open questions / to weigh
 
-- **Deployment vs. features** — Phase 2 is the differentiator but structurally needs Phase 1's backend. Recommendation: a *minimal* deploy early (unblocks real testing + social), then invest in features. Don't gold-plate infra before the social loop proves out.
+- **Hardening vs. social** — feedback is the differentiator, but anonymous hosted
+  ingest plus persistent storage is the operational risk. Do prompt navigation
+  and outcome chips now, then harden ingest/privacy before pushing discovery.
 - What's the right unit to "fork" — a whole project, a session, or a single prompt?
 - How much conversation content is safe to expose publicly even after redaction?

@@ -5,12 +5,20 @@ Display. Synthesis of two research passes (Claude + Codex) plus Mike's direction
 
 ## Positioning (the frame)
 
+Canonical strategy: `PRODUCT_STRATEGY.md`.
+
 VibeRate is **not** "GitHub for agent conversations" (that's version control;
-wrong). It's about **getting feedback / collaborating** on agent work, **managing
-your project's AI brain** (the constitution + docs + memory the agent runs on),
-and **seeing how others manage theirs**. The internal product's potential: *a
-living history of how a person and their agents understood, discussed, and
-changed a project* — every claim traceable to the work that created it.
+wrong). It is the viewer and feedback layer for terminal-agent development:
+**publish, watch, review, and understand agent work**. It is about **getting
+feedback / collaborating** on agent work, **managing your project's AI brain**
+(the constitution + docs + memory the agent runs on), and **seeing how others
+manage theirs**. The internal product's potential: *a living history of how a
+person and their agents understood, discussed, and changed a project* — every
+claim traceable to the work that created it.
+
+Category language is intentionally unsettled. "Agentic Code Viewer" and "Agentic
+Work Environment" / "AWE" are plausible, but the product should not depend on
+choosing the acronym before the workflow is obvious.
 
 ## Core organizing principle
 
@@ -58,10 +66,11 @@ concept it changed — that link is the "living history."
 ## Remaining (read-only)
 
 ### A. Activity timeline + Brain history — *cheap, no new capture*
-- [ ] Make **commits / brain / code lanes clickable** (today only convos + the
-  message brush are wired; the rest are tooltip-only).
-- [ ] **Brain diamond → detail** (which brain docs that commit changed + subject/
-  date/hash).
+- [x] Make **commits / brain / code lanes clickable** — all three ribbon lanes
+  now open detail popovers (`[data-commit]`/`[data-brain]`/`[data-code]` handlers
+  in `public/app.js`); the code lane selects + scrolls to its session.
+- [x] **Brain diamond → detail** — `brainDetailHtml`/`commitDetailHtml` popovers
+  show the commit's changed brain docs + subject/date/hash.
 - [x] A dedicated **Brain history view** — shipped as the **time-travel scrubber**
   (§B), driven by the git data already in the bundle.
 - [x] git capture → `--name-status` for **add / modify / delete / rename**
@@ -95,9 +104,20 @@ concept it changed — that link is the "living history."
 - [x] **Screenshot artifacts** (`ARTIFACTS.md`) — `vbrt shot <url|img>` binds a
   before/after shot to the prompt that produced it; renders in the reader. *(first
   outcome-rail family; diff/test/provenance families still below.)*
+- [x] **Motion-clip artifacts** *(shipped 2026-06-17)* — `vbrt shot <url> --clip
+  [seconds]` records a few seconds via Playwright; emits an animated **gif** when
+  `ffmpeg` is present, else a **webm** (`media: 'video'`), both loop in the reader
+  + lightbox. Server caps clips at 6 MB; redaction skips inline `data:video/`.
+- [x] **Auto-derived outcome chips** *(first pass shipped 2026-06-17)* —
+  files changed, commits produced, brain docs changed, commands run,
+  screenshot attached, context fullness, and follow-up type, all from existing
+  captured data before adding heavier artifact families.
+  Shipped signals: files, commits, brain docs, command count, screenshots,
+  context fullness. *Command pass/fail was tried and removed — the only cheap
+  signal (regex for a nonzero exit code in tool output) fired on normal runs and
+  meant nothing; real pass/fail needs the diff/test family below.* Follow-up
+  classification remains separate below.
 - [ ] **Real diffs** per edit in the reader.
-- [ ] **Outcome signals** beside each prompt: files changed, tests run + result,
-  commits produced, brain changed.
 - [ ] **Follow-up classification** — correction / continuation / approval.
 - [ ] **Prompt intent auto-tagging** (design / debug / refactor / ask / fix).
 - [ ] **Prompt-quality-through-consequences** signals (needed clarification?
@@ -105,6 +125,11 @@ concept it changed — that link is the "living history."
 - [ ] *Decision (mock):* outcome-rail placement — side rail / chip row / footer.
 
 ### D. Scale & navigation
+- [x] **Prompt-unit sidebar + deep links** *(first pass shipped 2026-06-17)* — `Sessions |
+  Prompts` toggle, default Prompts; prompt rows show agent/source color, session
+  color, timestamp, intent tag, and outcome chips; click deep-links to that exact
+  card; live mode slides new prompt-units into the rail. Shipped without intent
+  tags yet; intent auto-tagging remains tracked in §C.
 - [ ] **Progressive / summary-first loading** (sessions up to ~1,300 msgs / 1.6 MB).
 - [ ] **Search + filters** (prompt/response text, files, commands, outcome, …).
 - [ ] **Conversation minimap.**
@@ -118,6 +143,16 @@ concept it changed — that link is the "living history."
 
 ### F. Hygiene
 - [ ] **Tests** around parsers / prompt extraction / redaction / activity attribution.
+- [x] **Hosted ingest hardening** *(first pass shipped 2026-06-17)* — rate limiting, per-owner/project bundle limits,
+  max evidence/image counts, server-side payload validation, admin/delete tools,
+  backups/export/restore for `/data`. Shipped: JSON/session/message/evidence/image
+  caps, in-memory upload rate limit, bundle shape validation. Still open:
+  admin/delete tools and backups/export/restore.
+- [x] **Privacy preview** *(CLI first pass shipped 2026-06-17)* — `vbrt push --dry-run` and hosted "what will be
+  visible?" summary: memory included/excluded, evidence warning, files/docs
+  included, private/public badge, publish/unpublish controls. Shipped: CLI dry-run
+  with redacted payload size, visibility, sessions/messages, commits, docs, memory,
+  and evidence counts. Still open: hosted dashboard preview panel.
 
 ### G. Legibility & polish — *external review, ranked by impact*
 > An outside review (2026-06) of the live UI. The bones are strong; these are the
@@ -155,11 +190,10 @@ captured before/after). New observations, categorized:
   opens an in-page lightbox (Esc/click-out to close), built to extend to video/gif.
 
 **Viewer (→ §D)**
-- [ ] **Sidebar = messages, not convos** *(Mike's strong steer).* The left list should
-  populate with **individual prompt-units**, not whole sessions — color-coded by
-  convo/agent, **sliding in** as you send each, click → the existing in-context reader
-  at that turn. *Decision (mock first):* replace the convo list / a **toggle** between
-  convo↔message views / hybrid. This is the prompt-unit thesis applied to navigation.
+- [ ] **Sidebar = messages, not convos** *(Mike's strong steer).* Promoted to
+  the main §D priority as **Prompt-unit sidebar + deep links**: `Sessions |
+  Prompts` toggle, default Prompts, prompt rows with source/session/timestamp/
+  intent/outcome signals, live slide-in, click → exact in-context card.
 - [ ] **Interim sidebar fix:** session rows show the *starting* prompt (often
   "read SEED.md"); show the **most-recent** message preview (~100 chars) instead.
   Needs `lastUserText` in the session summary (pairs with §D auto intent-titles).
@@ -167,10 +201,10 @@ captured before/after). New observations, categorized:
   cue in live mode (slide-in/pulse). Largely *falls out of* the message-sidebar.
 
 **Capture / artifacts (→ §E, `ARTIFACTS.md`)**
-- [ ] **GIF / short-clip capture.** Many before/afters are only legible in motion
-  (later: sound/video). Extend `vbrt shot` → record a few seconds (Playwright video/
-  webm or a frame loop). **Not token-costly** — clips never enter the model's context
-  (same as screenshots); cost is wall-clock + file size, so prefer webm over gif.
+- [x] **GIF / short-clip capture** *(shipped 2026-06-17).* `vbrt shot <url> --clip
+  [seconds]` records a few seconds via Playwright → gif (if ffmpeg) or webm. **Not
+  token-costly** — clips never enter the model's context (same as screenshots); cost
+  is wall-clock + file size. *Later:* sound/multi-viewport; before-capture reuse below.
 - [ ] **Before-capture reuse.** Optionally reuse the prior `after` as the next `before`
   when the URL/file is unchanged (timestamp/hash check). *Low priority* — the worry
   was "token-wasteful," but a `before` shot costs **0 model tokens**, just ~a Playwright

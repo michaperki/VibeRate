@@ -1,9 +1,9 @@
 # Artifacts — evidence the agent captures for a prompt (`vbrt shot`)
 
-> Status: **spec / building** · an experiment run via the [experiment loop]
-> (spec → push → build → archive→ghost). Follows the research in `PROMPT_GALLERY.md`
-> and feeds the polymorphic **outcome rail** (`PROJECT_VIEW_PLAN.md §C`). Mock of the
-> per-archetype renderings: `prototypes/outcome-artifacts.html`.
+> Status: **screenshot + motion-clip families shipped; broader outcome rail open**.
+> Follows the research in `PROMPT_GALLERY.md` and feeds the polymorphic **outcome
+> rail** (`PROJECT_VIEW_PLAN.md §C`). Mock of the per-archetype renderings:
+> `prototypes/outcome-artifacts.html`.
 
 ## Why
 
@@ -73,9 +73,13 @@ side. (Lone shots stand alone.)
 - [x] Reader render — before/after strip on the prompt card (`renderArtifacts` in
       `public/app.js`, `.pc-artifacts` styles), click-to-zoom.
 - [x] Rebuild skill bundle so the agent's `shot`/`push` include `evidence.js`.
-- [ ] **Exercise it** — fresh "to-do list" repo: seed + dev-journal brain, run a few
-      plans, capture before/after on the UI ones. Verify they stream in live.
-- [ ] *Then:* viewport set / gif capture; the other artifact families (diff,
+- [x] **Motion clips** — `vbrt shot <url> --clip [seconds]` records via Playwright
+      → animated gif (if `ffmpeg`) or webm (`media: 'video'`); the reader + lightbox
+      render both as looping media. (`captureClip` in `src/evidence.js`.)
+- [ ] **Exercise it** — fresh repo (next: a **sorting visualizer**, see
+      `EXPERIMENT_SORT.md`): seed + dev-journal brain, run a few plans, capture
+      before/after **and a clip** on the UI ones. Verify they stream in live.
+- [ ] *Then:* viewport set / multi-shot; the other artifact families (diff,
       test-status, provenance) — mostly auto-derived, tracked in §C.
 
 ## Decisions (Mike's method — defaults, revisit if wrong)
