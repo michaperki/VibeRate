@@ -1,6 +1,8 @@
 # Artifacts — evidence the agent captures for a prompt (`vbrt shot`)
 
-> Status: **screenshot + motion-clip families shipped; broader outcome rail open**.
+> Status: **screenshot + motion-clip families shipped and exercised on a real
+> experiment; agent-ergonomics gaps from that run fixed (`vbrt doctor`,
+> repo-local Playwright resolution); broader outcome rail open**.
 > Follows the research in `PROMPT_GALLERY.md` and feeds the polymorphic **outcome
 > rail** (`PROJECT_VIEW_PLAN.md §C`). Mock of the per-archetype renderings:
 > `prototypes/outcome-artifacts.html`.
@@ -56,8 +58,14 @@ side. (Lone shots stand alone.)
   screenshot the agent already produced with its own tooling. Works today.
 - **URL** (`vbrt shot https://<your-app>.fly.dev`): the deployed app, captured
   headless via **Playwright if installed** (lazy import keeps the pushed skill
-  dependency-free); otherwise a clear message says to pass `--image`. Reachable from
-  the agent's env regardless of where it runs. Unlocks viewports/gifs later.
+  dependency-free). Resolution tries the global/dev install first, then the **repo's
+  own `node_modules`** (`resolvePlaywright(cwd)`) — so a `npm i -D playwright` in the
+  project Just Works, instead of failing because the bundled client lives in the skill
+  dir. If neither resolves, a clear message names the fix (install + `npx playwright
+  install chromium`) and the `--image` fallback. Unlocks viewports/gifs later.
+- **Preflight** (`vbrt doctor`): reports repo / watch / capture / clip / file-register
+  readiness and prints the recommended `shot` command, so the agent doesn't probe
+  capabilities by trial and error.
 
 ## Implementation checklist
 
@@ -76,9 +84,20 @@ side. (Lone shots stand alone.)
 - [x] **Motion clips** — `vbrt shot <url> --clip [seconds]` records via Playwright
       → animated gif (if `ffmpeg`) or webm (`media: 'video'`); the reader + lightbox
       render both as looping media. (`captureClip` in `src/evidence.js`.)
-- [ ] **Exercise it** — fresh repo (next: a **sorting visualizer**, see
-      `EXPERIMENT_SORT.md`): seed + dev-journal brain, run a few plans, capture
-      before/after **and a clip** on the UI ones. Verify they stream in live.
+- [x] **Exercise it** — done via the **sorting-visualizer** experiment (seed +
+      dev-journal brain, multi-phase build, before/after + clip on the UI, streamed
+      live). The run worked but surfaced two real ergonomics gaps, both now fixed:
+      - **Capture resolution bug** — the agent installed Playwright *in the repo* and
+        `vbrt shot <url>` still failed, because the bundled client did a bare
+        `import('playwright')` that resolved against the **skill dir**, not the repo.
+        It then burned tokens on `NODE_PATH` / patch-the-skill / write-own-capture
+        detours. Fixed: `resolvePlaywright(cwd)` now falls back to the repo's
+        `node_modules` (`src/evidence.js`); the error message names the two real
+        options and says *not* to touch NODE_PATH; **`vbrt doctor`** preflights it.
+      - **Protocol too heavy for a toy app** — ~8 brain docs + 10 artifacts where ~3
+        were enough. Fixed in `skill/SKILL.md`: "scale the process to the work"
+        (small-experiment mode) + a capture decision tree + a "trust `vbrt watch`,
+        don't also `push --all`" rule.
 - [ ] *Then:* viewport set / multi-shot; the other artifact families (diff,
       test-status, provenance) — mostly auto-derived, tracked in §C.
 

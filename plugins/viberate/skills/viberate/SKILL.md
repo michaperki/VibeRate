@@ -25,6 +25,23 @@ VBRT_API_URL="${VBRT_API_URL:-https://vbrt.fly.dev}" node "${CLAUDE_SKILL_DIR}/c
 - On success the command prints `✓ Pushed project ... view & share at:` followed by a URL like `https://vbrt.fly.dev/p/<id>`. **Give that full URL to the user** — that's their shareable dashboard.
 - Conversations are scrubbed for obvious secrets (API keys, tokens, private keys) before upload. The link is unlisted but anyone who has it can view it — remind the user of that.
 
+## Before you build (preflight + project size)
+
+Run **`vbrt doctor`** once at the start. It reports — in a few seconds — whether this
+is a git repo, whether `vbrt watch` is already live, whether headless capture works
+(Playwright + browser), and prints the exact `shot` command to use. Trust its output
+instead of discovering capabilities by trial and error.
+
+- **If `vbrt watch` is live** (doctor says so): it streams changes automatically.
+  **Do not run `vbrt push --all`** at the end — only push manually if watch errors or
+  the user asks. Capture artifacts normally; they ride the stream.
+- **Scale the process to the work.** For small experiments (under ~1 hour): keep just
+  `ROADMAP.md` + `DEVLOG.md`, skip per-phase `PLAN_*.md` files unless the user asks,
+  commit at meaningful milestones (not every micro-phase), and capture **≤3 artifacts**
+  (typically one before, one final clip, maybe one final shot). The brain conventions
+  below are how to make work legible *when there's enough of it* — not homework for a
+  toy app. More ceremony than product is a failure mode, not discipline.
+
 ## Capturing evidence (screenshots) for a prompt
 
 When you make a **visible UI change**, capture a before/after screenshot so it shows on the prompt that produced it. One line; it binds itself to the current conversation — no session/turn id needed.
@@ -51,6 +68,25 @@ node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot http://localhost:5173 --clip 
 
 - `--clip [seconds]` (default 4, max 15). Produces an animated **gif** if `ffmpeg` is installed, otherwise a **webm** — both render and loop in the reader, no difference to you.
 - Keep clips short and the `--viewport` modest (e.g. `960x600`); they inline into the bundle, so smaller is better. Prefer a clip only when a still wouldn't show the point.
+
+### If capture fails — the decision tree (don't improvise)
+
+URL/clip capture needs Playwright **and** a browser binary. If `vbrt shot <url>` reports
+Playwright is missing or a browser is unavailable:
+
+1. Install it **in this repo** and re-run the *same* command — vbrt resolves Playwright
+   from the repo's own `node_modules`:
+   ```bash
+   npm i -D playwright && npx playwright install chromium
+   ```
+2. If that's not possible (no network, headless capture unavailable), **fall back to a
+   file**: take the screenshot/clip with your own tooling and register it —
+   ```bash
+   vbrt shot ./shot.png --label after --note "…"   # also accepts .gif / .webm
+   ```
+3. **Do NOT** edit `NODE_PATH`, inspect the skill install, or write a custom capture
+   script to work around resolution — that is never the fix and just burns time. The two
+   options above are the only ones.
 
 ## Making your work legible in VibeRate (brain conventions)
 

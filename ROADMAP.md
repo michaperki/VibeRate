@@ -66,8 +66,19 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 - **Outcome chips** — cheap summaries from captured data before building more
   artifact families. ✅ First pass shipped.
 - **Evidence artifacts** — `vbrt shot` before/after screenshots ✅ + motion clips
-  (`--clip`, gif via ffmpeg or webm fallback) ✅ shipped; diff/test/provenance
-  families still tracked in `PROJECT_VIEW_PLAN.md §C`.
+  (`--clip`, gif via ffmpeg or webm fallback) ✅ shipped and exercised on the
+  sorting-visualizer experiment; diff/test/provenance families still tracked in
+  `PROJECT_VIEW_PLAN.md §C`.
+- **Agent ergonomics — "make capture boring"** ✅ first pass, from experiment-3
+  feedback: VibeRate was costing the agent tokens, not just collecting work. Fixed:
+  (a) `vbrt shot` now resolves Playwright from the **repo's** `node_modules`, not just
+  the skill dir, so an in-repo `npm i -D playwright` works instead of sending the agent
+  down a `NODE_PATH`/patch-the-skill detour; (b) **`vbrt doctor`** preflight (repo /
+  watch / capture readiness + the exact command); (c) `vbrt watch` writes a heartbeat
+  so the agent can skip a redundant final `push --all`; (d) SKILL.md guidance —
+  capture decision tree, "scale the process to the work" small-experiment mode, and a
+  trust-watch sync rule. Next, if needed: a deeper `doctor --fix` and per-archetype
+  capture hints.
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
 - **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)
 - **Legibility pass (external review, 2026-06)** — first-contact gaps on an otherwise polished UI; full breakdown + ranking in `PROJECT_VIEW_PLAN.md` §G:

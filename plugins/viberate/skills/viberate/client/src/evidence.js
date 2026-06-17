@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { discoverSessions } from './discover.js';
 import { parseClaude, parseCodex } from './parsers.js';
 
@@ -24,6 +26,60 @@ function hasFfmpeg() {
   } catch {
     return false;
   }
+}
+
+// Resolve Playwright from wherever it actually lives. The skill bundle ships with
+// no node_modules, so a bare `import('playwright')` resolves against the *skill
+// dir* and never sees a copy the agent installed in the repo — which is exactly
+// what sent an earlier run down a NODE_PATH / patch-the-skill rabbit hole. Try the
+// normal specifier first (a global/dev install), then resolve from the repo's own
+// node_modules. Returns { module, source } so the doctor can report which it used.
+async function resolvePlaywright(cwd) {
+  // require.resolve() finds the package's CJS entry; importing that file by URL puts
+  // its exports under `.default` (CJS interop), while the bare specifier picks the
+  // ESM entry where `chromium` is a named export. Normalize so callers always see
+  // `.chromium` regardless of which path resolved it.
+  const norm = (mod) => (mod && !mod.chromium && mod.default && mod.default.chromium ? mod.default : mod);
+  try {
+    return { module: norm(await import('playwright')), source: 'global' };
+  } catch { /* not resolvable from the skill/global scope — try the repo */ }
+  try {
+    const req = createRequire(path.join(cwd || process.cwd(), 'package.json'));
+    const entry = req.resolve('playwright');
+    return { module: norm(await import(pathToFileURL(entry).href)), source: 'repo' };
+  } catch {
+    return { module: null, source: null };
+  }
+}
+
+// One message for the "no headless capture available" case — tells the agent the
+// two things that actually work and the two things that don't (so it stops trying
+// to patch NODE_PATH or the skill install, the costly detour we saw in practice).
+const PW_HELP =
+  'Headless capture needs Playwright + a browser. In THIS repo run:\n' +
+  '    npm i -D playwright && npx playwright install chromium\n' +
+  '  then re-run the same `vbrt shot` command — vbrt resolves Playwright from the repo.\n' +
+  '  Or skip headless capture entirely: take the screenshot/clip yourself and register the\n' +
+  '  file with `vbrt shot ./shot.png --label after` (also accepts .gif / .webm).\n' +
+  '  Do NOT edit NODE_PATH or the skill install — that is never the fix.';
+
+// Probe what capture can actually do from here, for `vbrt doctor`. Resolves
+// Playwright and (if found) does a real chromium launch — the browser binary is a
+// separate install, so "module present" isn't enough to know URL/clip capture works.
+export async function captureCapabilities(cwd) {
+  const out = { playwright: false, source: null, chromium: false, ffmpeg: hasFfmpeg(), error: null };
+  const { module: pw, source } = await resolvePlaywright(cwd);
+  if (!pw) return out;
+  out.playwright = true;
+  out.source = source;
+  try {
+    const browser = await pw.chromium.launch();
+    await browser.close();
+    out.chromium = true;
+  } catch (err) {
+    out.error = err.message;
+  }
+  return out;
 }
 
 function gitHead(cwd) {
@@ -81,16 +137,10 @@ function dataUrl(imgPath) {
 // Capture a URL with Playwright *if it's installed*; otherwise tell the caller to
 // pass --image with a screenshot the agent already took. The lazy import keeps the
 // pushed skill bundle dependency-free (same pattern as @inquirer/express).
-async function captureUrl(url, viewport) {
-  let chromium;
-  try {
-    ({ chromium } = await import('playwright'));
-  } catch {
-    throw new Error(
-      'URL capture needs Playwright (`npm i -D playwright`). ' +
-        'Or pass `--image <file>` with a screenshot the agent already captured.',
-    );
-  }
+async function captureUrl(url, viewport, cwd) {
+  const { module: pw } = await resolvePlaywright(cwd);
+  if (!pw) throw new Error(PW_HELP);
+  const { chromium } = pw;
   const [w, h] = String(viewport || '1280x800').split('x').map(Number);
   const browser = await chromium.launch();
   try {
@@ -107,16 +157,10 @@ async function captureUrl(url, viewport) {
 // deps); if system ffmpeg is present we transcode to an animated .gif (smaller,
 // renders in a plain <img>), otherwise we keep the webm (renders as <video>).
 // Returns a { dataUrl, media } pair so the caller/viewer knows how to render it.
-async function captureClip(url, { viewport, seconds = 4, fps = 12 } = {}) {
-  let chromium;
-  try {
-    ({ chromium } = await import('playwright'));
-  } catch {
-    throw new Error(
-      'Clip capture needs Playwright (`npm i -D playwright`). ' +
-        'Or pass `--image <file>` with a gif/clip the agent already captured.',
-    );
-  }
+async function captureClip(url, { viewport, seconds = 4, fps = 12, cwd } = {}) {
+  const { module: pw } = await resolvePlaywright(cwd);
+  if (!pw) throw new Error(PW_HELP);
+  const { chromium } = pw;
   const [w, h] = String(viewport || '960x600').split('x').map(Number);
   const width = w || 960;
   const height = h || 600;
@@ -179,14 +223,14 @@ export async function recordShot(cwd, { target, image, label = null, note = '', 
   let media;
   if (clip) {
     if (!isUrl) throw new Error('--clip needs a URL to record (pass an http(s) URL)');
-    const out = await captureClip(target, { viewport, seconds: clip === true ? 4 : Number(clip) });
+    const out = await captureClip(target, { viewport, seconds: clip === true ? 4 : Number(clip), cwd });
     img = out.dataUrl;
     media = out.media;
   } else if (image) {
     img = dataUrl(image);
     media = mediaOf(img);
   } else if (isUrl) {
-    img = await captureUrl(target, viewport);
+    img = await captureUrl(target, viewport, cwd);
     media = 'image';
   } else if (target) {
     img = dataUrl(target);

@@ -4,13 +4,14 @@
 // what lets the skill bundle ship without node_modules.
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { discoverSessions } from '../src/discover.js';
 import { parseClaude, parseCodex } from '../src/parsers.js';
 import { saveBundle } from '../src/storage.js';
 import { extractGit, extractDocHistory } from '../src/git.js';
 import { extractDocsMulti } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
-import { readEvidence, recordShot } from '../src/evidence.js';
+import { readEvidence, recordShot, captureCapabilities } from '../src/evidence.js';
 import { buildBundle } from '../src/bundle.js';
 import { pushBundle, apiBase, resolveApi, login } from '../src/push.js';
 import { redactBundle } from '../src/redact.js';
@@ -131,6 +132,21 @@ async function cmdWatch(args = []) {
   const repoPaths = [...new Set([cwd, ...sessions0.map((s) => s.cwd).filter(Boolean)])];
   console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim(`(${sessionFiles.length} session(s) + brain docs + git · Ctrl-C to stop)`)}`);
 
+  // Heartbeat so `vbrt doctor` (and the agent) can tell a watcher is live and skip
+  // a redundant final `vbrt push`. Refreshed each tick; removed on exit.
+  const lockFile = path.join(cwd, '.vbrt', 'watch.lock');
+  const writeLock = () => {
+    try {
+      fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+      fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, cwd, ts: Date.now() }));
+    } catch { /* best-effort */ }
+  };
+  const clearLock = () => { try { fs.unlinkSync(lockFile); } catch { /* gone */ } };
+  writeLock();
+  process.on('exit', clearLock);
+  process.on('SIGINT', () => { clearLock(); process.exit(0); });
+  process.on('SIGTERM', () => { clearLock(); process.exit(0); });
+
   let lastSig = watchSignature(repoPaths, sessionFiles); // baseline; don't push on startup
   let pendingSince = 0;
   let busy = false;
@@ -146,6 +162,7 @@ async function cmdWatch(args = []) {
   let firstPush = true;
 
   const tick = async () => {
+    writeLock(); // refresh heartbeat even while idle so doctor sees a live watcher
     if (busy) return;
     if (--rediscoverIn <= 0) {
       rediscoverIn = 10;
@@ -405,6 +422,62 @@ async function cmdServe(args) {
   console.log(C.dim('Press Ctrl+C to stop.\n'));
 }
 
+// Is a `vbrt watch` heartbeat live for this repo? (lock refreshed every ~2s)
+function watchStatus(cwd) {
+  try {
+    const raw = fs.readFileSync(path.join(cwd, '.vbrt', 'watch.lock'), 'utf8');
+    const { pid, ts } = JSON.parse(raw);
+    if (Date.now() - Number(ts) < 15000) return { active: true, pid };
+  } catch { /* no lock / stale */ }
+  return { active: false };
+}
+
+function isGitRepo(cwd) {
+  try {
+    return execFileSync('git', ['-C', cwd, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8' }).trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+// Preflight: one command an agent runs before building so artifact capture is
+// boring and predictable. Reports repo / watch / capture / clip / fallback and
+// prints the exact command pattern to use — so it never rediscovers the Playwright
+// resolution detour the hard way.
+async function cmdDoctor() {
+  const cwd = process.cwd();
+  const ok = (b) => (b ? C.green('✓') : C.yellow('✗'));
+  console.log(`\n${C.bold('vbrt doctor')} — ${C.cyan(cwd)}\n`);
+
+  const repo = isGitRepo(cwd);
+  console.log(`  ${ok(repo)} git repo            ${repo ? C.dim('initialized') : C.yellow('not a git repo — run `git init` so commits/brain timeline are captured')}`);
+
+  let sessionCount = 0;
+  try { sessionCount = (await discoverSessions(cwd)).length; } catch { /* none */ }
+  console.log(`  ${ok(sessionCount > 0)} sessions           ${sessionCount > 0 ? C.dim(`${sessionCount} found for this folder`) : C.yellow('none yet — run from the repo root where you used Claude Code / Codex')}`);
+
+  const watch = watchStatus(cwd);
+  console.log(`  ${ok(watch.active)} vbrt watch         ${watch.active ? C.dim(`live (pid ${watch.pid}) — DON'T run \`push --all\`; watch streams changes`) : C.dim('not running — push with `vbrt push --all` when done')}`);
+
+  console.log(C.dim('\n  capture (checking Playwright + browser; may take a few seconds)…'));
+  const cap = await captureCapabilities(cwd);
+  const urlOk = cap.playwright && cap.chromium;
+  console.log(`  ${ok(urlOk)} URL capture        ${urlOk ? C.dim(`Playwright (${cap.source}) + chromium ready`) : C.yellow(cap.playwright ? `Playwright (${cap.source}) found but no browser — run \`npx playwright install chromium\`` : 'no Playwright — `npm i -D playwright && npx playwright install chromium`, or register a file (see below)')}`);
+  console.log(`  ${ok(urlOk)} clip capture       ${urlOk ? C.dim(cap.ffmpeg ? 'records → animated .gif (ffmpeg present)' : 'records → .webm (no ffmpeg; gif unavailable but webm loops fine)') : C.dim('needs URL capture (above)')}`);
+  console.log(`  ${C.green('✓')} file register      ${C.dim('always works: `vbrt shot ./shot.png --label after` (.png/.gif/.webm)')}`);
+  if (cap.error) console.log(C.dim(`      browser launch error: ${cap.error.split('\n')[0]}`));
+
+  console.log(`\n  ${C.bold('Recommended capture command')}:`);
+  if (urlOk) {
+    console.log(`    ${C.cyan('vbrt shot http://localhost:<port> --label after --note "…"')}`);
+    console.log(C.dim('    add `--clip 4` for motion. Point at YOUR app, never VibeRate.'));
+  } else {
+    console.log(`    ${C.cyan('vbrt shot ./shot.png --label after --note "…"')}   ${C.dim('(take the file with your own tooling)')}`);
+    console.log(C.dim('    headless capture is unavailable here — do NOT touch NODE_PATH or the skill install.'));
+  }
+  console.log(C.dim('\n  Small experiments (<~1h): keep ROADMAP.md + DEVLOG.md, skip per-phase PLAN files, ≤3 artifacts.\n'));
+}
+
 function cmdHelp() {
   console.log(`
 ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
@@ -418,6 +491,7 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)
   ${C.cyan('vbrt shot <url> --clip [s]')} Record a short motion clip (gif if ffmpeg, else webm)
+  ${C.cyan('vbrt doctor')}        Preflight: repo / watch / capture readiness + the command to use
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port
   ${C.cyan('vbrt help')}          Show this help
@@ -439,6 +513,9 @@ async function main() {
       break;
     case 'shot':
       await cmdShot(rest);
+      break;
+    case 'doctor':
+      await cmdDoctor();
       break;
     case 'login':
       await cmdLogin(rest);
