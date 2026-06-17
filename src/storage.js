@@ -110,6 +110,7 @@ export function saveSessions(cwd, sessions, opts = {}) {
       id: fileId,
       source: session.source,
       title: session.title,
+      lastUserText: session.lastUserText || null,
       startedAt: session.startedAt,
       endedAt: session.endedAt,
       messageCount: session.messageCount,

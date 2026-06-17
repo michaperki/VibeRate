@@ -13,6 +13,16 @@ function truncate(s, n = 100) {
   return flat.length > n ? flat.slice(0, n - 1) + '…' : flat;
 }
 
+// The most recent user-typed message — what the sidebar previews so a convo reads
+// as "where it is now", not its opening prompt ("read SEED.md").
+function lastUserOf(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.kind === 'text' && m.role === 'user' && String(m.text || '').trim()) return m.text;
+  }
+  return null;
+}
+
 // Known model context windows. Default to the 200k standard; the [1m] beta
 // models advertise a million-token window. Used to turn raw token counts into a
 // "how full was the window" percentage (the prompt-time "dumb zone" signal).
@@ -130,6 +140,7 @@ export async function parseClaude(file) {
     source: 'claude',
     cwd,
     title: truncate(firstUserText) || '(no prompt)',
+    lastUserText: truncate(lastUserOf(messages), 160) || null,
     startedAt,
     endedAt,
     messageCount: messages.length,
@@ -234,6 +245,7 @@ export async function parseCodex(file) {
     source: 'codex',
     cwd,
     title: truncate(firstUserText) || '(no prompt)',
+    lastUserText: truncate(lastUserOf(messages), 160) || null,
     startedAt,
     endedAt,
     messageCount: messages.length,

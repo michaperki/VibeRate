@@ -801,6 +801,13 @@ function renderSessionList() {
   const all = filteredSessions();
   const substantive = all.filter((s) => userCountOf(s) > 0);
   const empties = all.filter((s) => userCountOf(s) === 0);
+  // Most-recently-active convo on top — so a convo bumps up as you send into it.
+  substantive.sort((a, b) => new Date(b.endedAt || 0) - new Date(a.endedAt || 0));
+  // "Just grew" detection for the live flash: compare to the pre-update baseline
+  // (advanced later in this same refresh by computeFreshActivity), so it's correct
+  // at render time and never false-flashes on a plain re-render.
+  const seen = state._liveSeenConvos;
+  const isFresh = (s) => state.live && seen && seen.get(s.id) !== undefined && userCountOf(s) > seen.get(s.id);
 
   const card = (s) => {
     const dur = s.startedAt && s.endedAt ? fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)) : '';
@@ -808,15 +815,17 @@ function renderSessionList() {
     const label = act ? plural(act.userCount, 'msg') : `${s.messageCount} total`;
     const color = (state.colorById || {})[s.id] || 'var(--muted)';
     const dl = act ? diffLabel(act) : '';
+    // Preview the most-recent prompt ("where the convo is now"), not its opener.
+    const preview = esc(s.lastUserText || s.title || '');
     return `
-        <div class="sess ${state.session === s.id ? 'active' : ''}${state.selectedConvo === s.id ? ' hl' : ''}" data-id="${esc(s.id)}">
+        <div class="sess${isFresh(s) ? ' fresh' : ''} ${state.session === s.id ? 'active' : ''}${state.selectedConvo === s.id ? ' hl' : ''}" data-id="${esc(s.id)}">
           <div class="row">
+            <span class="sw" style="background:${color}"></span>
             <span class="badge ${s.source}">${s.source}</span>
-            <span class="meta">${fmtDate(s.startedAt)}</span>
+            <span class="meta">${fmtDate(s.endedAt || s.startedAt)}</span>
           </div>
-          <div class="title"><span class="sw" style="background:${color}"></span>${esc(s.title)}</div>
-          <div class="meta">${label}${dur ? ` · ${dur}` : ''}</div>
-          ${dl ? `<div class="meta files">${dl}</div>` : ''}
+          <div class="sess-preview">${preview}</div>
+          <div class="meta">${label}${dur ? ` · ${dur}` : ''}${dl ? ` · ${dl}` : ''}</div>
         </div>`;
   };
   const thinRow = (s) => `
@@ -2378,12 +2387,45 @@ function renderReaderCard(u, i) {
 // captured. before/after pairs sit side by side; lone shots stand alone.
 function renderArtifacts(evs) {
   if (!evs || !evs.length) return '';
-  const fig = (e) => `<figure class="art-shot art-${esc(e.label || 'shot')}">
-      <a href="${e.image}" target="_blank" rel="noopener"><img loading="lazy" src="${e.image}" alt="${esc(e.note || e.label || 'screenshot')}"></a>
+  const fig = (e) => {
+    const cap = [e.label, e.note, e.viewport].filter(Boolean).join(' · ');
+    return `<figure class="art-shot art-${esc(e.label || 'shot')}">
+      <img loading="lazy" class="art-img" src="${e.image}" data-lightbox="${e.image}" data-cap="${esc(cap)}" alt="${esc(e.note || e.label || 'screenshot')}">
       <figcaption>${e.label ? `<span class="art-tag">${esc(e.label)}</span>` : ''}${e.note ? esc(e.note) : ''}${e.viewport ? `<span class="art-vp">${esc(e.viewport)}</span>` : ''}</figcaption>
     </figure>`;
+  };
   return `<div class="pc-artifacts">${evs.map(fig).join('')}</div>`;
 }
+
+// ---------- media lightbox ----------
+// Click any evidence image to view it in-page (instead of a raw new tab). Built to
+// extend to video/gif later: swap the <img> for a <video> by data-type.
+function openLightbox(src, caption) {
+  let box = el('#lightbox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'lightbox';
+    box.innerHTML = `<button class="lb-close" title="Close (Esc)" aria-label="Close">✕</button><figure class="lb-fig"><img alt=""><figcaption></figcaption></figure>`;
+    box.addEventListener('click', (ev) => {
+      if (ev.target === box || ev.target.classList.contains('lb-close')) closeLightbox();
+    });
+    document.body.appendChild(box);
+  }
+  box.querySelector('img').src = src;
+  const cap = box.querySelector('figcaption');
+  cap.textContent = caption || '';
+  cap.style.display = caption ? '' : 'none';
+  box.classList.add('open');
+}
+function closeLightbox() {
+  const b = el('#lightbox');
+  if (b) b.classList.remove('open');
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
+document.addEventListener('click', (e) => {
+  const img = e.target.closest && e.target.closest('[data-lightbox]');
+  if (img) { e.preventDefault(); openLightbox(img.getAttribute('data-lightbox'), img.getAttribute('data-cap') || ''); }
+});
 
 function wireConversation(turnCount) {
   const pane = el('#conversation');
