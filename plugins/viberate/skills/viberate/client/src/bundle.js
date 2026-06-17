@@ -15,6 +15,7 @@ function summarize(s) {
     id: `${s.source}-${s.id}`,
     source: s.source,
     title: s.title,
+    lastUserText: s.lastUserText || null,
     startedAt: s.startedAt,
     endedAt: s.endedAt,
     messageCount: s.messageCount,
