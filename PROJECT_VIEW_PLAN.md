@@ -144,6 +144,45 @@ concept it changed — that link is the "living history."
    "🧠 brain edits", "🧠 AI architecture", "🧠 Brain history", the context gauge,
    and the "glow = recency" key.
 
+## 🎮 Experiment 2 feedback (Codex · 2026-06-17)
+
+Mike ran the artifact/brain loop with **Codex** on a 2048-style game. The loop held
+(Codex loaded the skill first, followed the brain conventions, consulted at forks,
+captured before/after). New observations, categorized:
+
+**Shipped immediately**
+- [x] **In-page media viewer.** Evidence images opened in a raw new tab; now a click
+  opens an in-page lightbox (Esc/click-out to close), built to extend to video/gif.
+
+**Viewer (→ §D)**
+- [ ] **Sidebar = messages, not convos** *(Mike's strong steer).* The left list should
+  populate with **individual prompt-units**, not whole sessions — color-coded by
+  convo/agent, **sliding in** as you send each, click → the existing in-context reader
+  at that turn. *Decision (mock first):* replace the convo list / a **toggle** between
+  convo↔message views / hybrid. This is the prompt-unit thesis applied to navigation.
+- [ ] **Interim sidebar fix:** session rows show the *starting* prompt (often
+  "read SEED.md"); show the **most-recent** message preview (~100 chars) instead.
+  Needs `lastUserText` in the session summary (pairs with §D auto intent-titles).
+- [ ] **Live-motion feedback:** stronger "a new message just arrived / movement"
+  cue in live mode (slide-in/pulse). Largely *falls out of* the message-sidebar.
+
+**Capture / artifacts (→ §E, `ARTIFACTS.md`)**
+- [ ] **GIF / short-clip capture.** Many before/afters are only legible in motion
+  (later: sound/video). Extend `vbrt shot` → record a few seconds (Playwright video/
+  webm or a frame loop). **Not token-costly** — clips never enter the model's context
+  (same as screenshots); cost is wall-clock + file size, so prefer webm over gif.
+- [ ] **Before-capture reuse.** Optionally reuse the prior `after` as the next `before`
+  when the URL/file is unchanged (timestamp/hash check). *Low priority* — the worry
+  was "token-wasteful," but a `before` shot costs **0 model tokens**, just ~a Playwright
+  launch; keep always-capture for correctness unless the wall-time bites.
+- [ ] **Auto-graveyard at 100%?** *Decision.* VibeRate is read-only — it **can't** delete
+  repo files. Options: (a) SKILL convention (agent `git rm` on ship — current), (b) a
+  `vbrt graveyard <plan>` helper (one clean step), or (c) the viewer **visually retires**
+  a 100% plan (fade/ghost) **without** deleting. *Rec: (c)* for the auto-feel + keep
+  deletion human/agent-driven.
+
+---
+
 ## Guardrails — keep, don't regress (external review)
 
 The review flagged these as the strongest parts. Don't break them while polishing:
