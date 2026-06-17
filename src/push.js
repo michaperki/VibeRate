@@ -71,25 +71,82 @@ function saveToken(apiUrl, token) {
   }
 }
 
-export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadToken(apiUrl), isPublic = false } = {}) {
+// Outbox: a redacted bundle is written here *before* we attempt the upload and
+// removed on success — so a 429, a network blip, or a crash mid-push never loses the
+// captured work. `vbrt push --retry` drains it. (Watch deltas opt out: they're
+// ephemeral, the next tick re-sends current state.)
+const outboxDir = () => path.join(DATA_DIR, 'outbox');
+
+function queueBundle(safe, apiUrl, isPublic) {
+  try {
+    fs.mkdirSync(outboxDir(), { recursive: true });
+    const slug = (safe.project && safe.project.slug) || 'project';
+    const file = path.join(outboxDir(), `${slug}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`);
+    fs.writeFileSync(file, JSON.stringify({ apiUrl, isPublic, bundle: safe }));
+    return file;
+  } catch {
+    return null; // best-effort; upload still proceeds
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// POST a project, retrying on 429 / 5xx with exponential backoff. Honors a numeric
+// `Retry-After` (seconds) when the server sends one. Returns the final Response;
+// the caller decides what a non-ok terminal status means.
+async function postProject(target, body, { token, isPublic = false, retries = 3 } = {}) {
+  const url = `${target}/api/projects${isPublic ? '?public=1' : ''}`;
+  const headers = {
+    'content-type': 'application/json',
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+  };
+  let attempt = 0;
+  for (;;) {
+    let res;
+    try {
+      res = await fetch(url, { method: 'POST', headers, body });
+    } catch (err) {
+      if (attempt >= retries) throw err; // network error — let it propagate (bundle is queued)
+      await sleep(Math.min(30000, 500 * 2 ** attempt) + Math.random() * 250);
+      attempt++;
+      continue;
+    }
+    if (res.ok) return res;
+    const retriable = res.status === 429 || res.status >= 500;
+    if (!retriable || attempt >= retries) return res;
+    const ra = Number(res.headers.get('retry-after'));
+    const wait = Number.isFinite(ra) && ra > 0 ? ra * 1000 : Math.min(30000, 500 * 2 ** attempt) + Math.random() * 250;
+    await sleep(wait);
+    attempt++;
+  }
+}
+
+export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadToken(apiUrl), isPublic = false, queue = true, retries = 3 } = {}) {
   if (!apiUrl) {
     throw new Error(
       'No hosted endpoint configured. Set VBRT_API_URL (e.g. https://vbrt.fly.dev) to push.',
     );
   }
   const safe = redactBundle(bundle); // scrub secrets before leaving the machine
-  const res = await fetch(`${apiUrl}/api/projects${isPublic ? '?public=1' : ''}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(safe),
-  });
+  // Persist first (unless a caller opts out, e.g. watch deltas); remove on success
+  // so a 429/network failure leaves a resendable copy in the outbox.
+  const queuedAt = queue ? queueBundle(safe, apiUrl, isPublic) : null;
+
+  let res;
+  try {
+    res = await postProject(apiUrl, JSON.stringify(safe), { token, isPublic, retries });
+  } catch (err) {
+    err.queuedAt = queuedAt; // network error after retries — bundle is safe in the outbox
+    throw err;
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`Upload failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
+    const e = new Error(`Upload failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
+    e.status = res.status;
+    e.queuedAt = queuedAt;
+    throw e;
   }
+  if (queuedAt) { try { fs.unlinkSync(queuedAt); } catch { /* already gone */ } }
   // Expected: { id, url, token? } — token present only on the first push (mint).
   const out = await res.json();
   let newToken = false;
@@ -106,4 +163,51 @@ export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadTo
     tokenPath: credsPath(),
     linkUrl: effToken ? `${apiUrl}/link#${effToken}` : null,
   };
+}
+
+// How many bundles are sitting in the outbox waiting to be resent.
+export function outboxCount() {
+  try {
+    return fs.readdirSync(outboxDir()).filter((f) => f.endsWith('.json')).length;
+  } catch {
+    return 0;
+  }
+}
+
+// Resend every queued bundle (already redacted at queue time — don't re-redact).
+// Removes each file on a successful send; leaves the rest for the next `--retry`.
+export async function flushOutbox({ apiUrl = resolveApi() } = {}) {
+  let files;
+  try {
+    files = fs.readdirSync(outboxDir()).filter((f) => f.endsWith('.json')).sort();
+  } catch {
+    return { sent: 0, failed: 0, results: [] };
+  }
+  const results = [];
+  for (const f of files) {
+    const full = path.join(outboxDir(), f);
+    let payload;
+    try {
+      payload = JSON.parse(fs.readFileSync(full, 'utf8'));
+    } catch {
+      try { fs.unlinkSync(full); } catch { /* corrupt — drop it */ }
+      continue;
+    }
+    const target = payload.apiUrl || apiUrl;
+    const token = loadToken(target);
+    try {
+      const res = await postProject(target, JSON.stringify(payload.bundle), { token, isPublic: payload.isPublic, retries: 2 });
+      if (res.ok) {
+        const out = await res.json().catch(() => ({}));
+        if (out.token) saveToken(target, out.token);
+        try { fs.unlinkSync(full); } catch { /* ignore */ }
+        results.push({ file: f, ok: true, url: out.url || `${target}/p/${out.id || ''}` });
+      } else {
+        results.push({ file: f, ok: false, status: res.status });
+      }
+    } catch (err) {
+      results.push({ file: f, ok: false, error: err.message });
+    }
+  }
+  return { sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
 }

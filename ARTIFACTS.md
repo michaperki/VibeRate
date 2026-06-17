@@ -98,6 +98,13 @@ side. (Lone shots stand alone.)
         were enough. Fixed in `skill/SKILL.md`: "scale the process to the work"
         (small-experiment mode) + a capture decision tree + a "trust `vbrt watch`,
         don't also `push --all`" rule.
+- [x] **Re-run (iteration 2, Codex)** — confirmed the capture fix: `vbrt shot
+      <localhost>` captured stills + clips on the first try, no Playwright spiral.
+      Friction shifted from *tool* to *workflow*; the remaining items are publish
+      resilience (429 + outbox), watch/push dedup, lean-by-default + `doctor` adoption,
+      and a capturable-app-design tip — tracked in `ROADMAP.md` Phase 3. Note: the
+      sort seed deliberately over-specifies docs/artifacts (it's a stress test), so its
+      ceremony is *not* the product default.
 - [ ] *Then:* viewport set / multi-shot; the other artifact families (diff,
       test-status, provenance) — mostly auto-derived, tracked in §C.
 

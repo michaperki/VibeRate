@@ -27,20 +27,31 @@ VBRT_API_URL="${VBRT_API_URL:-https://vbrt.fly.dev}" node "${CLAUDE_SKILL_DIR}/c
 
 ## Before you build (preflight + project size)
 
-Run **`vbrt doctor`** once at the start. It reports — in a few seconds — whether this
-is a git repo, whether `vbrt watch` is already live, whether headless capture works
-(Playwright + browser), and prints the exact `shot` command to use. Trust its output
-instead of discovering capabilities by trial and error.
+**Always run `vbrt doctor` first**, before your first capture or push. In a few
+seconds it reports whether this is a git repo, whether `vbrt watch` is already live,
+whether headless capture works (Playwright + browser), and prints the exact `shot`
+command to use. Trust its output — don't discover capabilities by trial and error.
 
 - **If `vbrt watch` is live** (doctor says so): it streams changes automatically.
   **Do not run `vbrt push --all`** at the end — only push manually if watch errors or
   the user asks. Capture artifacts normally; they ride the stream.
-- **Scale the process to the work.** For small experiments (under ~1 hour): keep just
-  `ROADMAP.md` + `DEVLOG.md`, skip per-phase `PLAN_*.md` files unless the user asks,
-  commit at meaningful milestones (not every micro-phase), and capture **≤3 artifacts**
-  (typically one before, one final clip, maybe one final shot). The brain conventions
-  below are how to make work legible *when there's enough of it* — not homework for a
-  toy app. More ceremony than product is a failure mode, not discipline.
+- **Scale the process to the work — lean is the default.** Don't stand up a
+  mini project-management system for a small build. Default to:
+  - **`DEVLOG.md` only.** Add `ROADMAP.md` only if the work outgrows a single session.
+    **No `PLAN_*.md` files unless the user asks.** `DECISIONS.md` only when a real
+    fork was decided.
+  - **2–3 artifacts total** for a small app — typically one *before*, one final
+    *clip*, maybe one final *shot*. More is ceremony, not evidence.
+  - Commit at meaningful milestones, not every micro-phase.
+
+  The brain conventions below are how to make work legible *when there's enough of
+  it* — not homework for a toy app. More ceremony than product is a failure mode, not
+  discipline. (Scale **up** to the full conventions for a real, multi-session project.)
+- **Make your UI capturable.** When you build something visual, support
+  **deep-link / query params** that drive its state — e.g. `?autoplay=1&speed=10&view=x`.
+  Then a single `vbrt shot "<url>?autoplay=1&…"` (or `--clip`) reproduces exactly the
+  state worth showing, with no scripting or manual interaction. This is the cheapest
+  way to make motion/UI work recordable.
 
 ## Capturing evidence (screenshots) for a prompt
 

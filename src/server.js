@@ -27,6 +27,10 @@ const MAX_IMAGE_BYTES = Number(process.env.VBRT_MAX_IMAGE_BYTES || 1536 * 1024);
 const MAX_CLIP_BYTES = Number(process.env.VBRT_MAX_CLIP_BYTES || 6 * 1024 * 1024);
 const RATE_WINDOW_MS = Number(process.env.VBRT_RATE_WINDOW_MS || 10 * 60 * 1000);
 const RATE_MAX = Number(process.env.VBRT_RATE_MAX || 20);
+// Authenticated pushers (Bearer token / signed-in account) get more headroom — an
+// active `vbrt watch` plus a final push easily exceeds the anonymous limit, and we
+// can key them by token instead of a shared NAT/WSL IP.
+const RATE_MAX_AUTH = Number(process.env.VBRT_RATE_MAX_AUTH || 120);
 const ingestHits = new Map();
 
 // The owner hashes a request can act as: a signed-in account's linked tokens, or
@@ -53,10 +57,18 @@ function canRead(project, req) {
 
 function rateLimitIngest(req, res, next) {
   if (!HOSTED) return next();
-  const key = req.ip || req.get('x-forwarded-for') || 'unknown';
+  const owners = currentOwners(req); // null = anon, [hash] = token, [..] = account
+  const authed = Array.isArray(owners) && owners.length > 0;
+  // Key authed pushers by their token (stable across a shared IP); anon by IP.
+  const key = authed ? `tok:${owners[0]}` : `ip:${req.ip || req.get('x-forwarded-for') || 'unknown'}`;
+  const max = authed ? RATE_MAX_AUTH : RATE_MAX;
   const now = Date.now();
   const hits = (ingestHits.get(key) || []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (hits.length >= RATE_MAX) return res.status(429).json({ error: 'too many uploads; try again later' });
+  if (hits.length >= max) {
+    const retryAfter = Math.max(1, Math.ceil((RATE_WINDOW_MS - (now - hits[0])) / 1000));
+    res.set('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: 'too many uploads; try again later', retryAfter });
+  }
   hits.push(now);
   ingestHits.set(key, hits);
   next();

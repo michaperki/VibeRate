@@ -13,7 +13,7 @@ import { extractDocsMulti } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
 import { readEvidence, recordShot, captureCapabilities } from '../src/evidence.js';
 import { buildBundle } from '../src/bundle.js';
-import { pushBundle, apiBase, resolveApi, login } from '../src/push.js';
+import { pushBundle, apiBase, resolveApi, login, flushOutbox, outboxCount } from '../src/push.js';
 import { redactBundle } from '../src/redact.js';
 import { slugify, claudeRoots, codexRoots, canonicalKey } from '../src/paths.js';
 
@@ -182,7 +182,9 @@ async function cmdWatch(args = []) {
         try { parsed.push(s.source === 'claude' ? await parseClaude(s.file) : await parseCodex(s.file)); } catch { /* skip */ }
       }
       const { bundle } = await assembleBundle(cwd, sessions, parsed, { includeMemory });
-      const { url } = await pushBundle(bundle, { isPublic });
+      // Deltas are ephemeral: don't queue to the outbox, and fail fast — the next
+      // tick re-sends current state, so a transient 429 self-heals without piling up.
+      const { url } = await pushBundle(bundle, { isPublic, queue: false, retries: 1 });
       const kind = firstPush ? 'full' : 'delta';
       for (const s of sessions) lastMtimes.set(s.file, sessionSig(s.file));
       firstPush = false;
@@ -200,6 +202,27 @@ async function cmdAdd(args = []) {
   // configured; otherwise write to the local store the viewer reads.
   const push = args.includes('--push') || args.includes('push') || Boolean(apiBase());
   const cwd = process.cwd();
+
+  // `vbrt push --retry` (or --flush): resend bundles that an earlier push left in the
+  // outbox (after a 429 / network failure) and stop — don't re-scan sessions.
+  if (args.includes('--retry') || args.includes('--flush')) {
+    const pending = outboxCount();
+    if (!pending) {
+      console.log(C.dim('\nNothing queued — the outbox is empty.\n'));
+      return;
+    }
+    console.log(`\nResending ${pending} queued bundle(s) → ${C.cyan(resolveApi())} ...`);
+    const { sent, failed, results } = await flushOutbox();
+    for (const r of results) if (r.ok) console.log(C.green(`  ✓ ${r.url}`));
+    if (failed) {
+      console.log(C.yellow(`\n✗ ${sent} sent, ${failed} still queued — run \`vbrt push --retry\` again later.\n`));
+      process.exitCode = 1;
+    } else {
+      console.log(C.green(`\n✓ Sent all ${sent} queued bundle(s).\n`));
+    }
+    return;
+  }
+
   console.log(`\nScanning sessions for ${C.cyan(cwd)} ...`);
   const sessions = await discoverSessions(cwd);
 
@@ -296,6 +319,11 @@ async function cmdAdd(args = []) {
         printDryRun(bundle, { includeMemory, isPublic });
         return;
       }
+      const watching = watchStatus(cwd);
+      if (watching.active) {
+        console.log(C.yellow(`\n⚠ \`vbrt watch\` is live (pid ${watching.pid}) — it's already streaming this repo.`));
+        console.log(C.dim('  This manual push is redundant; only push by hand if watch errored. Proceeding anyway…'));
+      }
       const { url, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
       if (visibility === 'public') {
         console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (public) — view & share at:`));
@@ -313,7 +341,12 @@ async function cmdAdd(args = []) {
       console.log('');
     } catch (err) {
       console.log(C.yellow(`\n✗ Push failed: ${err.message}`));
-      console.log(C.dim('  (bundle was not saved locally; fix the endpoint and retry, or run `vbrt add` for a local copy)'));
+      if (err.queuedAt) {
+        console.log(C.dim('  Your work is saved locally in the outbox — nothing lost.'));
+        console.log(C.dim(`  Resend it when the host is ready: ${C.bold('vbrt push --retry')}`));
+      } else {
+        console.log(C.dim('  (fix the endpoint and retry, or run `vbrt add` for a local copy)'));
+      }
       process.exitCode = 1;
     }
     return;
@@ -377,7 +410,9 @@ async function cmdShot(args = []) {
     const kind = rec.media === 'video' ? 'clip (webm)' : clip ? 'clip (gif)' : 'artifact';
     console.log(C.green(`\n✓ Captured ${kind}${rec.label ? ` (${rec.label})` : ''} → ${path.relative(cwd, rec.file)}`));
     console.log(C.dim(`  bound to ${rec.session ? `session ${rec.session.id}` : '(no active session found — will attach by time)'}${rec.note ? ` · "${rec.note}"` : ''}`));
-    console.log(C.dim('  Uploaded on your next `vbrt push` (or live, if `vbrt watch` is running).\n'));
+    console.log(watchStatus(cwd).active
+      ? C.dim('  `vbrt watch` is live — this streams up automatically. No manual push needed.\n')
+      : C.dim('  Rides your next `vbrt push --all`.\n'));
   } catch (err) {
     console.log(C.yellow(`\n✗ ${err.message}\n`));
     process.exitCode = 1;
@@ -487,6 +522,7 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt push')}          Upload to your dashboard at vbrt.fly.dev (set VBRT_API_URL for a local host)
   ${C.cyan('vbrt push --public')}   Publish on push (share a link immediately; default is private)
   ${C.cyan('vbrt push --dry-run')}  Preview the redacted payload and visibility without uploading
+  ${C.cyan('vbrt push --retry')}    Resend bundles left in the outbox after a failed upload
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
   ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)

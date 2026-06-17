@@ -77,8 +77,27 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   watch / capture readiness + the exact command); (c) `vbrt watch` writes a heartbeat
   so the agent can skip a redundant final `push --all`; (d) SKILL.md guidance —
   capture decision tree, "scale the process to the work" small-experiment mode, and a
-  trust-watch sync rule. Next, if needed: a deeper `doctor --fix` and per-archetype
-  capture hints.
+  trust-watch sync rule.
+- **Iteration-2 (Codex re-run of the sort experiment)** — the capture fix **worked**:
+  `vbrt shot <localhost>` captured screenshots + clips immediately, no Playwright
+  spiral (capture friction down ~80–90%). The friction has now **shifted from tool to
+  workflow**. Remaining gaps, being addressed:
+  - **Publish resilience** ◐ — hosted ingest returned `429` mid-run (the 20/10min IP
+    limit counts every `watch` delta + the manual `push` equally) and the client had
+    **no fallback** — `pushBundle` threw and the bundle was lost. Adding: backoff/retry
+    honoring `Retry-After`, a local **outbox** so a failed upload is never lost,
+    `vbrt push --retry` to drain it, and auth-aware rate-limit headroom server-side.
+  - **Watch/push double-send** ◐ — agent pushed manually while `watch` was (or seemed)
+    live. Adding: `push` warns on a fresh `watch.lock`; `shot` success message tells you
+    whether the artifact streamed live or rides the next push.
+  - **Lean-by-default + `doctor` adoption** ◐ — small-experiment mode didn't stick
+    because the *seed* mandates full ceremony (that seed is an intentional stress test).
+    Strengthening the SKILL.md default: run `vbrt doctor` first; `DEVLOG.md` only unless
+    the work outgrows one session; 2–3 artifacts.
+  - **Capturable-app design** ◐ — emergent win: the agent added `?algo=&autoplay=&speed=`
+    URL params so a single `shot <url>?…` reproduced the view. SKILL.md will teach this.
+  - Next, if needed: a deeper `doctor --fix`, per-archetype capture hints, SSE/WebSocket
+    streaming, and coalescing watch deltas so they don't count toward ingest limits.
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
 - **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)
 - **Legibility pass (external review, 2026-06)** — first-contact gaps on an otherwise polished UI; full breakdown + ranking in `PROJECT_VIEW_PLAN.md` §G:
