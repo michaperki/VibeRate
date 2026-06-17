@@ -1,5 +1,6 @@
 import { listProjects, getSession } from './storage.js';
 import { getRatingSummary, getUserVote } from './ratings.js';
+import { attachEvidence } from './evidence.js';
 
 // A globally-addressable card id: project ~ session ~ turn index. '~' is URL-safe
 // and absent from slugs/session ids, so it round-trips cleanly in /c/<id>.
@@ -120,7 +121,7 @@ function summarizeAfter(items, cap = 6) {
   return { steps: steps.slice(0, cap), stepCount: steps.length, verdict: verdict ? clip(verdict, 400) : null };
 }
 
-export function extractPromptUnits(session, sessionId, slug = null) {
+export function extractPromptUnits(session, sessionId, slug = null, { evidence = null } = {}) {
   const turns = buildTurns(session.messages);
   const out = [];
   for (let i = 0; i < turns.length; i++) {
@@ -149,6 +150,7 @@ export function extractPromptUnits(session, sessionId, slug = null) {
       chars: prompt.length,
     });
   }
+  if (evidence) attachEvidence(out, evidence, sessionId);
   return out;
 }
 
