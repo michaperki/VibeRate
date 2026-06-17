@@ -57,16 +57,19 @@ concept it changed — that link is the "living history."
 
 ## Remaining (read-only)
 
-### A. Activity timeline + Brain history — *cheap, no new capture* ← NEXT
+### A. Activity timeline + Brain history — *cheap, no new capture*
 - [ ] Make **commits / brain / code lanes clickable** (today only convos + the
   message brush are wired; the rest are tooltip-only).
 - [ ] **Brain diamond → detail** (which brain docs that commit changed + subject/
   date/hash).
-- [ ] A dedicated **Brain history view** from the git data already in the bundle.
-- [ ] git capture → `--name-status` for **add / modify / delete / rename**
-  (one-line change; unlocks lifecycle).
-- [ ] **Unify "what is the brain"** — timeline uses a fixed filename allowlist
-  (`git.js` `BRAIN_DOCS`); the graph uses a broader doc set (`docs.js`). Reconcile.
+- [x] A dedicated **Brain history view** — shipped as the **time-travel scrubber**
+  (§B), driven by the git data already in the bundle.
+- [x] git capture → `--name-status` for **add / modify / delete / rename**
+  (`git.js` now logs `--name-status` and tags each changed `.md` with a status —
+  this is what unlocked ghost-node lifecycle + streaming add/remove).
+- [x] **Unify "what is the brain"** — `BRAIN_DOCS` allowlist retired; `git.js`
+  keeps **all `.md`** and the viewer intersects with the captured doc graph
+  (`docs.js`). Timeline and graph now agree on what counts as a brain doc.
 
 ### B. Brain lifecycle & time-travel — ✅ shipped
 - [x] **"just-changed" entrance** — docs from the most recent brain commit play a
@@ -83,6 +86,15 @@ concept it changed — that link is the "living history."
     pushes capture history (the build copies all of `src/` + `bin/vbrt.js`).
 
 ### C. Prompt reader / outcome rail (Slice 4)
+> Research: `PROMPT_GALLERY.md` — a pass over Mike's real prompts found **12
+> archetypes**, and the key product finding is that each needs a *different*
+> artifact (only ~3/12 are screenshot-shaped). So the outcome rail must be
+> **polymorphic**. Mock of all 12 artifact renderings: `prototypes/outcome-artifacts.html`.
+> First family shipped: author-captured **screenshots** via `vbrt shot` — spec +
+> checklist in `ARTIFACTS.md` (before/after on the prompt card, concurrency-safe binding).
+- [x] **Screenshot artifacts** (`ARTIFACTS.md`) — `vbrt shot <url|img>` binds a
+  before/after shot to the prompt that produced it; renders in the reader. *(first
+  outcome-rail family; diff/test/provenance families still below.)*
 - [ ] **Real diffs** per edit in the reader.
 - [ ] **Outcome signals** beside each prompt: files changed, tests run + result,
   commits produced, brain changed.
@@ -162,6 +174,31 @@ Completion follow-ups (when needed):
 
 ---
 
+## 🧪 Experiment — live streaming (`vbrt watch`) · ✅ shipped & archived
+
+The dashboard is no longer a frozen snapshot. **`vbrt watch`** runs locally,
+fingerprints the **active session logs + brain docs + git**, debounces, and
+re-pushes (upsert, stable id) — so brain *and* conversation **stream live** while
+you work. The viewer **polls the `updatedAt` stamp** and animates the diff in
+place (reusing the time-travel `applyBrainAsOf` layer): nodes fade in/out, rings
+fill, the activity ribbon pulses on new convos/commits/brain diamonds, and the
+session reader **follows new turns** as they land. Delta pushes keep live updates
+small (only changed sessions after the first sync). A `● live` indicator + pause
+control + "updated Ns ago" readout sit on the dashboard and reader.
+
+Mike watched the loop close **live from the deployed site**: spec `STREAMING.md`
+was **archived** (git deletion, not a move — ghost detection keys on deletion),
+so it now ghosts in the brain graveyard alongside `PLAN_COMPLETION.md` — the
+feature burying its own spec in real time. (This was the experiment loop's
+"streaming is next" item; loop now closed.)
+
+Streaming follow-ups (only if needed — tracked in `ROADMAP.md` under `vbrt watch`):
+- [ ] **SSE / WebSocket** transport if polling ever feels laggy (drop the poll).
+- [ ] **Reader append-not-rerender** — append new turns instead of a full
+  re-render, preserving expanded `<details>` while following a live session.
+
+---
+
 ## Decisions resolved via toggle/mock (Mike's method)
 
 For any fork with >1 viable UI path, build a live **toggle** or a **mock** (à la
@@ -170,4 +207,7 @@ the prompt-unit / brain prototypes) — don't pick unilaterally.
 - Brain organization → resolved: hover-peek + role-clustering + fit-to-canvas;
   heading-explosion dropped; recoloring not pursued (clustering sufficed).
 - Completion-ring visual → resolved: **Arc** (mocked Arc/Liquid/Segments).
+- Streaming transport → resolved: **poll the `updatedAt` stamp** (SSE/WebSocket
+  deferred until polling proves laggy); live affordance → `● live` + pause +
+  "updated Ns ago"; reader → **auto-follow** new turns (scroll only if near bottom).
 - Still open: outcome-rail placement (C).
