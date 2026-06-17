@@ -63,7 +63,8 @@ export function ingestBundle(bundle, { owner = null, visibility = null } = {}) {
   const existing = findOwnedProjectByCwd(owner, cwd);
   const id = existing ? existing.slug : crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars, unlisted
   saveBundle(bundle, { slug: id, name: (bundle.project && bundle.project.name) || id, owner, visibility });
-  return { id, updated: !!existing };
+  const manifest = getProject(id);
+  return { id, updated: !!existing, visibility: manifest && manifest.visibility };
 }
 
 // Flip a project public/private (the "publish" action). Returns the manifest.

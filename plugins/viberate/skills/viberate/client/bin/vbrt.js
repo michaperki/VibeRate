@@ -13,7 +13,7 @@ import { extractDocsMulti } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
 import { readEvidence, recordShot, captureCapabilities } from '../src/evidence.js';
 import { buildBundle } from '../src/bundle.js';
-import { pushBundle, apiBase, resolveApi, login, flushOutbox, outboxCount } from '../src/push.js';
+import { pushBundle, apiBase, resolveApi, login, flushOutbox, outboxCount, publishProject, saveProjectRef, loadProjectRef } from '../src/push.js';
 import { redactBundle } from '../src/redact.js';
 import { slugify, claudeRoots, codexRoots, canonicalKey } from '../src/paths.js';
 
@@ -194,10 +194,11 @@ async function cmdWatch(args = []) {
       const { bundle } = await assembleBundle(cwd, sessions, parsed, { includeMemory });
       // Deltas are ephemeral: don't queue to the outbox, and fail fast — the next
       // tick re-sends current state, so a transient 429 self-heals without piling up.
-      const { url } = await pushBundle(bundle, { isPublic, queue: false, retries: 1 });
+      const { id, url, visibility } = await pushBundle(bundle, { isPublic, queue: false, retries: 1 });
       const kind = firstPush ? 'full' : 'delta';
       for (const s of sessions) lastMtimes.set(s.file, sessionSig(s.file));
       firstPush = false;
+      saveProjectRef(cwd, { id, url, apiUrl, visibility });
       lockState.url = url || lockState.url;
       lockState.lastUpload = Date.now();
       writeLock(); // surface the share URL + upload time immediately
@@ -337,15 +338,16 @@ async function cmdAdd(args = []) {
         console.log(C.yellow(`\n⚠ \`vbrt watch\` is live (pid ${watching.pid}) — it's already streaming this repo.`));
         console.log(C.dim('  This manual push is redundant; only push by hand if watch errored. Proceeding anyway…'));
       }
-      const { url, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
+      const { id, url, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
+      saveProjectRef(cwd, { id, url, apiUrl: resolveApi(), visibility });
       if (visibility === 'public') {
         console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (public) — view & share at:`));
         console.log(`  ${C.cyan(url)}`);
         console.log(C.dim(`  Your projects: ${dashboardUrl}`));
       } else {
         console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (private) — only you can see it:`));
-        console.log(`  ${C.cyan(dashboardUrl)}`);
-        console.log(C.dim('  Publish it from your dashboard, or push with --public to share a link.'));
+        console.log(`  ${C.cyan(url)}`);
+        console.log(C.dim(`  It's private. Make this link shareable without re-uploading: ${C.bold('vbrt publish --public')}`));
       }
       if (newToken) {
         console.log(C.dim(`  (saved an access token to ${tokenPath})`));
@@ -554,20 +556,43 @@ function agoStr(ts) {
 function cmdStatus() {
   const cwd = process.cwd();
   const w = watchStatus(cwd);
+  const ref = loadProjectRef(cwd); // survives across runs even without a watcher
   const queued = outboxCount();
   let evidence = 0;
   try { evidence = readEvidence(cwd).length; } catch { /* none */ }
+  const url = w.url || (ref && ref.url) || null;
+  const visibility = ref && ref.visibility;
 
   console.log(`\n${C.bold('vbrt status')} — ${C.cyan(cwd)}\n`);
   console.log(`  Watch:        ${w.active ? C.green(`live`) + C.dim(` (pid ${w.pid}${w.lastUpload ? `, last upload ${agoStr(w.lastUpload)}` : ''})`) : C.dim('not running')}`);
-  const url = w.url || null;
-  console.log(`  Project:      ${url ? C.cyan(url) : C.dim(w.active ? '(none yet — first stream not landed)' : 'no link yet — `vbrt push --all` or `vbrt watch` to publish')}`);
+  const vis = visibility ? C.dim(`  [${visibility}]`) : '';
+  console.log(`  Project:      ${url ? C.cyan(url) + vis : C.dim(w.active ? '(none yet — first stream not landed)' : 'no link yet — `vbrt push --all` or `vbrt watch` to publish')}`);
+  if (url && visibility === 'private') console.log(C.dim(`                share it: ${C.bold('vbrt publish --public')}`));
   console.log(`  Evidence:     ${evidence ? `${evidence} captured` : C.dim('none captured')}${evidence && w.active ? C.dim(' (streaming live)') : ''}`);
   console.log(`  Outbox:       ${queued ? C.yellow(`${queued} queued`) + C.dim(' — `vbrt push --retry`') : C.dim('empty')}`);
   const manual = queued ? C.yellow('run `vbrt push --retry` (queued uploads)')
     : w.active ? C.green('not needed') + C.dim(' (watch is streaming)')
+    : url ? C.dim('already pushed — re-push only to update')
     : C.dim('recommended — `vbrt push --all` (no watcher running)');
   console.log(`  Manual push:  ${manual}\n`);
+}
+
+// Flip the already-uploaded project public/private without re-sending the bundle.
+async function cmdPublish(args = []) {
+  const cwd = process.cwd();
+  const visibility = args.includes('--private') ? 'private' : 'public';
+  try {
+    const out = await publishProject(cwd, { visibility });
+    if (out.visibility === 'public') {
+      console.log(C.green(`\n✓ Public — anyone with the link can view:`));
+      console.log(`  ${C.cyan(out.url)}\n`);
+    } else {
+      console.log(C.green(`\n✓ Private — only you can view. ${C.dim('(re-share with `vbrt publish --public`)')}\n`));
+    }
+  } catch (err) {
+    console.log(C.yellow(`\n✗ ${err.message}\n`));
+    process.exitCode = 1;
+  }
 }
 
 function cmdHelp() {
@@ -578,6 +603,8 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt login <token>')}  Connect this machine to your account (token from the dashboard)
   ${C.cyan('vbrt push')}          Upload to your dashboard at vbrt.fly.dev (set VBRT_API_URL for a local host)
   ${C.cyan('vbrt push --public')}   Publish on push (share a link immediately; default is private)
+  ${C.cyan('vbrt publish --public')} Make the last pushed link shareable without re-uploading
+  ${C.cyan('vbrt publish --private')} Make the last pushed link private again
   ${C.cyan('vbrt push --dry-run')}  Preview the redacted payload and visibility without uploading
   ${C.cyan('vbrt push --retry')}    Resend bundles left in the outbox after a failed upload
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
@@ -601,6 +628,9 @@ async function main() {
       break;
     case 'push':
       await cmdAdd(['push', ...rest]);
+      break;
+    case 'publish':
+      await cmdPublish(rest);
       break;
     case 'watch':
       await cmdWatch(rest);

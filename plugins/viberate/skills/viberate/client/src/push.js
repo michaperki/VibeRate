@@ -165,6 +165,62 @@ export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadTo
   };
 }
 
+// Remember the project a repo pushes to, so `vbrt publish` / `vbrt status` know the
+// share URL + current visibility without a network round-trip or a re-upload. Lives
+// in the (gitignored) sidecar next to evidence.
+const projectRefPath = (cwd) => path.join(cwd, '.vbrt', 'project.json');
+
+function ensureVbrtIgnored(cwd) {
+  try {
+    const gi = path.join(cwd, '.gitignore');
+    const body = fs.existsSync(gi) ? fs.readFileSync(gi, 'utf8') : '';
+    if (/^\.vbrt\/?\s*$/m.test(body)) return;
+    const prefix = body && !body.endsWith('\n') ? '\n' : '';
+    fs.appendFileSync(gi, `${prefix}# VibeRate runtime state (project ref, evidence, watch lock)\n.vbrt/\n`);
+  } catch { /* best-effort */ }
+}
+
+export function saveProjectRef(cwd, ref) {
+  try {
+    ensureVbrtIgnored(cwd);
+    fs.mkdirSync(path.join(cwd, '.vbrt'), { recursive: true });
+    const prev = loadProjectRef(cwd) || {};
+    fs.writeFileSync(projectRefPath(cwd), JSON.stringify({ ...prev, ...ref }, null, 2));
+  } catch { /* best-effort */ }
+}
+
+export function loadProjectRef(cwd) {
+  try {
+    return JSON.parse(fs.readFileSync(projectRefPath(cwd), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Flip an already-uploaded project's visibility without re-sending the bundle — the
+// fix for "push private, realize, re-push --public". Uses the saved project ref +
+// owner token against the existing visibility endpoint.
+export async function publishProject(cwd, { visibility = 'public', apiUrl } = {}) {
+  const ref = loadProjectRef(cwd);
+  if (!ref || !ref.id) {
+    throw new Error('No published project for this repo yet — run `vbrt push --all` first.');
+  }
+  const target = apiUrl || ref.apiUrl || resolveApi();
+  const token = loadToken(target);
+  const res = await fetch(`${target}/api/projects/${ref.id}/visibility`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ visibility }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Publish failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
+  }
+  const out = await res.json();
+  saveProjectRef(cwd, { visibility: out.visibility });
+  return { ...out, url: ref.url || `${target}/p/${ref.id}` };
+}
+
 // How many bundles are sitting in the outbox waiting to be resent.
 export function outboxCount() {
   try {

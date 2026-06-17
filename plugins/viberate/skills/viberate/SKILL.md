@@ -23,7 +23,11 @@ VBRT_API_URL="${VBRT_API_URL:-https://vbrt.fly.dev}" node "${CLAUDE_SKILL_DIR}/c
 - `push --all` selects every session discovered for this folder, non-interactively (no prompts). **Always pass `--all`** — bare `vbrt push` opens an interactive session picker you can't drive.
 - If `vbrt` is on your `PATH` (a global install, or running under **Codex**), drop the `node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js"` prefix and just run `vbrt push --all` / `vbrt shot …` / `vbrt watch`. Same commands, agent-agnostic.
 - On success the command prints `✓ Pushed project ... view & share at:` followed by a URL like `https://vbrt.fly.dev/p/<id>`. **Give that full URL to the user** — that's their shareable dashboard.
-- Conversations are scrubbed for obvious secrets (API keys, tokens, private keys) before upload. The link is unlisted but anyone who has it can view it — remind the user of that.
+- Hosted pushes are **private by default**. To make an existing pushed link shareable
+  without uploading the bundle again, run `vbrt publish --public`. To pull it back,
+  run `vbrt publish --private`. Conversations are scrubbed for obvious secrets (API
+  keys, tokens, private keys) before upload, but a public link is still a shareable
+  surface.
 
 ## Before you build (preflight + project size)
 
@@ -39,11 +43,15 @@ command to use. Trust its output — don't discover capabilities by trial and er
   one glance whether watch is live, the **project URL**, how much evidence is captured,
   anything queued in the outbox, and whether a manual push is needed. Use it instead of
   pushing just to get a URL (that's what caused redundant pushes + rate-limit errors).
+- **End with `vbrt status`.** Make it the final source of truth before reporting back:
+  it should show the project URL, visibility, evidence count, outbox state, and whether
+  a manual push is still needed.
 - **Scale the process to the work — lean is the default.** Don't stand up a
   mini project-management system for a small build. Default to:
-  - **`DEVLOG.md` only.** Add `ROADMAP.md` only if the work outgrows a single session.
-    **No `PLAN_*.md` files unless the user asks.** `DECISIONS.md` only when a real
-    fork was decided.
+  - **`DEVLOG.md` + `README.md` only** for small experiments. Do **not** create
+    `ROADMAP.md`, `PLAN_*.md`, `TASKS.md`, or similar ceremony unless the work is
+    multi-session, the user asks, or the repo already uses those docs. `DECISIONS.md`
+    only when a real fork was decided.
   - **2–3 artifacts total** for a small app — typically one *before*, one final
     *clip*, maybe one final *shot*. More is ceremony, not evidence.
   - Commit at meaningful milestones, not every micro-phase.
@@ -62,6 +70,10 @@ command to use. Trust its output — don't discover capabilities by trial and er
 When you make a **visible UI change**, capture a before/after screenshot so it shows on the prompt that produced it. One line; it binds itself to the current conversation — no session/turn id needed.
 
 Point it at **the app's URL** — normally its **deployed site** (reachable from anywhere for headless capture, and it reflects the real shipped state). Use a `localhost` dev URL only if that's literally where the app is running.
+
+**Default order:** commit the first working version before capture, unless the user
+explicitly wants a pre/post comparison. Evidence is most useful when it ties to a
+git checkpoint; `vbrt shot` will warn if there is no commit yet.
 
 ```bash
 # before the change (current live state):
@@ -83,6 +95,9 @@ node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot http://localhost:5173 --clip 
 
 - `--clip [seconds]` (default 4, max 15). Produces an animated **gif** if `ffmpeg` is installed, otherwise a **webm** — both render and loop in the reader, no difference to you.
 - Keep clips short and the `--viewport` modest (e.g. `960x600`); they inline into the bundle, so smaller is better. Prefer a clip only when a still wouldn't show the point.
+- For animated apps, games, simulations, visualizers, drag/drop, hover states, or
+  transition-heavy UI, capture **at least one `--clip` after the first commit**. A
+  final still alone is not enough evidence for motion-first work.
 
 ### If capture fails — the decision tree (don't improvise)
 

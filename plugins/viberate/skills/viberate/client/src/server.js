@@ -184,8 +184,8 @@ export function startServer(port = 4317) {
         owner = hashToken(token);
       }
       // Private by default; `vbrt push --public` (?public=1) publishes on push.
-      const visibility = HOSTED ? (req.query.public === '1' ? 'public' : 'private') : 'public';
-      const { id } = ingestBundle(bundle, { owner, visibility });
+      const requestedVisibility = HOSTED ? (req.query.public === '1' ? 'public' : 'private') : 'public';
+      const { id, visibility } = ingestBundle(bundle, { owner, visibility: requestedVisibility });
       const url = `${req.protocol}://${req.get('host')}/p/${id}`;
       res.status(201).json({ id, url, visibility, ...(minted ? { token: minted } : {}) });
     } catch (err) {

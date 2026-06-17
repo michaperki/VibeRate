@@ -114,20 +114,21 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   `Share/view: …/p/…` so the agent never hunted for the URL; **no 429**; the no-commit
   nudge worked (committed, then recaptured). Remaining friction is now **polish-level
   workflow defaults**, not tool friction → next priorities:
-  - **Lean docs, harder default** ☐ — it still made `ROADMAP.md` + `PLAN_life.md` for a
+  - **Lean docs, harder default** ✅ — it still made `ROADMAP.md` + `PLAN_life.md` for a
     toy (the ROADMAP just pointed at the PLAN — pure ceremony). Tighten SKILL.md: small
     experiments are **`DEVLOG.md` + `README.md` only**; no `ROADMAP.md`/`PLAN_*` unless
     multi-session or asked.
-  - **Public/private clarity** ☐ — it pushed (private), realized, then re-pushed
+  - **Public/private clarity** ✅ — it pushed (private), realized, then re-pushed
     `--public`. When a link already exists, say its visibility and the exact next command
-    (e.g. a `vbrt publish --public` that flips visibility without re-sending the bundle).
-  - **Require a clip for animated apps** ☐ — the final capture was a still
+    (`vbrt publish --public` / `--private` now flips visibility without re-sending the
+    bundle, and `vbrt status` shows the saved link visibility).
+  - **Require a clip for animated apps** ✅ — the final capture was a still
     (`✓ Captured artifact`), not a clip, on a motion-first app. SKILL.md: for animated
     work, capture at least one `--clip` after the first commit.
-  - **Commit-before-first-capture, stated** ☐ — handled reactively now; make it the
+  - **Commit-before-first-capture, stated** ✅ — handled reactively now; make it the
     explicit default in SKILL.md (commit the first working version before capturing,
     unless the user wants a pre/post comparison).
-  - **`vbrt status` as the natural finish** ☐ — it succeeded *without* `status`/`doctor`,
+  - **`vbrt status` as the natural finish** ✅ — it succeeded *without* `status`/`doctor`,
     inferring state from push output. Nudge agents to **end with `vbrt status`** so the
     tool, not the output log, is the source of truth.
   - Later, if needed: `doctor --fix`, SSE/WebSocket streaming, coalescing watch deltas.

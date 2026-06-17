@@ -56,13 +56,15 @@ The hosted workflow is the product path:
 
 ```bash
 vbrt push --all     # upload a shareable project dashboard
+vbrt publish --public # make the last pushed link public without re-uploading
+vbrt status         # local truth: watch, URL, visibility, evidence, outbox
 vbrt watch          # keep the hosted dashboard live while you work
 vbrt shot <url|img> # attach before/after UI evidence to the active prompt
 ```
 
 Uploads are redacted for obvious secrets before leaving the machine, but hosted
-links are still shareable surfaces. Privacy preview and hosted ingest hardening
-are tracked as near-term roadmap items before broader social/discovery work.
+projects are private by default. Use `vbrt publish --public` when the existing
+link should be shareable, or `vbrt publish --private` to make it owner-only again.
 
 ## Layout
 
