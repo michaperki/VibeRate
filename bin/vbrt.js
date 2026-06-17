@@ -132,13 +132,23 @@ async function cmdWatch(args = []) {
   const repoPaths = [...new Set([cwd, ...sessions0.map((s) => s.cwd).filter(Boolean)])];
   console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim(`(${sessionFiles.length} session(s) + brain docs + git · Ctrl-C to stop)`)}`);
 
-  // Heartbeat so `vbrt doctor` (and the agent) can tell a watcher is live and skip
-  // a redundant final `vbrt push`. Refreshed each tick; removed on exit.
+  // Heartbeat so `vbrt doctor` / `vbrt status` (and the agent) can tell a watcher is
+  // live, find the share URL, and skip a redundant final `vbrt push`. The lock also
+  // carries the project URL + last-upload time so nobody has to go hunting for them.
+  // Refreshed each tick; removed on exit.
   const lockFile = path.join(cwd, '.vbrt', 'watch.lock');
+  const lockState = { url: null, lastUpload: null };
   const writeLock = () => {
     try {
       fs.mkdirSync(path.dirname(lockFile), { recursive: true });
-      fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, cwd, ts: Date.now() }));
+      fs.writeFileSync(lockFile, JSON.stringify({
+        pid: process.pid,
+        cwd,
+        ts: Date.now(),
+        url: lockState.url,
+        lastUpload: lockState.lastUpload,
+        queued: outboxCount(),
+      }));
     } catch { /* best-effort */ }
   };
   const clearLock = () => { try { fs.unlinkSync(lockFile); } catch { /* gone */ } };
@@ -188,6 +198,9 @@ async function cmdWatch(args = []) {
       const kind = firstPush ? 'full' : 'delta';
       for (const s of sessions) lastMtimes.set(s.file, sessionSig(s.file));
       firstPush = false;
+      lockState.url = url || lockState.url;
+      lockState.lastUpload = Date.now();
+      writeLock(); // surface the share URL + upload time immediately
       console.log(C.dim(`  ↑ ${new Date().toLocaleTimeString()} — pushed ${parsed.length} session(s) [${kind}] → ${url}`));
     } catch (err) {
       console.log(C.yellow(`  ✗ push failed: ${err.message}`));
@@ -410,9 +423,19 @@ async function cmdShot(args = []) {
     const kind = rec.media === 'video' ? 'clip (webm)' : clip ? 'clip (gif)' : 'artifact';
     console.log(C.green(`\n✓ Captured ${kind}${rec.label ? ` (${rec.label})` : ''} → ${path.relative(cwd, rec.file)}`));
     console.log(C.dim(`  bound to ${rec.session ? `session ${rec.session.id}` : '(no active session found — will attach by time)'}${rec.note ? ` · "${rec.note}"` : ''}`));
-    console.log(watchStatus(cwd).active
-      ? C.dim('  `vbrt watch` is live — this streams up automatically. No manual push needed.\n')
-      : C.dim('  Rides your next `vbrt push --all`.\n'));
+    // Before the first commit, evidence can't tie to a code checkpoint — nudge, don't fail.
+    if (isGitRepo(cwd) && !rec.gitHead) {
+      console.log(C.yellow('  ⚠ No commit yet — captured, but not tied to a code checkpoint. Commit first, then capture for a clean before/after.'));
+    }
+    const w = watchStatus(cwd);
+    if (w.active) {
+      console.log(C.dim('  `vbrt watch` is live — this streams up automatically. No manual push needed.'));
+      if (w.url) console.log(C.dim(`  Share/view: ${C.cyan(w.url)}`));
+      else console.log(C.dim('  (share link appears after the first stream lands — `vbrt status` shows it)'));
+      console.log('');
+    } else {
+      console.log(C.dim('  Rides your next `vbrt push --all`.\n'));
+    }
   } catch (err) {
     console.log(C.yellow(`\n✗ ${err.message}\n`));
     process.exitCode = 1;
@@ -458,11 +481,15 @@ async function cmdServe(args) {
 }
 
 // Is a `vbrt watch` heartbeat live for this repo? (lock refreshed every ~2s)
+// Returns the lock's payload too — project URL, last-upload time, queued count —
+// so callers don't go hunting for the share link.
 function watchStatus(cwd) {
   try {
     const raw = fs.readFileSync(path.join(cwd, '.vbrt', 'watch.lock'), 'utf8');
-    const { pid, ts } = JSON.parse(raw);
-    if (Date.now() - Number(ts) < 15000) return { active: true, pid };
+    const lock = JSON.parse(raw);
+    if (Date.now() - Number(lock.ts) < 15000) {
+      return { active: true, pid: lock.pid, url: lock.url || null, lastUpload: lock.lastUpload || null, queued: lock.queued || 0 };
+    }
   } catch { /* no lock / stale */ }
   return { active: false };
 }
@@ -513,6 +540,36 @@ async function cmdDoctor() {
   console.log(C.dim('\n  Small experiments (<~1h): keep ROADMAP.md + DEVLOG.md, skip per-phase PLAN files, ≤3 artifacts.\n'));
 }
 
+function agoStr(ts) {
+  if (!ts) return null;
+  const s = Math.max(0, Math.round((Date.now() - Number(ts)) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
+// One glance at VibeRate's state for this repo: is watch live, where's the share
+// URL, how much evidence is captured, anything queued, and is a manual push needed.
+// Reads only local state (lock + outbox + evidence sidecar) — no network.
+function cmdStatus() {
+  const cwd = process.cwd();
+  const w = watchStatus(cwd);
+  const queued = outboxCount();
+  let evidence = 0;
+  try { evidence = readEvidence(cwd).length; } catch { /* none */ }
+
+  console.log(`\n${C.bold('vbrt status')} — ${C.cyan(cwd)}\n`);
+  console.log(`  Watch:        ${w.active ? C.green(`live`) + C.dim(` (pid ${w.pid}${w.lastUpload ? `, last upload ${agoStr(w.lastUpload)}` : ''})`) : C.dim('not running')}`);
+  const url = w.url || null;
+  console.log(`  Project:      ${url ? C.cyan(url) : C.dim(w.active ? '(none yet — first stream not landed)' : 'no link yet — `vbrt push --all` or `vbrt watch` to publish')}`);
+  console.log(`  Evidence:     ${evidence ? `${evidence} captured` : C.dim('none captured')}${evidence && w.active ? C.dim(' (streaming live)') : ''}`);
+  console.log(`  Outbox:       ${queued ? C.yellow(`${queued} queued`) + C.dim(' — `vbrt push --retry`') : C.dim('empty')}`);
+  const manual = queued ? C.yellow('run `vbrt push --retry` (queued uploads)')
+    : w.active ? C.green('not needed') + C.dim(' (watch is streaming)')
+    : C.dim('recommended — `vbrt push --all` (no watcher running)');
+  console.log(`  Manual push:  ${manual}\n`);
+}
+
 function cmdHelp() {
   console.log(`
 ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
@@ -528,6 +585,7 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)
   ${C.cyan('vbrt shot <url> --clip [s]')} Record a short motion clip (gif if ffmpeg, else webm)
   ${C.cyan('vbrt doctor')}        Preflight: repo / watch / capture readiness + the command to use
+  ${C.cyan('vbrt status')}        Where things stand: watch, project URL, evidence, outbox, push needed?
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port
   ${C.cyan('vbrt help')}          Show this help
@@ -552,6 +610,9 @@ async function main() {
       break;
     case 'doctor':
       await cmdDoctor();
+      break;
+    case 'status':
+      cmdStatus();
       break;
     case 'login':
       await cmdLogin(rest);

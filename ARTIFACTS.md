@@ -105,6 +105,13 @@ side. (Lone shots stand alone.)
       and a capturable-app-design tip — tracked in `ROADMAP.md` Phase 3. Note: the
       sort seed deliberately over-specifies docs/artifacts (it's a stress test), so its
       ceremony is *not* the product default.
+- [x] **Re-run (iteration 3, Game of Life, lean seed)** — best yet: 4m39s, 3 light
+      docs, 2 clips, capture direct, app designed around capturable URL params. Lean
+      defaults landed without the seed forcing them. Capture/artifact friction is now
+      essentially solved; the remaining friction is **state/status clarity** (is watch
+      live, where's the project URL, what's queued, is a push needed) + the still-open
+      **429** blocking the share-URL "reward moment" — both tracked in `ROADMAP.md`
+      Phase 3 (`vbrt status`, enriched `watch.lock`, `shot` prints URL under watch).
 - [ ] *Then:* viewport set / multi-shot; the other artifact families (diff,
       test-status, provenance) — mostly auto-derived, tracked in §C.
 

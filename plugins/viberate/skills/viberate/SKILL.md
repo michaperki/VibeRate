@@ -35,6 +35,10 @@ command to use. Trust its output — don't discover capabilities by trial and er
 - **If `vbrt watch` is live** (doctor says so): it streams changes automatically.
   **Do not run `vbrt push --all`** at the end — only push manually if watch errors or
   the user asks. Capture artifacts normally; they ride the stream.
+- **Need the share link, or unsure what's going on? Run `vbrt status`** — it shows in
+  one glance whether watch is live, the **project URL**, how much evidence is captured,
+  anything queued in the outbox, and whether a manual push is needed. Use it instead of
+  pushing just to get a URL (that's what caused redundant pushes + rate-limit errors).
 - **Scale the process to the work — lean is the default.** Don't stand up a
   mini project-management system for a small build. Default to:
   - **`DEVLOG.md` only.** Add `ROADMAP.md` only if the work outgrows a single session.

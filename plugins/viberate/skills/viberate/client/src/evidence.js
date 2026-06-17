@@ -84,9 +84,29 @@ export async function captureCapabilities(cwd) {
 
 function gitHead(cwd) {
   try {
-    return execFileSync('git', ['-C', cwd, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    // stderr ignored: before the first commit, `rev-parse HEAD` prints
+    // "fatal: Needed a single revision" — expected, not an error to surface.
+    return execFileSync('git', ['-C', cwd, 'rev-parse', '--short', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return null;
+  }
+}
+
+// Keep runtime evidence out of git without making the agent think about it: ensure
+// the whole `.vbrt/` dir is ignored the first time we write a capture. Idempotent.
+function ensureGitignore(cwd) {
+  const gi = path.join(cwd, '.gitignore');
+  try {
+    let body = '';
+    try { body = fs.readFileSync(gi, 'utf8'); } catch { /* none yet */ }
+    if (/^\.vbrt\/?\s*$/m.test(body)) return; // already ignored
+    const prefix = body && !body.endsWith('\n') ? '\n' : '';
+    fs.appendFileSync(gi, `${prefix}# VibeRate runtime evidence (screenshots, clips, watch lock)\n.vbrt/\n`);
+  } catch {
+    /* best-effort: a missing .gitignore just means evidence may show as untracked */
   }
 }
 
@@ -215,6 +235,7 @@ async function captureClip(url, { viewport, seconds = 4, fps = 12, cwd } = {}) {
 export async function recordShot(cwd, { target, image, label = null, note = '', viewport = null, session = null, pair = null, clip = null } = {}) {
   const dir = evidenceDir(cwd);
   fs.mkdirSync(dir, { recursive: true });
+  ensureGitignore(cwd);
 
   const isUrl = target && /^https?:\/\//i.test(target);
   // media: 'image' (still or gif) renders in <img>; 'video' renders as <video>.

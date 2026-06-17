@@ -80,24 +80,39 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   trust-watch sync rule.
 - **Iteration-2 (Codex re-run of the sort experiment)** — the capture fix **worked**:
   `vbrt shot <localhost>` captured screenshots + clips immediately, no Playwright
-  spiral (capture friction down ~80–90%). The friction has now **shifted from tool to
-  workflow**. Remaining gaps, being addressed:
-  - **Publish resilience** ◐ — hosted ingest returned `429` mid-run (the 20/10min IP
-    limit counts every `watch` delta + the manual `push` equally) and the client had
-    **no fallback** — `pushBundle` threw and the bundle was lost. Adding: backoff/retry
-    honoring `Retry-After`, a local **outbox** so a failed upload is never lost,
-    `vbrt push --retry` to drain it, and auth-aware rate-limit headroom server-side.
-  - **Watch/push double-send** ◐ — agent pushed manually while `watch` was (or seemed)
-    live. Adding: `push` warns on a fresh `watch.lock`; `shot` success message tells you
-    whether the artifact streamed live or rides the next push.
-  - **Lean-by-default + `doctor` adoption** ◐ — small-experiment mode didn't stick
-    because the *seed* mandates full ceremony (that seed is an intentional stress test).
-    Strengthening the SKILL.md default: run `vbrt doctor` first; `DEVLOG.md` only unless
-    the work outgrows one session; 2–3 artifacts.
-  - **Capturable-app design** ◐ — emergent win: the agent added `?algo=&autoplay=&speed=`
-    URL params so a single `shot <url>?…` reproduced the view. SKILL.md will teach this.
-  - Next, if needed: a deeper `doctor --fix`, per-archetype capture hints, SSE/WebSocket
-    streaming, and coalescing watch deltas so they don't count toward ingest limits.
+  spiral (capture friction down ~80–90%). Friction **shifted from tool to workflow**;
+  shipped in response:
+  - **Publish resilience** ✅ — backoff/retry honoring `Retry-After`, a local **outbox**
+    so a failed upload is never lost, `vbrt push --retry` to drain it, auth-aware
+    rate-limit headroom server-side, and watch deltas opt out of the outbox.
+  - **Watch/push double-send** ✅ — `push` warns on a fresh `watch.lock`; `shot` success
+    message says whether the artifact streamed live or rides the next push.
+  - **Lean-by-default + `doctor` adoption** ✅ — SKILL.md default: run `vbrt doctor`
+    first; `DEVLOG.md` only unless the work outgrows one session; 2–3 artifacts.
+  - **Capturable-app design** ✅ — SKILL.md teaches deep-link/query params so a single
+    `shot <url>?…` reproduces the view.
+- **Iteration-3 (Game of Life, lean prescription-free seed)** — best run yet: 4m39s vs
+  7m32s, 3 lightweight docs (no `PLAN_*` sprawl), 2 clips, capture worked directly,
+  better product per minute. Overhead down to ~10–20%. The lean defaults + capturable
+  URL pattern **landed without the seed forcing them**. The bottleneck is no longer
+  agent confusion — it's **VibeRate state/status clarity**: the agent should always know
+  *is watch live, where is the project URL, what's queued, is a manual push needed*.
+  Remaining gaps → next priorities:
+  - **`vbrt status`** ☐ — one command that answers the above: watch live?, project URL,
+    evidence captured/uploaded, outbox count, "manual push needed?". The single
+    highest-leverage fix — removes most remaining waste.
+  - **Enrich `watch.lock`** ☐ — currently just `{pid,cwd,ts}`; the agent read it, found
+    no share URL, and searched `~/.vbrt` then `/tmp`. Add: project **URL**, last
+    successful upload time, queued count. Feeds `status` and `shot`.
+  - **`shot` under live watch prints the project URL** ☐ — the agent only ran manual
+    `push` to *get a URL* (then hit 429). If watch is live, `shot` should print the URL
+    from `watch.lock` so there's no reason to push.
+  - **"No commit yet" guidance** ☐ — `vbrt shot` before the first commit leaked
+    `fatal: Needed a single revision` and bound evidence to no checkpoint. Detect it,
+    suppress the git stderr, and recommend commit-then-capture.
+  - **`.gitignore` default** ☐ — ignore the whole `.vbrt/` dir (not just `watch.lock`);
+    have `shot` ensure it on first capture so runtime evidence never lands in git.
+  - Later, if needed: `doctor --fix`, SSE/WebSocket streaming, coalescing watch deltas.
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
 - **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)
 - **Legibility pass (external review, 2026-06)** — first-contact gaps on an otherwise polished UI; full breakdown + ranking in `PROJECT_VIEW_PLAN.md` §G:
