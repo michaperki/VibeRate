@@ -24,13 +24,14 @@ function readJson(file, fallback) {
 // behavior-compatible. `opts.slug` overrides the cwd-derived slug (used for
 // hosted projects keyed by a random id); `opts.name` sets the display name.
 export function saveBundle(bundle, opts = {}) {
-  const { project, sessions, git, docs, memory, docHistory } = bundle;
+  const { project, sessions, git, docs, memory, docHistory, evidence } = bundle;
   const cwd = project.cwd;
   const result = saveSessions(cwd, sessions, opts);
   if (git) saveGit(cwd, git, opts.slug);
   if (docs && docs.docs) saveDocs(cwd, docs.docs, opts.slug);
   if (docHistory) saveDocHistory(cwd, docHistory, opts.slug);
   if (memory && memory.ok) saveMemory(cwd, memory, opts.slug);
+  if (evidence) saveEvidence(cwd, evidence, opts.slug);
   return result;
 }
 
@@ -212,6 +213,21 @@ export function saveMemory(cwd, memory, slug = slugify(cwd)) {
 
 export function getMemory(slug) {
   return readJson(path.join(projectDir(slug), 'memory.json'), null);
+}
+
+// Author-captured evidence artifacts (screenshots/gifs), each bound to a session
+// + capture time so the reader can place it on the prompt that produced it. The
+// bundle carries the full set each push, so this overwrites idempotently.
+export function saveEvidence(cwd, evidence, slug = slugify(cwd)) {
+  if (!evidence || !evidence.length) return;
+  const dir = projectDir(slug);
+  ensureDir(dir);
+  fs.writeFileSync(path.join(dir, 'evidence.json'), JSON.stringify({ capturedAt: new Date().toISOString(), evidence }));
+}
+
+export function getEvidence(slug) {
+  const data = readJson(path.join(projectDir(slug), 'evidence.json'), null);
+  return data && data.evidence ? data.evidence : [];
 }
 
 // Overarching ("workspace") rollup across one owner's projects, built only from

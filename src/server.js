@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getDocHistory, getMemory, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
+import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getDocHistory, getMemory, getEvidence, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { extractPromptUnits, buildFeed, parseCardId } from './prompts.js';
@@ -212,7 +212,7 @@ export function startServer(port = 4317) {
     if (!guardRead(req, res)) return;
     const session = getSession(req.params.slug, req.params.id);
     if (!session) return res.status(404).json({ error: 'not found' });
-    res.json(extractPromptUnits(session, req.params.id, req.params.slug));
+    res.json(extractPromptUnits(session, req.params.id, req.params.slug, { evidence: getEvidence(req.params.slug) }));
   });
 
   // Discover feed: substantive prompt cards across published projects. Public —
@@ -230,7 +230,7 @@ export function startServer(port = 4317) {
     if (!project || !canRead(project, req)) return res.status(404).json({ error: 'not found' });
     const session = getSession(slug, sessionId);
     if (!session) return res.status(404).json({ error: 'not found' });
-    const unit = extractPromptUnits(session, sessionId, slug).find((u) => u.index === index);
+    const unit = extractPromptUnits(session, sessionId, slug, { evidence: getEvidence(slug) }).find((u) => u.index === index);
     if (!unit) return res.status(404).json({ error: 'not found' });
     const summary = (project.sessions || []).find((s) => s.id === sessionId) || {};
     const user = currentUser(req);

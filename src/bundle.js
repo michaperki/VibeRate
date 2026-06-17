@@ -23,7 +23,7 @@ function summarize(s) {
 
 // Build a bundle from already-parsed pieces. Pure: no I/O, no clock-dependent
 // behavior beyond the capture timestamp, so it's trivial to test and to diff.
-export function buildBundle(cwd, { sessions = [], git = null, docs = null, memory = null, docHistory = null } = {}) {
+export function buildBundle(cwd, { sessions = [], git = null, docs = null, memory = null, docHistory = null, evidence = null } = {}) {
   const slug = slugify(cwd);
   const capturedAt = new Date().toISOString();
   return {
@@ -44,5 +44,8 @@ export function buildBundle(cwd, { sessions = [], git = null, docs = null, memor
     // This repo's cold-start memory (index + notes + adopted). Included by default
     // so shared pages show context; suppressed with `vbrt push --no-memory`.
     memory: memory && memory.ok ? memory : null,
+    // Author-captured evidence artifacts (screenshots/gifs) bound to the prompt
+    // that produced them, via `vbrt shot`. Optional; image data is inlined.
+    evidence: evidence && evidence.length ? evidence : null,
   };
 }

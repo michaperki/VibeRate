@@ -2368,9 +2368,21 @@ function renderReaderCard(u, i) {
     <div class="pc-head">${docs}${contextGauge(u.context)}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(u.prompt)}</div>
+    ${renderArtifacts(u.evidence)}
     ${played}
     ${link ? `<div class="pc-bar">${link}</div>` : ''}
   </article>`;
+}
+
+// Evidence artifacts (vbrt shot) on a prompt: before/after screenshots the agent
+// captured. before/after pairs sit side by side; lone shots stand alone.
+function renderArtifacts(evs) {
+  if (!evs || !evs.length) return '';
+  const fig = (e) => `<figure class="art-shot art-${esc(e.label || 'shot')}">
+      <a href="${e.image}" target="_blank" rel="noopener"><img loading="lazy" src="${e.image}" alt="${esc(e.note || e.label || 'screenshot')}"></a>
+      <figcaption>${e.label ? `<span class="art-tag">${esc(e.label)}</span>` : ''}${e.note ? esc(e.note) : ''}${e.viewport ? `<span class="art-vp">${esc(e.viewport)}</span>` : ''}</figcaption>
+    </figure>`;
+  return `<div class="pc-artifacts">${evs.map(fig).join('')}</div>`;
 }
 
 function wireConversation(turnCount) {
@@ -2628,6 +2640,7 @@ function renderPromptCard(c) {
     <div class="pc-head">${proj}${docs}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(c.prompt)}</div>
+    ${renderArtifacts(c.evidence)}
     ${played}
     <div class="pc-bar">${vote}${link}${open}</div>
   </article>`;

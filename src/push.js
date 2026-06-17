@@ -9,14 +9,30 @@ import { DATA_DIR } from './paths.js';
 // locally and send it on every later push so all your projects share one owner
 // and show up together on the dashboard.
 //
+// The deployed host. `resolveApi()` falls back to this so push/watch "just work"
+// with no config; override it for local dev with VBRT_API_URL=http://localhost:4317.
+export const DEFAULT_API = 'https://vbrt.fly.dev';
+
 // Endpoint is configurable so the same client points at local dev or production.
 // After `vbrt login`, fall back to the single saved endpoint so `vbrt push` works
 // without re-exporting VBRT_API_URL each session.
+//
+// `apiBase()` reports only an **explicitly chosen** endpoint (env var or a saved
+// login) — never the default. `vbrt add` keys its push-vs-save-locally decision on
+// this, so a plain `vbrt add` with no config still saves to the local store for
+// `vbrt serve` instead of silently uploading to production.
 export function apiBase() {
   const env = (process.env.VBRT_API_URL || '').replace(/\/+$/, '');
   if (env) return env;
   const urls = Object.keys(readCreds());
   return urls.length === 1 ? urls[0] : '';
+}
+
+// The endpoint commands that *actively upload* (push/watch) should hit: an explicit
+// choice if set, else the deployed host. So `vbrt push`/`vbrt watch` need no env var,
+// but VBRT_API_URL still points them at a local host for VibeRate's own dev loop.
+export function resolveApi() {
+  return apiBase() || DEFAULT_API;
 }
 
 // `vbrt login <token>`: save an account-bound token (minted from the dashboard's
@@ -55,7 +71,7 @@ function saveToken(apiUrl, token) {
   }
 }
 
-export async function pushBundle(bundle, { apiUrl = apiBase(), token = loadToken(apiBase()), isPublic = false } = {}) {
+export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadToken(resolveApi()), isPublic = false } = {}) {
   if (!apiUrl) {
     throw new Error(
       'No hosted endpoint configured. Set VBRT_API_URL (e.g. https://vbrt.fly.dev) to push.',

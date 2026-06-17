@@ -10,8 +10,9 @@ import { saveBundle } from '../src/storage.js';
 import { extractGit, extractDocHistory } from '../src/git.js';
 import { extractDocsMulti } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
+import { readEvidence, recordShot } from '../src/evidence.js';
 import { buildBundle } from '../src/bundle.js';
-import { pushBundle, apiBase, login } from '../src/push.js';
+import { pushBundle, apiBase, resolveApi, login } from '../src/push.js';
 import { slugify, claudeRoots, codexRoots, canonicalKey } from '../src/paths.js';
 
 const C = {
@@ -56,6 +57,7 @@ async function assembleBundle(cwd, sessions, parsed, { includeMemory = true } = 
   }
   const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames) : null;
   const memory = includeMemory ? extractMemory(cwd) : null;
+  const evidence = readEvidence(cwd); // author-captured screenshots/gifs (full set each push)
 
   const bundle = buildBundle(cwd, {
     sessions: parsed,
@@ -63,8 +65,9 @@ async function assembleBundle(cwd, sessions, parsed, { includeMemory = true } = 
     docs,
     docHistory,
     memory,
+    evidence,
   });
-  return { bundle, commits, docs, memory, repoPaths };
+  return { bundle, commits, docs, memory, evidence, repoPaths };
 }
 
 // A cheap fingerprint of the repo's live inputs — agent-doc mtimes/sizes, git
@@ -89,12 +92,7 @@ function watchSignature(repoPaths, sessionFiles = []) {
 // change, so the live dashboard updates while you/the agent edit. Read-only.
 async function cmdWatch(args = []) {
   const cwd = process.cwd();
-  const apiUrl = apiBase();
-  if (!apiUrl) {
-    console.log(C.yellow('No endpoint configured. Set VBRT_API_URL=… or run `vbrt login` first.'));
-    process.exitCode = 1;
-    return;
-  }
+  const apiUrl = resolveApi(); // deployed host by default; VBRT_API_URL overrides for local dev
   const includeMemory = !args.includes('--no-memory');
   const isPublic = args.includes('--public');
   let sessions0 = await discoverSessions(cwd);
@@ -278,6 +276,54 @@ async function cmdAdd(args = []) {
   console.log(C.dim(`Run ${C.bold('vbrt serve')} to browse.`));
 }
 
+// `vbrt shot <url|image> [--label before|after] [--note "…"] [--viewport WxH]`:
+// capture a screenshot artifact and bind it to the active session/prompt. Designed
+// to be a one-liner an agent runs mid-task — no need to know its own session id.
+// The artifact is stored in `.vbrt/evidence/` and uploaded on the next push/watch.
+async function cmdShot(args = []) {
+  const opts = {};
+  const pos = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith('--')) {
+      const k = a.slice(2);
+      const v = args[i + 1] && !args[i + 1].startsWith('--') ? args[++i] : true;
+      opts[k] = v;
+    } else pos.push(a);
+  }
+  const target = pos[0];
+  const label = opts.label === true ? null : opts.label;
+  if (label && label !== 'before' && label !== 'after') {
+    console.log(C.yellow('--label must be "before" or "after".'));
+    process.exitCode = 1;
+    return;
+  }
+  if (!target && !opts.image) {
+    console.log(C.yellow('Usage: vbrt shot <url|image.png> [--image <file>] [--label before|after] [--note "…"] [--viewport 1280x800]'));
+    console.log(C.dim('  Pass a local dev URL (captured via Playwright if installed) or an image the agent already took.'));
+    process.exitCode = 1;
+    return;
+  }
+  const cwd = process.cwd();
+  try {
+    const rec = await recordShot(cwd, {
+      target,
+      image: opts.image === true ? undefined : opts.image,
+      label,
+      note: opts.note === true ? '' : opts.note || '',
+      viewport: opts.viewport === true ? null : opts.viewport || null,
+      session: opts.session === true ? null : opts.session || null,
+      pair: opts.pair === true ? null : opts.pair || null,
+    });
+    console.log(C.green(`\n✓ Captured artifact${rec.label ? ` (${rec.label})` : ''} → ${path.relative(cwd, rec.file)}`));
+    console.log(C.dim(`  bound to ${rec.session ? `session ${rec.session.id}` : '(no active session found — will attach by time)'}${rec.note ? ` · "${rec.note}"` : ''}`));
+    console.log(C.dim('  Uploaded on your next `vbrt push` (or live, if `vbrt watch` is running).\n'));
+  } catch (err) {
+    console.log(C.yellow(`\n✗ ${err.message}\n`));
+    process.exitCode = 1;
+  }
+}
+
 async function cmdLogin(args) {
   let apiUrl = '';
   let token = null;
@@ -322,10 +368,11 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
 
   ${C.cyan('vbrt')} ${C.dim('|')} ${C.cyan('vbrt add')}     Pick this folder's sessions and save them locally
   ${C.cyan('vbrt login <token>')}  Connect this machine to your account (token from the dashboard)
-  ${C.cyan('vbrt push')}          Upload to your private dashboard (needs VBRT_API_URL)
+  ${C.cyan('vbrt push')}          Upload to your dashboard at vbrt.fly.dev (set VBRT_API_URL for a local host)
   ${C.cyan('vbrt push --public')}   Publish on push (share a link immediately; default is private)
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
   ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
+  ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port
   ${C.cyan('vbrt help')}          Show this help
@@ -344,6 +391,9 @@ async function main() {
       break;
     case 'watch':
       await cmdWatch(rest);
+      break;
+    case 'shot':
+      await cmdShot(rest);
       break;
     case 'login':
       await cmdLogin(rest);
