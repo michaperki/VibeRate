@@ -65,6 +65,8 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 - **Prompt-card permalinks** — stable URLs to a specific prompt card / turn. ✅ Existing `/c/<cardId>` now pairs with exact-card rail navigation.
 - **Outcome chips** — cheap summaries from captured data before building more
   artifact families. ✅ First pass shipped.
+- **Live dashboard re-entry** ✅ — clicking the active project in the project rail
+  from a conversation now returns to the AI brain/dashboard without turning live off.
 - **Evidence artifacts** — `vbrt shot` before/after screenshots ✅ + motion clips
   (`--clip`, gif via ffmpeg or webm fallback) ✅ shipped and exercised on the
   sorting-visualizer experiment; diff/test/provenance families still tracked in

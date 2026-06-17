@@ -496,7 +496,8 @@ function openMemo(file) {
 
 async function selectProject(slug) {
   showProject();
-  stopLive(); // don't keep polling a project you've navigated away from
+  const switchingProject = state.project && state.project !== slug;
+  if (switchingProject) stopLive(); // don't keep polling a project you've navigated away from
   state.project = slug;
   state.session = null;
   document.querySelectorAll('.proj').forEach((n) =>
