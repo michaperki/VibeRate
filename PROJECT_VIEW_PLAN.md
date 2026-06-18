@@ -189,8 +189,9 @@ concept it changed — that link is the "living history."
 - [x] Swapped the flat `outcomeChips`/`renderArtifacts` calls in **both** card renderers
   (`renderReaderCard`, `renderPromptCard`) for the single `renderOutcomeRail`.
 - [x] CSS: `.outcome-rail.rail-footer` panel + `.rail-diff`/`.rail-file` deliverable styling.
-- [ ] *Live visual check* against a session re-ingested **with** an API key (archetype data is
-  null on all currently-stored bundles, so the footers can't render until classify runs).
+- [ ] *Live visual check* of the shot/diff footers — pending a classified session. The API key
+  was refreshed (2026-06-18) and the host redeployed, so classification now runs at ingest; this
+  session's live stream should populate archetypes for the check.
 >
 > **Stage 2 — light extraction for `record` + `test` + bespoke:** ✅ shipped 2026-06-18 (mostly)
 - [x] `src/prompts.js` emits a small `u.outcomeArtifact` (deterministic; no new capture, no
@@ -209,16 +210,17 @@ concept it changed — that link is the "living history."
 - [~] Verify against a real session: the **test family is verified end-to-end on real data**
   (3 genuine `codeswipe` prompts rendered a status timeline) + a 14-assertion extraction test
   (incl. conservatism: prose numbers and bare exit codes don't fire). *Still open:* live visual
-  check of **experiment/options** + scroll cost — blocked on classification, because the
-  environment `ANTHROPIC_API_KEY` returns **401 invalid x-api-key** (so all archetypes are null;
-  same blocker as Stage 1's open box, now diagnosed as an invalid key, not a missing one).
+  check of **experiment/options** + scroll cost — pending a classified bundle. (Earlier all
+  archetypes were null because the API key returned 401; the key was refreshed 2026-06-18 and the
+  host redeployed, so classification runs at ingest again.)
 
 ### D. Scale & navigation
 - [x] **Prompt-unit sidebar + deep links** *(first pass shipped 2026-06-17)* — `Sessions |
   Prompts` toggle, default Prompts; prompt rows show agent/source color, session
-  color, timestamp, intent tag, and outcome chips; click deep-links to that exact
-  card; live mode slides new prompt-units into the rail. Shipped without intent
-  tags yet; intent auto-tagging remains tracked in §C.
+  color, timestamp, and (compact) outcome chips; click deep-links to that exact
+  card; live mode slides new prompt-units into the rail. Intent auto-tagging itself
+  **shipped** (§C, `classify.js`) and renders as the archetype pill **on the card**
+  (`renderArchetype`); the only remainder is mirroring that pill **into the rail row**.
 - [ ] **Progressive / summary-first loading** (sessions up to ~1,300 msgs / 1.6 MB).
 - [ ] **Search + filters** (prompt/response text, files, commands, outcome, …).
 - [ ] **Conversation minimap.**
@@ -279,15 +281,16 @@ captured before/after). New observations, categorized:
   opens an in-page lightbox (Esc/click-out to close), built to extend to video/gif.
 
 **Viewer (→ §D)**
-- [ ] **Sidebar = messages, not convos** *(Mike's strong steer).* Promoted to
-  the main §D priority as **Prompt-unit sidebar + deep links**: `Sessions |
-  Prompts` toggle, default Prompts, prompt rows with source/session/timestamp/
-  intent/outcome signals, live slide-in, click → exact in-context card.
-- [ ] **Interim sidebar fix:** session rows show the *starting* prompt (often
-  "read SEED.md"); show the **most-recent** message preview (~100 chars) instead.
-  Needs `lastUserText` in the session summary (pairs with §D auto intent-titles).
-- [ ] **Live-motion feedback:** stronger "a new message just arrived / movement"
-  cue in live mode (slide-in/pulse). Largely *falls out of* the message-sidebar.
+- [x] **Sidebar = messages, not convos** *(Mike's strong steer — shipped via §D).*
+  Delivered as the **Prompt-unit sidebar**: `Sessions | Prompts` toggle, default
+  Prompts, rows with source/session/timestamp + outcome chips, live slide-in, click →
+  exact in-context card (`railToggle`/`promptRows`, `app.js`). *Only remainder:* the
+  per-row **intent pill** (the archetype pill renders on the card, not yet the row).
+- [x] **Interim sidebar fix** *(shipped).* Session rows now preview the **most-recent**
+  prompt, not the opener: `preview = s.lastUserText || s.title` (`renderSessionList`, `app.js`).
+- [x] **Live-motion feedback** *(shipped via the prompt rail).* New prompt-units slide
+  into the rail with a `.fresh` cue in live mode (`_liveFreshPrompts`, `app.js`) — as
+  predicted, it fell out of the message-sidebar.
 
 **Capture / artifacts (→ §E, `ARTIFACTS.md`)**
 - [x] **GIF / short-clip capture** *(shipped 2026-06-17).* `vbrt shot <url> --clip
@@ -356,8 +359,9 @@ feature burying its own spec in real time. (This was the experiment loop's
 
 Streaming follow-ups (only if needed — tracked in `ROADMAP.md` under `vbrt watch`):
 - [ ] **SSE / WebSocket** transport if polling ever feels laggy (drop the poll).
-- [ ] **Reader append-not-rerender** — append new turns instead of a full
-  re-render, preserving expanded `<details>` while following a live session.
+- [x] **Reader append-not-rerender** *(shipped).* `refreshLiveSession` →
+  `refreshSessionReaderInPlace` patches the reader in place while following a live session,
+  preserving expanded `<details>` + scroll position; full re-render only as a fallback.
 
 ---
 

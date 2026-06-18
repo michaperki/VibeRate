@@ -16,7 +16,7 @@ publish, watch, review, and understand agent work.
 ## Done (v0 — local + push foundations)
 
 - **Capture pipeline** — discover → parse Claude/Codex sessions, extract git history + agent docs.
-- **Viewer** — activity timeline, conversation viewer, and the AI-architecture network with **Web / Tree / Recent** layouts, animated transitions, and the doc-reader **overlay** (compact, no-scroll dashboard).
+- **Viewer** — activity timeline, conversation viewer, and the AI-architecture network with **Web / Tree / Recent** layouts, animated transitions, and the doc-reader **lightbox** (full-screen; plan/checklist docs get a parsed completion view).
 - **Client/server split** — `buildBundle` produces one payload; local sink (disk) and push sink (HTTP) share the contract.
 - **Hosted ingest** — `POST /api/projects` mints an unlisted id, `/p/:id` serves that project's dashboard.
 - **Secret redaction** on upload (keys/tokens/private-key blocks scrubbed before leaving the machine).
@@ -129,8 +129,10 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 ## Phase 3 — Viewer UX polish
 
 - **Prompt-unit rail** — `Sessions | Prompts` toggle, default Prompts; prompt rows
-  show source, session color, timestamp, intent tag, and outcome chips; live mode
-  slides new prompt-units into the rail. ✅ Shipped first pass.
+  show source, session color, timestamp, and outcome chips; live mode
+  slides new prompt-units into the rail. ✅ Shipped first pass. (Intent auto-tagging
+  shipped separately in §C and shows as the archetype pill on the card; mirroring it
+  into the rail row is the one open follow-up.)
 - **Prompt-card permalinks** — stable URLs to a specific prompt card / turn. ✅ Existing `/c/<cardId>` now pairs with exact-card rail navigation.
 - **Outcome chips** — cheap summaries from captured data before building more
   artifact families. ✅ First pass shipped.

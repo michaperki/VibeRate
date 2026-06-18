@@ -142,8 +142,9 @@ side. (Lone shots stand alone.)
         `--clip [s]` is now a *cap*; the clip records from first paint and **auto-stops
         when frames settle**, so length tracks real motion (button toggle → ~1s; long sim
         → cap). `captureClip` in `src/evidence.js`; CLI reports the auto-stopped duration.
-- [ ] *Then:* viewport set / multi-shot; the other artifact families (diff,
-      test-status, provenance) — mostly auto-derived, tracked in §C.
+- [~] *Then:* the other artifact families — **diff** + **test-status** shipped via the
+      polymorphic outcome rail (`PROJECT_VIEW_PLAN.md §C`, Stages 1–2, 2026-06-18); **provenance**
+      and **viewport set / multi-shot** still open.
 
 ## Decisions (Mike's method — defaults, revisit if wrong)
 
