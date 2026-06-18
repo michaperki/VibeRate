@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listProjects, getProject, getSession, getActivity, getGit, getDocs, getDocHistory, getMemory, getEvidence, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
+import { listProjects, getProject, getSession, getActivity, getTicker, getGit, getDocs, getDocHistory, getMemory, getEvidence, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { extractPromptUnits, buildFeed, parseCardId } from './prompts.js';
@@ -264,6 +264,15 @@ export function startServer(port = 4317) {
     const activity = getActivity(req.params.slug);
     if (!activity) return res.status(404).json({ error: 'not found' });
     res.json(activity);
+  });
+
+  // Live agent ticker: the tail of tool actions from the most-active session, so the
+  // dashboard can show what the agent is chewing on right now (polled in Live mode).
+  app.get('/api/projects/:slug/ticker', (req, res) => {
+    if (!guardRead(req, res)) return;
+    const ticker = getTicker(req.params.slug);
+    if (!ticker) return res.status(404).json({ error: 'not found' });
+    res.json(ticker);
   });
 
   app.get('/api/projects/:slug/git', (req, res) => {

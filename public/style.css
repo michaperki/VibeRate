@@ -265,11 +265,13 @@ pre.code {
 .end-marker.ok { color: var(--muted); border: 1px dashed var(--border); }
 .end-marker.warn { color: #ffcf8b; background: rgba(255,184,107,0.08); border: 1px solid rgba(255,184,107,0.35); }
 .end-marker.pending,
-.end-marker.paused {
+.end-marker.paused,
+.end-marker.working {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   color: #9aa7bd; background: rgba(143, 160, 189, 0.07);
   border: 1px dashed rgba(143, 160, 189, 0.28);
 }
+.end-marker.working { color: var(--claude); border-color: rgba(169, 120, 255, 0.32); background: rgba(169, 120, 255, 0.06); }
 .work-dot {
   width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
   box-shadow: 0 0 0 0 rgba(124, 92, 255, 0.55);
@@ -356,6 +358,18 @@ pre.code {
 
 /* ---------- merged Activity widget ---------- */
 .ov-stats { margin: 2px 0 14px; }
+/* orchestration pulse — one concerted "just changed" line per live snapshot */
+.live-pulse {
+  display: inline-flex; align-items: center; gap: 5px; margin-bottom: 6px;
+  padding: 2px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 600;
+  color: var(--accent); background: rgba(124, 92, 255, 0.12);
+  border: 1px solid rgba(124, 92, 255, 0.28);
+  animation: livepulsein 0.3s ease, livepulsefade 0.6s ease 5s forwards;
+}
+@keyframes livepulsein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes livepulsefade { to { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .live-pulse { animation: none; } }
 .ov-line1 { font-size: 15px; color: var(--muted); }
 .ov-line1 b { color: var(--text); }
 .ov-line1 b.diff-add { color: #3fb950; }
@@ -380,7 +394,7 @@ pre.code {
 .rib-heat { height: 28px; }
 .rib-h { position: absolute; bottom: 0; width: 3px; margin-left: -1.5px; background: var(--accent); opacity: 0.7; border-radius: 1px; }
 .rib-blocks { height: 18px; }
-.rib-b { position: absolute; top: 3px; height: 12px; min-width: 5px; border-radius: 2px; opacity: 0.7; cursor: pointer; border: 1px solid rgba(0, 0, 0, 0.35); }
+.rib-b { position: absolute; top: 3px; height: 12px; min-width: 4px; border-radius: 2px; opacity: var(--rib-op, 0.7); cursor: pointer; border: 1px solid rgba(0, 0, 0, 0.35); }
 .rib-b:hover { opacity: 1; box-shadow: 0 0 0 2px var(--text); z-index: 5; }
 /* streaming: a just-arrived convo/commit/brain mark pulses bright */
 .rib-fresh { animation: ribfresh 0.9s ease-out; }
@@ -693,6 +707,37 @@ pre.code {
 
 /* doc reader as a floating overlay in front of the network */
 .brain-wrap { position: relative; }
+/* live agent ticker — one-line "what's the agent chewing on" under the brain */
+.brain-ticker {
+  display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; overflow: hidden;
+  margin: 4px 2px 0; padding: 6px 9px; border-radius: 8px;
+  background: rgba(124, 92, 255, 0.06); border: 1px solid rgba(124, 92, 255, 0.16);
+  font-size: 11.5px; color: var(--muted); white-space: nowrap;
+  animation: tickerin 0.25s ease;
+}
+@keyframes tickerin { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+.brain-ticker .tick-tag {
+  flex: none; text-transform: uppercase; letter-spacing: 0.06em; font-size: 9px;
+  font-weight: 700; color: var(--accent); padding: 1px 5px; border-radius: 4px;
+  background: rgba(124, 92, 255, 0.14);
+}
+.brain-ticker .tick-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; opacity: 0.6; }
+.brain-ticker .tick-item.cur { opacity: 1; color: var(--text); }
+.brain-ticker .tick-sep { flex: none; opacity: 0.4; }
+.brain-ticker .tick-verb { flex: none; }
+.brain-ticker .tick-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; max-width: 30ch;
+}
+.brain-ticker .tick-item.cur .tick-label { color: #fff; }
+.brain-ticker .tick-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.brain-ticker .tick-item.cur .tick-dot { animation: tickpulse 1.1s ease-in-out infinite; }
+.tick-dot.edit { background: #ffb86b; }
+.tick-dot.cmd { background: #7fd0ff; }
+.tick-dot.read { background: #b6c2d9; }
+.tick-dot.search { background: #c9a3ff; }
+.tick-dot.web { background: #8affc1; }
+@keyframes tickpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.5); } 50% { box-shadow: 0 0 0 4px rgba(255,255,255,0); } }
 /* hover-peek: a doc node's outline + first line, anchored beside it */
 .brain-peek {
   position: absolute; z-index: 3; width: 248px; pointer-events: none;

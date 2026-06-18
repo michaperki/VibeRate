@@ -38,6 +38,7 @@ const state = {
   token: null, // hosted dashboard: owner token, sent as Bearer on API calls
   railMode: 'prompts',
   promptUnits: [],
+  ticker: null, // live agent ticker: { sessionId, items:[{cat,verb,label,ts}] }
   _liveSeenPrompts: null,
   _liveFreshPrompts: null,
   _pendingTurn: null,
@@ -285,21 +286,33 @@ function statChips(s) {
 
 // ---------- conversation termination ----------
 
-function endState(messages) {
+// `live` = we're following this session as it streams. While live, a trailing tool
+// call or assistant *narration* doesn't mean the convo ended — a working agent
+// emits text between tool batches, which used to flip the marker to "End of
+// conversation" prematurely (then more turns kept arriving). So while live those
+// both read as "Agent working…"; the definitive end only shows once streaming stops.
+function endState(messages, live = false) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.kind === 'text' && m.role === 'user') {
       return { cls: 'pending', text: 'Agent response pending' };
     }
     if (m.kind === 'tool_use' || m.kind === 'tool_result') {
-      return { cls: 'paused', text: 'Stopped while agent work was in progress' };
+      return live
+        ? { cls: 'working', text: 'Agent working…' }
+        : { cls: 'paused', text: 'Stopped while agent work was in progress' };
     }
     if (m.kind === 'text' && m.role === 'assistant') {
-      return { cls: 'ok', text: '■ End of conversation' };
+      return live
+        ? { cls: 'working', text: 'Agent working…' }
+        : { cls: 'ok', text: '■ End of conversation' };
     }
   }
   return { cls: 'ok', text: '■ End of conversation' };
 }
+
+// The end-marker shows a pulsing work-dot whenever the agent isn't done.
+const endWorking = (cls) => cls === 'pending' || cls === 'working';
 
 // ---------- projects + sessions ----------
 
@@ -624,7 +637,8 @@ function startLive() {
   state._liveSeenConvos = new Map(sessions.map((s) => [s.id, s.userCount]));
   state._liveSeenCommits = new Set(windowCommits(sessions).map((c) => c.hash));
   state._liveSeenPrompts = new Set((state.promptUnits || []).map((u) => u.cardId || u.id));
-  state._livePoll = setInterval(pollLive, 4000);
+  state._livePoll = setInterval(pollLive, 2000);
+  fetchTicker(); // populate the agent ticker immediately, don't wait for the next push
 }
 
 // Compute which convos are new/grown and which commits are new since the last
@@ -660,9 +674,78 @@ function computeFreshPrompts(units) {
   state._liveSeenPrompts = seen;
   state._liveFreshPrompts = fresh;
 }
+
+// New commits since the last live snapshot, without advancing the seen-set (that's
+// computeFreshActivity's job) — a peek for the orchestration digest.
+function freshCommitCount() {
+  const seen = state._liveSeenCommits;
+  if (!seen) return 0;
+  return windowCommits(timelineSessions()).filter((c) => !seen.has(c.hash)).length;
+}
+
+// Orchestration: roll up everything one snapshot changed into a single line, so a
+// live event reads as one concerted acknowledgment (a transient pulse on the
+// Activity header) rather than each surface — rail, timeline, brain, ticker —
+// flashing on its own. One-shot: consumed by overviewHeader on the next render.
+function noteLiveEvent({ brain = 0, prompts = 0, commits = 0 } = {}) {
+  const bits = [];
+  if (prompts) bits.push(`+${prompts} ${plw(prompts, 'message')}`);
+  if (brain) bits.push(`${brain} 🧠 ${plw(brain, 'brain edit')}`);
+  if (commits) bits.push(`+${commits} ${plw(commits, 'commit')}`);
+  state._liveDigest = bits.length ? bits.join(' · ') : null;
+}
+
 function stopLive() {
   state.live = false;
   if (state._livePoll) { clearInterval(state._livePoll); state._livePoll = null; }
+  state.ticker = null; // a stale "what's the agent doing" line is worse than none
+  updateTicker();
+}
+
+// ---------- live agent ticker ----------
+
+// One-shot ticker fetch (used when going live so the readout appears without waiting
+// for the next push). The poll path refreshes it as part of refreshLive's batch.
+async function fetchTicker() {
+  const slug = state.project;
+  if (!slug) return;
+  try { const t = await api(`/api/projects/${slug}/ticker`); if (slug === state.project) { state.ticker = t; updateTicker(); } } catch { /* ignore */ }
+}
+
+// A one-line readout of the agent's last few tool actions, under the brain. Shown
+// only while live — surfaces the tool_use blocks the parser already captured, so it
+// reflects "what's the agent chewing on right now" with no extra agent load.
+function tickerHtml() {
+  const t = state.ticker;
+  if (!state.live || !t || !Array.isArray(t.items) || !t.items.length) return '';
+  const items = t.items.slice(-4);
+  const row = items
+    .map((it, i) => {
+      const cur = i === items.length - 1 ? ' cur' : '';
+      const verb = esc(it.verb || 'using');
+      const label = esc(it.label || '');
+      return `<span class="tick-item${cur}"><span class="tick-dot ${esc(it.cat || 'other')}"></span><span class="tick-verb">${verb}</span> <span class="tick-label">${label}</span></span>`;
+    })
+    .join('<span class="tick-sep">›</span>');
+  return `<div class="brain-ticker" id="brainTicker"><span class="tick-tag">agent</span>${row}</div>`;
+}
+
+// Patch the ticker in place (the brain itself updates in-place on live ticks, so the
+// centerpiece isn't rebuilt — we surgically replace just the ticker node).
+function updateTicker() {
+  const card = el('#conversation .dash-card.centerpiece');
+  if (!card) return;
+  const existing = card.querySelector('.brain-ticker');
+  const html = tickerHtml();
+  if (!html) { if (existing) existing.remove(); return; }
+  const tmp = document.createElement('template');
+  tmp.innerHTML = html.trim();
+  const node = tmp.content.firstElementChild;
+  if (existing) existing.replaceWith(node);
+  else {
+    const wrap = card.querySelector('.brain-wrap');
+    if (wrap) wrap.insertAdjacentElement('afterend', node);
+  }
 }
 
 // Cheap change-detection: poll the project manifest and compare updatedAt.
@@ -697,17 +780,25 @@ function updateLiveReadout() {
 async function refreshLive() {
   const slug = state.project;
   const before = new Map((state.docGraph?.nodes || []).map((n) => [n.name, (n.content || '').length + ':' + (n.content || '').slice(0, 64)]));
-  try {
-    state.projectData = await api(`/api/projects/${slug}`);
-    try { const act = await api(`/api/projects/${slug}/activity`); if (slug === state.project) state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) }; } catch { /* keep old */ }
-    try { const units = await api(`/api/projects/${slug}/prompts`); if (slug === state.project) { computeFreshPrompts(units); state.promptUnits = units; } } catch { /* keep old */ }
-    try { const gg = await api(`/api/projects/${slug}/git`); if (slug === state.project && gg && Array.isArray(gg.commits)) state.git = { ok: true, commits: gg.commits }; } catch { /* keep old */ }
-    try { const h = await api(`/api/projects/${slug}/dochistory`); if (slug === state.project) state.docHistory = (h && h.docHistory) || null; } catch { /* keep old */ }
-    let docs = state.docs;
-    try { const d = await api(`/api/projects/${slug}/docs`); if (slug === state.project && d && Array.isArray(d.docs)) docs = { ok: true, files: d.docs }; } catch { /* keep old */ }
-    if (slug !== state.project) return;
-    state.docs = docs;
-  } catch { return; }
+  // Fetch the live-relevant data in parallel (was 6 serial round-trips) and only
+  // commit the results that came back — a failed leg keeps the prior value.
+  const [proj, act, units, gg, h, d, tk] = await Promise.all([
+    api(`/api/projects/${slug}`).catch(() => null),
+    api(`/api/projects/${slug}/activity`).catch(() => null),
+    api(`/api/projects/${slug}/prompts`).catch(() => null),
+    api(`/api/projects/${slug}/git`).catch(() => null),
+    api(`/api/projects/${slug}/dochistory`).catch(() => null),
+    api(`/api/projects/${slug}/docs`).catch(() => null),
+    api(`/api/projects/${slug}/ticker`).catch(() => null),
+  ]);
+  if (slug !== state.project) return;
+  if (proj) state.projectData = proj;
+  if (act) state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) };
+  if (units) { computeFreshPrompts(units); state.promptUnits = units; }
+  if (gg && Array.isArray(gg.commits)) state.git = { ok: true, commits: gg.commits };
+  if (h) state.docHistory = h.docHistory || null;
+  if (d && Array.isArray(d.docs)) state.docs = { ok: true, files: d.docs };
+  if (tk) state.ticker = tk;
 
   const newGraph = state.docs.ok ? buildDocGraphPinned([...state.docs.files, ...archivedPseudoFiles()], state.docGraph) : state.docGraph;
   // changed = nodes new or with different content since the last snapshot
@@ -720,6 +811,12 @@ async function refreshLive() {
   state.docGraph = newGraph;
   state.docTab = state.docGraph && state.docGraph.nodes[0] ? (state.docGraph.nodes.find((n) => n.name === state.docTab)?.name || state.docGraph.nodes[0].name) : null;
   state.colorById = state.colorById || {};
+  // Capture the digest before the renders below consume the per-surface fresh sets.
+  noteLiveEvent({
+    prompts: (state._liveFreshPrompts && state._liveFreshPrompts.size) || 0,
+    brain: flash.size,
+    commits: freshCommitCount(),
+  });
   renderSessionList();
   if (state.session) return; // reading a session — data's updated; render on return
 
@@ -731,6 +828,7 @@ async function refreshLive() {
   if (sameSet) {
     streamUpdateBrain(newGraph, new Set(flash.keys()));
     refreshActivityCard();
+    updateTicker();
     return;
   }
   // Add/remove path: fade out gone nodes, then re-render with the new ones fading
@@ -1323,9 +1421,16 @@ function layoutGraph(nodes, edges, W, H) {
   }
   const bw = maxX - minX || 1;
   const bh = maxY - minY || 1;
-  const base = Math.min((W - 2 * padX) / bw, (H - 2 * padY) / bh); // uniform fit
-  const sx = Math.min((W - 2 * padX) / bw, base * 1.6); // mild anisotropy to fill the wider axis
-  const sy = Math.min((H - 2 * padY) / bh, base * 1.6);
+  // Scale each axis to fill its own extent, capping the anisotropy so the web fills a
+  // wide card without looking stretched. Previously the fit was anchored to the
+  // *uniform* scale (min of the two), so on a wide canvas the tighter (height) axis
+  // held the width back and nodes bunched mid-canvas with empty margins left/right.
+  const fitX = (W - 2 * padX) / bw;
+  const fitY = (H - 2 * padY) / bh;
+  const lo = Math.min(fitX, fitY);
+  const ANISO = 2.4; // how far the roomier axis may stretch past the tighter fit
+  const sx = Math.min(fitX, lo * ANISO);
+  const sy = Math.min(fitY, lo * ANISO);
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
   nodes.forEach((n) => {
@@ -1544,6 +1649,7 @@ function renderCenterpiece() {
           <div class="docview markdown">${renderMarkdown(active.content)}</div>
         </div>` : ''}
       </div>
+      ${tickerHtml()}
       ${tt ? renderTimeTravel(ttLine) : ''}
     </section>`;
 }
@@ -2100,8 +2206,10 @@ function overviewHeader(sessions) {
   const added = sessions.reduce((a, s) => a + (s.added || 0), 0);
   const removed = sessions.reduce((a, s) => a + (s.removed || 0), 0);
   const lines = added || removed ? ` · <b class="diff-add">+${added}</b>/<b class="diff-del">−${removed}</b> lines` : '';
+  const pulse = state._liveDigest; state._liveDigest = null; // one-shot
   return `
     <div class="ov-stats">
+      ${pulse ? `<div class="live-pulse">↑ just now · ${pulse}</div>` : ''}
       <div class="ov-line1"><b>${convos}</b> ${plw(convos, 'conversation')} · <b>${messages}</b> ${plw(messages, 'message')}${state.git.ok ? ` · <b>${commits}</b> ${plw(commits, 'commit')}` : ''}${brain ? ` · <span class="jargon" title="commits that changed a brain doc — SOUL / AGENTS / CLAUDE / ROADMAP / etc."><b>${brain}</b> 🧠 ${plw(brain, 'brain edit')}</span>` : ''}${lines}</div>
       <div class="ov-line2">${fmtShort(firstT)} – ${fmtShort(lastT)} · last active <b>${fmtAgo(lastT)}</b>
         <span class="ov-split"><span class="sw2" style="background:var(--claude)"></span>${claude}
@@ -2145,13 +2253,18 @@ function renderRibbon(sessions) {
     .join('');
 
   const maxCount = Math.max(1, ...sessions.map((s) => s.userCount));
-  const wpx = (c) => Math.max(5, Math.round(4 + (c / maxCount) * 60));
+  // Convo blocks span their real start→end so a bar sits *under* the messages it
+  // contains. Previously each was a fixed count-width stub pinned at the start, which
+  // left message bars floating over empty track with no convo beneath them. Message
+  // count now reads as opacity (via --rib-op, so hover/select can still brighten).
   const blocks = sessions
     .map((s) => {
       const sel = state.selectedConvo === s.id ? ' sel' : '';
       const dl = diffLabel(s);
-      return `<span class="rib-b${sel}${state._liveFreshConvos?.has(s.id) ? ' rib-fresh' : ''}" data-convo="${esc(s.id)}" style="left:${pct(s.start)}%;width:${wpx(s.userCount)}px;background:${SRC_COLOR[s.source] || 'var(--accent)'}"
-           title="${esc(fmtShortDT(s.start))} · ${s.source} · ${plural(s.userCount, 'msg')}${dl ? ' · ' + dl : ''} · ${esc(s.title)}"></span>`;
+      const w = Math.max(0, pct(s.end) - pct(s.start));
+      const op = (0.4 + 0.5 * (s.userCount / maxCount)).toFixed(2);
+      return `<span class="rib-b${sel}${state._liveFreshConvos?.has(s.id) ? ' rib-fresh' : ''}" data-convo="${esc(s.id)}" style="left:${pct(s.start)}%;width:${w.toFixed(2)}%;--rib-op:${op};background:${SRC_COLOR[s.source] || 'var(--accent)'}"
+           title="${esc(fmtShortDT(s.start))} → ${esc(fmtShortDT(s.end))} · ${s.source} · ${plural(s.userCount, 'msg')}${dl ? ' · ' + dl : ''} · ${esc(s.title)}"></span>`;
     })
     .join('');
 
@@ -2370,11 +2483,11 @@ function renderSessionReader() {
   state.turnAnchors = units.map((_, i) => `turn-${i}`);
   const pendingTurn = state._pendingTurn;
   state.currentTurn = Number.isFinite(pendingTurn) && units.length ? Math.max(0, Math.min(units.length - 1, pendingTurn)) : 0;
-  const end = endState(s.messages);
+  const end = endState(s.messages, state.live);
   const dur = fmtDuration(new Date(s.endedAt) - new Date(s.startedAt));
   const filesList = [...stats.files].slice(0, 40);
 
-  const endIcon = end.cls === 'pending' ? '<span class="work-dot" aria-hidden="true"></span>' : '';
+  const endIcon = endWorking(end.cls) ? '<span class="work-dot" aria-hidden="true"></span>' : '';
   const endMarker = `<div class="end-marker ${end.cls}">${endIcon}${end.text}</div>`;
   const body = units.length
     ? units.map(renderReaderCard).join('') + endMarker
@@ -2442,8 +2555,8 @@ function readerUnitsSignature(units) {
 }
 
 function readerEndMarker(s) {
-  const end = endState(s.messages);
-  const endIcon = end.cls === 'pending' ? '<span class="work-dot" aria-hidden="true"></span>' : '';
+  const end = endState(s.messages, state.live);
+  const endIcon = endWorking(end.cls) ? '<span class="work-dot" aria-hidden="true"></span>' : '';
   return `<div class="end-marker ${end.cls}">${endIcon}${end.text}</div>`;
 }
 

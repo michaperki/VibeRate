@@ -325,6 +325,63 @@ export function getActivity(slug) {
   return out;
 }
 
+// Coarse category for a tool name — drives the ticker verb + dot color. Mirrors
+// the viewer's classifyTool so the live ticker reads the same as the convo chips.
+const TICKER_VERB = { edit: 'editing', read: 'reading', cmd: 'running', search: 'searching', web: 'fetching', other: 'using' };
+function classifyToolName(name) {
+  const n = (name || '').toLowerCase();
+  if (/write|edit|apply_patch|create|notebook|patch|update_plan/.test(n)) return 'edit';
+  if (/read|cat|view|open/.test(n)) return 'read';
+  if (/bash|exec|shell|command|run|terminal/.test(n)) return 'cmd';
+  if (/grep|glob|search|find|^ls|list/.test(n)) return 'search';
+  if (/fetch|web|browser|http/.test(n)) return 'web';
+  return 'other';
+}
+
+// A short human label for one tool action — the file it touched, the command it
+// ran, or the query it searched — for the "what is the agent chewing on" ticker.
+function toolLabel(m, cat, cwd) {
+  const inp = m.input;
+  if (inp && typeof inp === 'object') {
+    const file = inp.file_path || inp.path || inp.notebook_path;
+    if (file) return relPath(file, cwd);
+    if (cat === 'cmd' && inp.command) {
+      // Drop a leading `cd <path> && ` / `; ` — it's the harness boilerplate, not
+      // what the agent is actually running.
+      const cmd = String(inp.command).replace(/\s+/g, ' ').trim().replace(/^cd\s+\S+\s+(?:&&\s+|;\s+)?(?=\S)/, '');
+      return cmd.slice(0, 80);
+    }
+    if (cat === 'search' && (inp.pattern || inp.query)) return String(inp.pattern || inp.query).slice(0, 60);
+    if (inp.description) return String(inp.description).slice(0, 60);
+  }
+  if (typeof inp === 'string') {
+    const match = inp.match(/\*\*\*\s+(?:Add|Update|Delete) File:\s+(.+)/);
+    if (match) return relPath(match[1].trim(), cwd);
+  }
+  return m.name || cat;
+}
+
+// Live agent ticker: the tail of tool actions from the most-recently-active session,
+// so the dashboard can show what the agent is doing right now. Read-only — it's just
+// the session log we already parsed; no extra agent load. Newest last.
+export function getTicker(slug, limit = 16) {
+  const project = getProject(slug);
+  if (!project) return null;
+  const recency = (x) => new Date((x && (x.endedAt || x.startedAt)) || 0).getTime();
+  let latest = null;
+  for (const summary of project.sessions) if (!latest || recency(summary) > recency(latest)) latest = summary;
+  if (!latest) return { sessionId: null, items: [] };
+  const s = getSession(slug, latest.id);
+  if (!s) return { sessionId: latest.id, items: [] };
+  const items = [];
+  for (const m of s.messages) {
+    if (m.kind !== 'tool_use') continue;
+    const cat = classifyToolName(m.name);
+    items.push({ cat, verb: TICKER_VERB[cat], label: toolLabel(m, cat, s.cwd), ts: m.ts || null });
+  }
+  return { sessionId: latest.id, source: latest.source, endedAt: latest.endedAt, items: items.slice(-limit) };
+}
+
 // Shorten an absolute edited-file path to repo-relative for display.
 function relPath(file, cwd) {
   const f = String(file).replace(/\\/g, '/');

@@ -78,6 +78,29 @@ Social features all require a shared backend, so a thin deploy gates most of wha
    resumed sessions, deleted/renamed brain docs, watch left running across reboots,
    pushing the same project from two machines. Capture each failure mode as a fix or a
    documented limitation.
+6. **Live orchestration + timeline legibility** *(now-priority)* — make the dashboard
+   feel real-time and coherent while an agent is actively working. Full breakdown +
+   code root-causes in `LIVE_ORCHESTRATION.md`. ✅ First pass shipped (2026-06-18):
+   - **Real-time watch** ✅ — the watcher debounce gained a `maxWait`, so a push fires
+     during continuous agent activity instead of only on a quiet window; previously a
+     `plan.md` written early only appeared after the agent finished implementing
+     (the session log never went quiet long enough to settle the debounce). Tick → 1s,
+     frontend poll → 2s, `refreshLive` fetches parallelized.
+   - **Agent activity ticker** ✅ — a subtle marquee under the brain shows what the
+     agent is chewing on (reading / editing / running), surfaced from `tool_use`
+     blocks the parser already had; `GET /api/projects/:slug/ticker`. Zero added agent
+     load (read-only tail of the session log).
+   - **Liveness-aware end-of-convo** ✅ — `endState` no longer flips a still-working
+     agent to "End of conversation" when its latest block happens to be narration text;
+     while streaming it reads "Agent working…".
+   - **Concerted live updates** ✅ — one `liveEventDigest` per snapshot drives every
+     surface (rail / timeline / brain / ticker) so a single event reads as one update,
+     with a "what just happened" pulse on the Activity header.
+   - **Duration-based convo bars** ✅ — timeline convo blocks now span their real
+     start→end instead of a fixed count-width stub at the start, so message bars no
+     longer float over empty space with no convo beneath them.
+   - **Web-view layout fills the canvas** ✅ — `layoutGraph` spreads to encompass the
+     available width instead of clustering nodes mid-canvas.
 
 ## Phase 2 — Social / learning layer (later — byproduct of the Agentic IDE, not the core)
 
