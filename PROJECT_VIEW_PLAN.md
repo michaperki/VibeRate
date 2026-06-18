@@ -122,7 +122,13 @@ concept it changed — that link is the "living history."
 - [ ] **Prompt intent auto-tagging** (design / debug / refactor / ask / fix).
 - [ ] **Prompt-quality-through-consequences** signals (needed clarification?
   caused rework? referenced docs? survived later commits?).
-- [ ] *Decision (mock):* outcome-rail placement — side rail / chip row / footer.
+- [x] *Decision (mock → resolved):* outcome-rail placement — **per-archetype hybrid**,
+  not one global mode. The rail is polymorphic about its own *placement*, the same way
+  it's polymorphic about *content*: rich archetypes (screenshot redesign, spec/diff
+  deliverable) get a full-width **footer panel** (those artifacts want width); the banal
+  majority (#10 console-paste) collapses to a **chip row**, expandable on demand. So the
+  same router that picks *what* renders also picks *how prominently*. Side rail rejected
+  (cramps wide diffs/images). Toggle mock: `prototypes/outcome-placement.html`.
 
 ### D. Scale & navigation
 - [x] **Prompt-unit sidebar + deep links** *(first pass shipped 2026-06-17)* — `Sessions |
@@ -283,4 +289,7 @@ the prompt-unit / brain prototypes) — don't pick unilaterally.
 - Streaming transport → resolved: **poll the `updatedAt` stamp** (SSE/WebSocket
   deferred until polling proves laggy); live affordance → `● live` + pause +
   "updated Ns ago"; reader → **auto-follow** new turns (scroll only if near bottom).
-- Still open: outcome-rail placement (C).
+- Outcome-rail placement (C) → resolved: **per-archetype hybrid** — full-width footer
+  panel for rich artifacts (screenshots, diffs), collapsible chip row for the banal
+  majority (#10 console-paste); not one global mode. Side rail rejected (cramps wide
+  artifacts). Mock: `prototypes/outcome-placement.html`.
