@@ -15,6 +15,7 @@ import { readEvidence, recordShot, captureCapabilities, installCapture } from '.
 import { buildBundle } from '../src/bundle.js';
 import { pushBundle, apiBase, resolveApi, login, flushOutbox, outboxCount, publishProject, saveProjectRef, loadProjectRef } from '../src/push.js';
 import { redactBundle } from '../src/redact.js';
+import { recordHookFromStdin, readStream, streamSignature } from '../src/hooks.js';
 import { slugify, claudeRoots, codexRoots, canonicalKey } from '../src/paths.js';
 
 const C = {
@@ -90,6 +91,7 @@ async function assembleBundle(cwd, sessions, parsed, { includeMemory = true } = 
   const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames) : null;
   const memory = includeMemory ? extractMemory(cwd) : null;
   const evidence = readEvidence(cwd); // author-captured screenshots/gifs (full set each push)
+  const stream = readStream(cwd, 40); // real-time hook events (working/idle, current action, ctx)
 
   const bundle = buildBundle(cwd, {
     sessions: parsed,
@@ -98,6 +100,7 @@ async function assembleBundle(cwd, sessions, parsed, { includeMemory = true } = 
     docHistory,
     memory,
     evidence,
+    stream,
   });
   return { bundle, commits, docs, memory, evidence, repoPaths };
 }
@@ -117,6 +120,8 @@ function watchSignature(repoPaths, sessionFiles = []) {
   for (const f of sessionFiles) {
     try { const st = fs.statSync(f); parts.push(`s:${f}:${Math.floor(st.mtimeMs)}:${st.size}`); } catch { /* gone */ }
   }
+  // Real-time hook stream: a hook append should trigger a push just like a doc edit.
+  for (const p of repoPaths) parts.push(`${p}|${streamSignature(p)}`);
   return parts.sort().join('|');
 }
 
@@ -485,6 +490,65 @@ async function cmdLogin(args) {
   }
 }
 
+// `vbrt hook`: invoked by a Claude Code hook (PreToolUse / PostToolUse /
+// UserPromptSubmit / Stop / …). Reads the hook payload from stdin and records a
+// compact real-time event to `.vbrt/stream.jsonl`, which `vbrt watch` ships so the
+// dashboard ticker tracks the agent live (no flush lag, no token cost). Always
+// exits 0 — a hook must never break the agent's turn.
+async function cmdHook() {
+  try { await recordHookFromStdin(); } catch { /* never fail the agent */ }
+  process.exit(0);
+}
+
+// The hooks block we wire into settings.json. Each event runs `vbrt hook`, which is
+// a fast, dependency-free Node process that just appends to the local sidecar.
+function hookSettings() {
+  const cmd = 'vbrt hook';
+  const one = (matcher) => (matcher ? [{ matcher, hooks: [{ type: 'command', command: cmd }] }] : [{ hooks: [{ type: 'command', command: cmd }] }]);
+  return {
+    hooks: {
+      UserPromptSubmit: one(),
+      PreToolUse: one('*'),
+      PostToolUse: one('*'),
+      Stop: one(),
+      SessionStart: one(),
+    },
+  };
+}
+
+// `vbrt hooks` — print the settings snippet; `--install` merges it into
+// `<cwd>/.claude/settings.json` (creating it) without clobbering existing hooks.
+async function cmdHooks(args = []) {
+  const snippet = hookSettings();
+  if (!args.includes('--install')) {
+    console.log(`\n${C.bold('vbrt hooks')} — real-time agent ticker via Claude Code hooks\n`);
+    console.log(C.dim('Add this to .claude/settings.json (or run `vbrt hooks --install`):\n'));
+    console.log(JSON.stringify(snippet, null, 2));
+    console.log(C.dim('\nThen `vbrt watch` will stream the agent\'s live activity (working/idle,'));
+    console.log(C.dim('current action, context load) to the dashboard ticker. Zero token cost.\n'));
+    return;
+  }
+  const cwd = process.cwd();
+  const file = path.join(cwd, '.claude', 'settings.json');
+  let existing = {};
+  try { existing = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new file */ }
+  existing.hooks = existing.hooks || {};
+  // Merge per-event, skipping any event that already runs `vbrt hook` so re-install
+  // is idempotent and we never duplicate or drop the user's own hooks.
+  let added = 0;
+  for (const [event, entries] of Object.entries(snippet.hooks)) {
+    const cur = Array.isArray(existing.hooks[event]) ? existing.hooks[event] : [];
+    const already = JSON.stringify(cur).includes('vbrt hook');
+    if (already) continue;
+    existing.hooks[event] = [...cur, ...entries];
+    added++;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(existing, null, 2) + '\n');
+  console.log(`\n${C.green('✓')} ${added ? `Wired ${added} hook event(s) into` : 'Hooks already present in'} ${C.cyan(path.relative(cwd, file) || file)}`);
+  console.log(C.dim('Run `vbrt watch` and the dashboard ticker will follow the agent live.\n'));
+}
+
 async function cmdServe(args) {
   // Precedence: --port flag > PORT env (cloud hosts inject it) > local default.
   const portArg = args.find((a) => /^--port=/.test(a));
@@ -640,6 +704,8 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt push --retry')}    Resend bundles left in the outbox after a failed upload
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
   ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
+  ${C.cyan('vbrt hooks --install')} Wire Claude Code hooks so the dashboard ticker follows the agent live
+  ${C.cyan('vbrt hook')}          (internal) record a hook event to the live stream — called by the hooks
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)
   ${C.cyan('vbrt shot <url> --clip [s]')} Record a motion clip (auto-stops when motion settles; [s] caps it)
   ${C.cyan('vbrt doctor')}        Preflight: repo / watch / capture readiness + the command to use
@@ -666,6 +732,12 @@ async function main() {
       break;
     case 'watch':
       await cmdWatch(rest);
+      break;
+    case 'hook':
+      await cmdHook();
+      break;
+    case 'hooks':
+      await cmdHooks(rest);
       break;
     case 'shot':
       await cmdShot(rest);

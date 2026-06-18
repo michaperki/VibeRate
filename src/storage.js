@@ -24,7 +24,7 @@ function readJson(file, fallback) {
 // behavior-compatible. `opts.slug` overrides the cwd-derived slug (used for
 // hosted projects keyed by a random id); `opts.name` sets the display name.
 export function saveBundle(bundle, opts = {}) {
-  const { project, sessions, git, docs, memory, docHistory, evidence } = bundle;
+  const { project, sessions, git, docs, memory, docHistory, evidence, stream } = bundle;
   const cwd = project.cwd;
   const result = saveSessions(cwd, sessions, opts);
   if (git) saveGit(cwd, git, opts.slug);
@@ -32,6 +32,7 @@ export function saveBundle(bundle, opts = {}) {
   if (docHistory) saveDocHistory(cwd, docHistory, opts.slug);
   if (memory && memory.ok) saveMemory(cwd, memory, opts.slug);
   if (evidence) saveEvidence(cwd, evidence, opts.slug);
+  if (stream) saveStream(cwd, stream, opts.slug);
   return result;
 }
 
@@ -218,6 +219,20 @@ export function getMemory(slug) {
   return readJson(path.join(projectDir(slug), 'memory.json'), null);
 }
 
+// Real-time agent activity from Claude Code hooks (the tail of working/idle, tool,
+// and context-load events). Overwrites each push with the latest tail; getTicker
+// prefers it over parsing the (flush-lagged) session log when it's fresh.
+export function saveStream(cwd, stream, slug = slugify(cwd)) {
+  if (!stream || !stream.events || !stream.events.length) return;
+  const dir = projectDir(slug);
+  ensureDir(dir);
+  fs.writeFileSync(path.join(dir, 'stream.json'), JSON.stringify({ capturedAt: new Date().toISOString(), events: stream.events }));
+}
+
+export function getStream(slug) {
+  return readJson(path.join(projectDir(slug), 'stream.json'), null);
+}
+
 // Author-captured evidence artifacts (screenshots/gifs), each bound to a session
 // + capture time so the reader can place it on the prompt that produced it. The
 // bundle carries the full set each push, so this overwrites idempotently.
@@ -361,12 +376,38 @@ function toolLabel(m, cat, cwd) {
   return m.name || cat;
 }
 
-// Live agent ticker: the tail of tool actions from the most-recently-active session,
-// so the dashboard can show what the agent is doing right now. Read-only — it's just
-// the session log we already parsed; no extra agent load. Newest last.
+// Live agent ticker: what the agent is doing right now. Prefers the real-time hook
+// stream (working/idle + current action + context load, no flush lag) when present,
+// and otherwise falls back to the tail of tool calls parsed from the most-recently-
+// active session log. Read-only either way; no extra agent load. Items newest last.
 export function getTicker(slug, limit = 16) {
   const project = getProject(slug);
   if (!project) return null;
+
+  const stored = getStream(slug);
+  if (stored && Array.isArray(stored.events) && stored.events.length) {
+    const ev = stored.events;
+    const last = ev[ev.length - 1];
+    let ctxEv = null;
+    for (let i = ev.length - 1; i >= 0; i--) if (typeof ev[i].ctx === 'number') { ctxEv = ev[i]; break; }
+    let lastTool = null;
+    for (let i = ev.length - 1; i >= 0; i--) if (ev[i].ev === 'tool') { lastTool = ev[i]; break; }
+    const idle = last.ev === 'idle';
+    const live = {
+      state: idle ? 'idle' : 'working',
+      action: idle || !lastTool ? null : { cat: lastTool.cat, verb: lastTool.verb, label: lastTool.target || '' },
+      ctx: ctxEv ? ctxEv.ctx : null,
+      ctxPct: ctxEv ? ctxEv.ctxPct : null,
+      model: ctxEv ? ctxEv.model : null,
+      ts: last.t || null,
+    };
+    const items = ev
+      .filter((e) => e.ev === 'tool' && e.phase !== 'start') // completed actions; the in-flight one is `live.action`
+      .slice(-limit)
+      .map((e) => ({ cat: e.cat, verb: e.verb, label: e.target || '', ts: e.t || null }));
+    return { source: 'hook', live, items, capturedAt: stored.capturedAt };
+  }
+
   const recency = (x) => new Date((x && (x.endedAt || x.startedAt)) || 0).getTime();
   let latest = null;
   for (const summary of project.sessions) if (!latest || recency(summary) > recency(latest)) latest = summary;

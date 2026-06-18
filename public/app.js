@@ -712,19 +712,43 @@ async function fetchTicker() {
   try { const t = await api(`/api/projects/${slug}/ticker`); if (slug === state.project) { state.ticker = t; updateTicker(); } } catch { /* ignore */ }
 }
 
-// A one-line readout of the agent's last few tool actions, under the brain. Shown
-// only while live — surfaces the tool_use blocks the parser already captured, so it
-// reflects "what's the agent chewing on right now" with no extra agent load.
+const fmtTokens = (n) => (n == null ? '' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+
+// The agent ticker under the brain (live only). Two modes:
+//  • hook stream present → a status-line-style readout: working/idle, the current
+//    action, and context load — updates per agent event (no transcript-flush lag).
+//  • fallback → the recent tool actions parsed from the (lagged) session log.
 function tickerHtml() {
   const t = state.ticker;
-  if (!state.live || !t || !Array.isArray(t.items) || !t.items.length) return '';
-  const items = t.items.slice(-4);
+  if (!state.live || !t) return '';
+  const items = (t.items || []).slice(-4);
+
+  if (t.live) {
+    const live = t.live;
+    const working = live.state === 'working';
+    const now = working
+      ? (live.action
+        ? `${esc(live.action.verb || 'using')} <span class="tick-label">${esc(live.action.label || live.action.cat || '')}</span>`
+        : 'thinking…')
+      : 'waiting for you';
+    const ctx = live.ctx != null
+      ? `<span class="tick-ctx" title="context window used — ${live.ctx.toLocaleString()} tokens${live.model ? ' · ' + esc(live.model) : ''}">◔ ${fmtTokens(live.ctx)}${live.ctxPct != null ? ` · ${live.ctxPct}%` : ''}</span>`
+      : '';
+    const trail = items.length
+      ? `<span class="tick-trail">${items.map((it) => `<span class="tick-dot ${esc(it.cat || 'other')}" title="${esc((it.verb || '') + ' ' + (it.label || ''))}"></span>`).join('')}</span>`
+      : '';
+    return `<div class="brain-ticker ${working ? 'working' : 'idle'}" id="brainTicker">
+      <span class="tick-state"><span class="tick-pulse"></span>${working ? 'working' : 'idle'}</span>
+      <span class="tick-now">${now}</span>
+      ${trail}${ctx}
+    </div>`;
+  }
+
+  if (!items.length) return '';
   const row = items
     .map((it, i) => {
       const cur = i === items.length - 1 ? ' cur' : '';
-      const verb = esc(it.verb || 'using');
-      const label = esc(it.label || '');
-      return `<span class="tick-item${cur}"><span class="tick-dot ${esc(it.cat || 'other')}"></span><span class="tick-verb">${verb}</span> <span class="tick-label">${label}</span></span>`;
+      return `<span class="tick-item${cur}"><span class="tick-dot ${esc(it.cat || 'other')}"></span><span class="tick-verb">${esc(it.verb || 'using')}</span> <span class="tick-label">${esc(it.label || '')}</span></span>`;
     })
     .join('<span class="tick-sep">›</span>');
   return `<div class="brain-ticker" id="brainTicker"><span class="tick-tag">agent</span>${row}</div>`;

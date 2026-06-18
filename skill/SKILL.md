@@ -39,6 +39,14 @@ command to use. Trust its output — don't discover capabilities by trial and er
 - **If `vbrt watch` is live** (doctor says so): it streams changes automatically.
   **Do not run `vbrt push --all`** at the end — only push manually if watch errors or
   the user asks. Capture artifacts normally; they ride the stream.
+- **For a real-time ticker (Claude Code), wire the hooks once:** `vbrt hooks --install`
+  merges `PreToolUse` / `PostToolUse` / `UserPromptSubmit` / `Stop` hooks into
+  `.claude/settings.json`. Each fires `vbrt hook`, a fast dependency-free process that
+  appends the agent's live activity (working/idle, current action, context load) to
+  `.vbrt/stream.jsonl`, which `vbrt watch` streams to the dashboard ticker — **no token
+  cost** (hooks run in the harness, not the model). Without it the ticker still works,
+  but lags ~20–30s behind the session-log flush. (Codex writes its log per event, so it
+  needs no hook.)
 - **Need the share link, or unsure what's going on? Run `vbrt status`** — it shows in
   one glance whether watch is live, the **project URL**, how much evidence is captured,
   anything queued in the outbox, and whether a manual push is needed. Use it instead of

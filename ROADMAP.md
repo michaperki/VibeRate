@@ -104,6 +104,15 @@ Social features all require a shared backend, so a thin deploy gates most of wha
      two lanes read as the same threads.
    - **Web-view layout fills the canvas** ✅ — `layoutGraph` spreads to encompass the
      available width instead of clustering nodes mid-canvas.
+   - **Real-time ticker via Claude Code hooks** ✅ — CC flushes its session log in
+     chunks (~20–30s lag); `vbrt hooks --install` wires `Pre/PostToolUse` /
+     `UserPromptSubmit` / `Stop` hooks that fire `vbrt hook` (zero token cost — runs in
+     the harness, not the model), appending live activity to `.vbrt/stream.jsonl`. The
+     watcher ships it; the ticker becomes a **status-line-style readout** — working /
+     idle, current action, and per-step context/token load — instead of a lagged
+     tool-history list. `getTicker` prefers the hook stream, falls back to the log.
+     *Known limit:* per-step (per event), not a smooth per-token odometer — hooks are
+     event-driven, and the CC spinner verbs ("Pondering…") aren't exposed.
 
 ## Phase 2 — Social / learning layer (later — byproduct of the Agentic IDE, not the core)
 

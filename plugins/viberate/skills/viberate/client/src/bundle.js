@@ -24,7 +24,7 @@ function summarize(s) {
 
 // Build a bundle from already-parsed pieces. Pure: no I/O, no clock-dependent
 // behavior beyond the capture timestamp, so it's trivial to test and to diff.
-export function buildBundle(cwd, { sessions = [], git = null, docs = null, memory = null, docHistory = null, evidence = null } = {}) {
+export function buildBundle(cwd, { sessions = [], git = null, docs = null, memory = null, docHistory = null, evidence = null, stream = null } = {}) {
   const slug = slugify(cwd);
   const capturedAt = new Date().toISOString();
   return {
@@ -48,5 +48,9 @@ export function buildBundle(cwd, { sessions = [], git = null, docs = null, memor
     // Author-captured evidence artifacts (screenshots/gifs) bound to the prompt
     // that produced them, via `vbrt shot`. Optional; image data is inlined.
     evidence: evidence && evidence.length ? evidence : null,
+    // Real-time agent activity from Claude Code hooks (working/idle, current action,
+    // context load) — drives the live ticker without waiting on transcript flushes.
+    // Optional; only present when `vbrt hooks` are wired and a watcher is shipping.
+    stream: stream && stream.length ? { capturedAt, events: stream } : null,
   };
 }

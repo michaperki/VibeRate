@@ -84,6 +84,35 @@ artifacts), so every surface acknowledges the *same* event in concert, plus a sm
 "what just happened" pulse on the Activity header. Builds on #1 (events have to arrive
 in real time for coordination to matter).
 
+## 7. Real-time agent monitoring via Claude Code hooks ✅
+
+The watcher already pushes disk artifacts (files, brain docs, git) in ~1–3s, but the
+**conversation/ticker** lives only in Claude Code's session `.jsonl`, which CC flushes
+in chunks — so "what is the agent doing/saying" lagged ~20–30s. We can't change CC's
+flush, but **hooks** fire on each event, in the harness, at zero model/token cost.
+
+Pipeline:
+- `vbrt hooks --install` merges `PreToolUse` / `PostToolUse` / `UserPromptSubmit` /
+  `Stop` / `SessionStart` hooks into `.claude/settings.json`, each running `vbrt hook`.
+- `vbrt hook` (`src/hooks.js`) reads the hook payload on stdin and appends a compact
+  event to `.vbrt/stream.jsonl` — tool start/end (name → cat/verb/target), prompt,
+  idle — plus a best-effort context/token reading from the transcript tail. Always
+  exits 0; a hook must never break the agent's turn. The sidecar self-trims.
+- `vbrt watch` fingerprints `.vbrt/stream.jsonl` (so a hook append triggers a push) and
+  ships the tail in the bundle (`buildBundle` → `stream`); the server persists it
+  (`saveStream` → `stream.json`).
+- `getTicker` prefers the stored stream: it returns `live { state: working|idle,
+  action, ctx, ctxPct, model }` + recent completed actions; falls back to parsing the
+  (lagged) session log when no stream is present.
+- The ticker UI renders a **status-line-style** readout: a working/idle pulse, the
+  current action, a recent-action trail, and a context gauge.
+
+**What this gets us** (the honest scope): an accurate *working / idle* state, the
+current action, and a context/token gauge that updates **per agent event** — close to
+the CC status line. **Not** achievable: a smooth per-*token* counter mid-response
+(hooks are event-driven, not token deltas) or the CC spinner's gerunds ("Pondering…",
+which are internal UI). Codex writes its log per event already, so it needs no hook.
+
 ## 6. Brain "Web" view clustering ✅
 
 Specific to `layoutGraph` (Web only; Tree/Recent have their own axes). After the force
