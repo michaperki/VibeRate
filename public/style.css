@@ -528,6 +528,9 @@ pre.code {
 .art-tag { font: 600 9px ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .04em; color: var(--bg); background: var(--accent); border-radius: 4px; padding: 1px 6px; }
 .art-before .art-tag { background: #8b92a5; }
 .art-after .art-tag { background: var(--codex); }
+.out-chip.attach { color: #d7b3ff; border-color: rgba(180,130,255,0.30); }
+.att-shot .att-tag { background: #7c5cff; }
+.att-shot { flex: 0 1 200px; min-width: 160px; max-width: 280px; }
 .art-vp { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--dim); }
 .pc-after { margin-top: 10px; }
 .pc-after summary { cursor: pointer; color: #a8a0d8; font-size: 12px; }

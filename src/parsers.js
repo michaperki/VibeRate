@@ -71,6 +71,24 @@ async function* readLines(file) {
 
 // ---------- Claude Code ----------
 
+// Images a user pasted into a prompt (screenshots, design refs) — the artifact
+// that often lives *inside* the prompt, not after it. Claude logs them as `image`
+// blocks in two shapes: {source:{data, media_type}} or {file:{base64}}. We keep
+// them as data URLs bound to the prompt so the reader can show what the user was
+// looking at. Capped so a pasted screenshot can't bloat the bundle.
+const MAX_IMG_B64 = 1_500_000; // ~1.1 MB decoded; skip anything larger
+const MAX_IMGS_PER_MSG = 6;
+
+function imageDataUrl(block) {
+  const src = block.source || block.file || {};
+  const data = src.data ?? src.base64;
+  if (typeof data !== 'string' || !data) return null;
+  if (data.startsWith('data:')) return data.length > MAX_IMG_B64 ? null : data;
+  if (data.length > MAX_IMG_B64) return null;
+  const mt = src.media_type || src.mediaType || 'image/png';
+  return `data:${mt};base64,${data}`;
+}
+
 function claudeContentToParts(content, role) {
   const parts = [];
   if (typeof content === 'string') {
@@ -78,6 +96,7 @@ function claudeContentToParts(content, role) {
     return parts;
   }
   if (!Array.isArray(content)) return parts;
+  const images = [];
   for (const block of content) {
     if (!block || typeof block !== 'object') continue;
     switch (block.type) {
@@ -93,15 +112,41 @@ function claudeContentToParts(content, role) {
         break;
       case 'tool_result': {
         let text = block.content;
+        const imgs = [];
         if (Array.isArray(text)) {
+          for (const c of text) {
+            if (c && c.type === 'image' && imgs.length < MAX_IMGS_PER_MSG) {
+              const url = imageDataUrl(c);
+              if (url) imgs.push(url);
+            }
+          }
           text = text.map((c) => (typeof c === 'string' ? c : c.text || '')).join('\n');
         }
-        parts.push({ role, kind: 'tool_result', text: typeof text === 'string' ? text : JSON.stringify(text) });
+        const part = { role, kind: 'tool_result', text: typeof text === 'string' ? text : JSON.stringify(text) };
+        // Screenshots / images the agent's tools returned during the turn — the
+        // images that actually populate real Claude logs (pasted prompt images are
+        // rare; tool-result images are common). Bound to the prompt unit downstream.
+        if (imgs.length) part.images = imgs;
+        parts.push(part);
+        break;
+      }
+      case 'image': {
+        if (images.length < MAX_IMGS_PER_MSG) {
+          const url = imageDataUrl(block);
+          if (url) images.push(url);
+        }
         break;
       }
       default:
         break;
     }
+  }
+  // Bind pasted images to the message's text part (an image-only paste still
+  // forms a turn via an empty text part so the prompt unit exists).
+  if (images.length) {
+    const host = parts.find((p) => p.kind === 'text' && p.role === role);
+    if (host) host.images = images;
+    else parts.push({ role, kind: 'text', text: '', images });
   }
   return parts;
 }

@@ -211,19 +211,30 @@ export function extractPromptUnits(session, sessionId, slug = null, { evidence =
       if (agent || pu) before = { prompt: pu ? clip(pu, 200) : null, agent: agent ? clip(agent, 320, true) : null };
     }
     const context = contextAt(t.items);
+    // Images bound to this prompt: ones the user pasted *in* (input), and ones the
+    // agent's tools returned during the turn (working screenshots). Capped at 3 so a
+    // screenshot-heavy turn stays light in the upload (~<0.4 MB); pasted-input images
+    // come first so they're never crowded out by agent shots.
+    const attachments = [
+      ...((t.user && t.user.images) || []).map((src) => ({ src, kind: 'pasted' })),
+      ...t.items.flatMap((m) => (m.images || []).map((src) => ({ src, kind: 'tool' }))),
+    ].slice(0, 3);
     out.push({
       id: `${sessionId}#${i}`,
       cardId: slug ? makeCardId(slug, sessionId, i) : null,
       index: i,
       prompt,
       ts: t.user.ts || null,
-      isAck: isAck(prompt),
+      // A pasted image is a will-expression — don't fold it as a bare ack.
+      isAck: isAck(prompt) && !(t.user.images && t.user.images.length),
       isNoise: isNoise(prompt),
       before,
       after: summarizeAfter(t.items),
       docRefs: docRefs(prompt),
       context,
       outcomes: deriveOutcomes(t.items, prompt, context),
+      // Images bound to this prompt — `{src, kind}`, kind ∈ pasted | tool.
+      attachments,
       chars: prompt.length,
     });
   }

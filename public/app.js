@@ -2734,6 +2734,11 @@ function outcomeChips(u, { compact = false } = {}) {
   if (brain) chips.push(['brain', `🧠 ${brain}`, 'brain docs referenced or changed']);
   if (o.commandsRun) chips.push(['cmd', `${o.commandsRun} ${plw(o.commandsRun, 'cmd')}`, 'commands the agent ran']);
   if (o.screenshots) chips.push(['shot', `${o.screenshots} ${plw(o.screenshots, 'shot')}`, 'screenshot evidence attached']);
+  if (u && u.attachments && u.attachments.length) {
+    const n = u.attachments.length;
+    const anyPaste = u.attachments.some((a) => a.kind === 'pasted');
+    chips.push(['attach', `${anyPaste ? '📎' : '🖼'} ${n}`, 'images bound to this prompt — pasted in, or screenshots the agent captured during the turn']);
+  }
   if (o.contextPct != null) chips.push([o.contextPct >= 75 ? 'hot' : 'ctx', `${o.contextPct}% ctx`, 'context window fullness when the prompt was sent']);
   const max = compact ? 4 : chips.length;
   return chips.length
@@ -2772,6 +2777,7 @@ function renderReaderCard(u, i) {
     <div class="pc-head">${docs}${contextGauge(u.context)}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(u.prompt)}</div>
+    ${renderAttachments(u.attachments)}
     ${outcomeChips(u)}
     ${renderArtifacts(u.evidence)}
     ${played}
@@ -2795,6 +2801,25 @@ function renderArtifacts(evs) {
     </figure>`;
   };
   return `<div class="pc-artifacts">${evs.map(fig).join('')}</div>`;
+}
+
+// Images bound to a prompt: ones the user pasted *in* (kind 'pasted' — input the
+// user supplied) and ones the agent's tools returned during the turn (kind 'tool'
+// — working screenshots). Distinct from `vbrt shot` evidence (deliberate after-shots);
+// these are incidental, the images that actually populate real logs.
+function renderAttachments(atts) {
+  if (!atts || !atts.length) return '';
+  const meta = (k) => (k === 'tool'
+    ? { tag: '🖼 agent shot', cap: 'screenshot the agent\'s tools returned during this turn' }
+    : { tag: '📎 attached', cap: 'image the user pasted into this prompt' });
+  const fig = (a, i) => {
+    const m = meta(a.kind);
+    return `<figure class="art-shot att-shot att-${esc(a.kind)}">
+      <img loading="lazy" class="art-img" src="${a.src}" data-lightbox="${a.src}" data-cap="${esc(m.cap)}" alt="${esc(m.tag)} ${i + 1}">
+      <figcaption><span class="art-tag att-tag">${m.tag}</span></figcaption>
+    </figure>`;
+  };
+  return `<div class="pc-artifacts pc-attach">${atts.map(fig).join('')}</div>`;
 }
 
 // ---------- media lightbox ----------
@@ -3099,6 +3124,7 @@ function renderPromptCard(c) {
     <div class="pc-head">${proj}${docs}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(c.prompt)}</div>
+    ${renderAttachments(c.attachments)}
     ${outcomeChips(c)}
     ${renderArtifacts(c.evidence)}
     ${played}
