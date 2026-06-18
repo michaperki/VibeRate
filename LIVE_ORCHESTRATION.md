@@ -120,10 +120,13 @@ which are internal UI). Codex writes its log per event already, so it needs no h
 > current action · context bar `57% · 115k tok · opus-4-8`), and a footer (last push · outbox
 > · Ctrl-C). Alt-screen buffer with guaranteed cursor/teardown restore on exit. Hook events
 > now carry `sid` (`src/hooks.js`) so the repo's merged stream groups back into per-agent
-> panels; events without `sid` fold into one panel. **Deferred (as planned):** Codex
-> log-tail fallback (CC-only for now — no hooks stream from Codex), and promoting `--tui`
-> from opt-in to default. Verified against a synthetic two-agent stream (working + idle,
-> different models/contexts); borders measured to terminal width.
+> panels; events without `sid` fold into one panel. **Now the default:** `vbrt watch`
+> launches the TUI on an interactive terminal; `vbrt watch --log` (alias `--no-tui`) forces
+> the plain scrolling push log, and we fall back to it automatically when stdout is
+> piped/redirected (agents, CI, `| tee`) so logs still capture cleanly. **Deferred (as
+> planned):** Codex log-tail fallback (CC-only for now — no hooks stream from Codex).
+> Verified against a synthetic two-agent stream (working + idle, different models/contexts),
+> borders measured to terminal width, and both the TTY-default and piped-fallback paths.
 
 
 **The gap.** The terminal running `vbrt watch` is the *one* surface that doesn't show

@@ -110,8 +110,9 @@ Social features all require a shared backend, so a thin deploy gates most of wha
     dependency-free ANSI dashboard — a panel per agent (status / current action /
     context-token gauge), header, footer — as a *presentation layer* over the existing
     `.vbrt/stream.jsonl` (`readStream`) + `discoverSessions`, **no new capture or agent
-    overhead**. Hook events now carry `sid` for per-agent grouping. Opt-in (`--tui`); the
-    scrolling log stays the default. Deferred: Codex log-tail fallback, promote to default.
+    overhead**. Hook events now carry `sid` for per-agent grouping. **Now the default** on an
+    interactive terminal; `vbrt watch --log` forces the plain scrolling log (also the
+    automatic fallback when output is piped/redirected). Deferred: Codex log-tail fallback.
     Full breakdown in `LIVE_ORCHESTRATION.md §8`.
   - **Real-time ticker via Claude Code hooks** ✅ — CC flushes its session log in
      chunks (~20–30s lag); `vbrt hooks --install` wires `Pre/PostToolUse` /

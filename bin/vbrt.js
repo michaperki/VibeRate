@@ -240,13 +240,12 @@ async function cmdWatch(args = []) {
   const apiUrl = resolveApi(); // deployed host by default; VBRT_API_URL overrides for local dev
   const includeMemory = !args.includes('--no-memory');
   const isPublic = args.includes('--public');
-  // Opt-in live TUI (LIVE_ORCHESTRATION §8). Needs a real terminal; degrade to the
-  // scrolling log if stdout is piped/redirected so logs still capture cleanly.
-  let tui = args.includes('--tui');
-  if (tui && !process.stdout.isTTY) {
-    console.log(C.yellow('  (--tui needs an interactive terminal; falling back to the log view)'));
-    tui = false;
-  }
+  // Live TUI (LIVE_ORCHESTRATION §8) is the default on an interactive terminal.
+  // `--log` (alias `--no-tui`) forces the plain scrolling push log; we also fall back
+  // to it automatically when stdout is piped/redirected (agents, CI, `| tee`) so logs
+  // still capture cleanly. `--tui` is still accepted as an explicit no-op.
+  const forceLog = args.includes('--log') || args.includes('--no-tui');
+  const tui = !forceLog && !!process.stdout.isTTY;
   let sessions0 = await discoverSessions(cwd);
   let sessionFiles = sessions0.map((s) => s.file);
   let sessionsList = sessions0; // full objects, kept fresh for sid→agent mapping in the TUI
@@ -845,9 +844,10 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt push --dry-run')}  Preview the redacted payload and visibility without uploading
   ${C.cyan('vbrt push --retry')}    Resend bundles left in the outbox after a failed upload
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
-  ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
-  ${C.cyan('vbrt watch --tui')}   Same, but a live in-terminal dashboard: a panel per agent (status,
-                       current action, context gauge). Needs an interactive terminal.
+  ${C.cyan('vbrt watch')}         Live in-terminal dashboard (default): a panel per agent — status,
+                       current action, context gauge — re-pushing as brain docs / git change.
+  ${C.cyan('vbrt watch --log')}   Plain scrolling push log instead of the dashboard (also the
+                       automatic fallback when output is piped/redirected).
   ${C.cyan('vbrt hooks --install')} Wire Claude Code hooks so the dashboard ticker follows the agent live
   ${C.cyan('vbrt hook')}          (internal) record a hook event to the live stream — called by the hooks
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)
