@@ -164,6 +164,108 @@ function deriveOutcomes(items, prompt, ctx) {
   };
 }
 
+// ---------- Stage 2 outcome artifacts (PROJECT_VIEW_PLAN §C) ----------
+// A small, deterministic `outcomeArtifact` blob the polymorphic rail renders for
+// the `test` / `record` families. Everything here is lifted from data already in
+// the bundle (the prompt text + the agent's tool_results) — no new capture, no
+// model call. We stay deliberately conservative: a tool's *exit code* "fired on
+// normal runs and meant nothing" (§C), so test detection requires a real
+// pass/fail summary, and we never fabricate which option was executed from a
+// brittle keyword match — the menu is lifted verbatim, execution state is left to
+// the provenance layer.
+
+// One tool_result's test verdict, or null if it isn't recognizable test output.
+// Requires an explicit runner summary (counts, a `PASS`/`FAIL` line, or ✓/✗) —
+// not a bare nonzero exit.
+function testStatusOf(text) {
+  const s = String(text || '');
+  if (!s || s.length > 20000) return null; // huge dumps aren't a test summary
+  const failed = (s.match(/(\d+)\s+(?:failed|failing)\b/i) || [])[1];
+  const passed = (s.match(/(\d+)\s+(?:passed|passing)\b/i) || [])[1];
+  const flaky = (s.match(/(\d+)\s+(?:flaky|skipped|pending)\b/i) || [])[1];
+  if (failed != null || passed != null) {
+    const f = Number(failed || 0), p = Number(passed || 0), k = Number(flaky || 0);
+    const label = [p ? `${p} passed` : '', f ? `${f} failed` : '', k ? `${k} flaky/skipped` : '']
+      .filter(Boolean).join(', ');
+    return { status: f > 0 ? 'r' : k > 0 ? 'a' : 'g', label };
+  }
+  if (/^\s*FAIL\b/m.test(s) || /[✗✘]/.test(s)) return { status: 'r', label: 'failures' };
+  if (/^\s*PASS\b/m.test(s) || /[✓✔]/.test(s) || /all tests passed/i.test(s)) return { status: 'g', label: 'passing' };
+  return null;
+}
+
+// Test-status timeline (#10/#4): the pass→fail→green arc across the turn's tool
+// runs. Collapses consecutive identical states so "green green green" reads as one.
+function extractTestTimeline(items) {
+  const segs = [];
+  for (const m of items || []) {
+    if (m.kind !== 'tool_result') continue;
+    const v = testStatusOf(m.text);
+    if (v) segs.push(v);
+  }
+  if (!segs.length) return null;
+  const collapsed = segs.filter((s, i) => i === 0 || s.status !== segs[i - 1].status);
+  const last = collapsed[collapsed.length - 1];
+  return {
+    kind: 'test',
+    segments: collapsed.map((s) => s.status),
+    label: segs[segs.length - 1].label,
+    verdict: last.status === 'r' ? 'FAIL' : last.status === 'a' ? 'FLAKY' : 'PASS',
+  };
+}
+
+// Enumerated "options menu" (#8): the choices the prompt put on the table. The
+// menu parses cleanly; per-item executed/deferred state is *not* inferred here
+// (it needs a transcript↔option semantic match — deferred to the provenance
+// layer rather than faked from keyword hits).
+function extractOptions(prompt) {
+  const items = [];
+  for (const ln of String(prompt || '').split('\n')) {
+    const m = ln.match(/^\s*(\d{1,2})[.):]?\s+(\S.{2,118}?)\s*$/);
+    if (m) items.push({ n: Number(m[1]), text: m[2].trim() });
+  }
+  if (items.length < 2) return null; // a real menu, not one stray "1."
+  return { kind: 'options', items: items.slice(0, 10) };
+}
+
+// A labeled value the author typed: `EXPECTED: …`, `RESULT - …`.
+function labelVal(s, label) {
+  const m = String(s).match(new RegExp(`\\b${label}\\b\\s*[:\\-]\\s*(.{3,220}?)(?:\\n|$)`, 'i'));
+  return m ? clip(m[1], 180) : null;
+}
+
+// Experiment-as-prompt (#4): the user pastes a designed test + observed result +
+// a verdict, in their own words. We lift those labeled blocks verbatim — the
+// author's stated outcome, not our guess.
+function extractExperiment(prompt) {
+  const s = String(prompt || '');
+  const expected = labelVal(s, 'expected') || labelVal(s, 'expect');
+  const actual = labelVal(s, 'actual') || labelVal(s, 'response') || labelVal(s, 'got');
+  const result = labelVal(s, 'result') || labelVal(s, 'outcome');
+  if (!expected && !actual && !result) return null;
+  let verdict = null;
+  if (/\bpartial\b/i.test(result || '')) verdict = 'PARTIAL';
+  else if (/\b(fail|wrong|broke|incorrect)\b|[✗✘]/i.test(result || '')) verdict = 'FAIL';
+  else if (/\b(pass|works?|correct|good)\b|[✓✔]/i.test(result || '')) verdict = 'PASS';
+  return { kind: 'experiment', expected, actual, result, verdict };
+}
+
+// Route a prompt-unit to its `outcomeArtifact` (or null). Archetype gates the
+// prompt-parse families (experiment/options) so their patterns can't false-fire
+// on unrelated prompts; the transcript-derived test timeline is universal but
+// self-gating (it only emits on a real runner summary).
+function extractOutcomeArtifact(prompt, items, arch) {
+  if (arch === 'experiment') {
+    const e = extractExperiment(prompt);
+    if (e) return e;
+  }
+  if (arch === 'options') {
+    const o = extractOptions(prompt);
+    if (o) return o;
+  }
+  return extractTestTimeline(items);
+}
+
 function attachGitOutcomes(units, session, git) {
   const commits = (git && git.commits) || [];
   if (!commits.length || !units.length) return;
@@ -219,6 +321,8 @@ export function extractPromptUnits(session, sessionId, slug = null, { evidence =
       ...((t.user && t.user.images) || []).map((src) => ({ src, kind: 'pasted' })),
       ...t.items.flatMap((m) => (m.images || []).map((src) => ({ src, kind: 'tool' }))),
     ].slice(0, 3);
+    // Intent archetype (classify.js) — { archetype, confidence, rationale } or null.
+    const archetype = classify && slug ? classify[makeCardId(slug, sessionId, i)] || null : null;
     out.push({
       id: `${sessionId}#${i}`,
       cardId: slug ? makeCardId(slug, sessionId, i) : null,
@@ -235,8 +339,9 @@ export function extractPromptUnits(session, sessionId, slug = null, { evidence =
       outcomes: deriveOutcomes(t.items, prompt, context),
       // Images bound to this prompt — `{src, kind}`, kind ∈ pasted | tool.
       attachments,
-      // Intent archetype (classify.js) — { archetype, confidence, rationale } or null.
-      archetype: classify && slug ? classify[makeCardId(slug, sessionId, i)] || null : null,
+      archetype,
+      // Stage 2 outcome artifact for the test/record families (or null).
+      outcomeArtifact: extractOutcomeArtifact(prompt, t.items, archetype && archetype.archetype),
       chars: prompt.length,
     });
   }

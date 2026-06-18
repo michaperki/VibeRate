@@ -192,14 +192,26 @@ concept it changed — that link is the "living history."
 - [ ] *Live visual check* against a session re-ingested **with** an API key (archetype data is
   null on all currently-stored bundles, so the footers can't render until classify runs).
 >
-> **Stage 2 — light extraction for `record` + `test` + bespoke:**
-- [ ] `src/prompts.js` emits a small `u.outcomeArtifact`: test-status timeline (pass/fail
-  across tool outputs), options checklist (enumerated items × files/commits touched —
-  candidate to ride the existing Haiku classify call by extending its schema rather than a
-  new request), feasibility decision-record (question + `verdict`).
-- [ ] Bespoke `railExperiment` (expected→actual + PASS/PARTIAL/FAIL pill) and `railOptions`
-  (✓/▢ checklist), keyed off the new blob.
-- [ ] Verify against a real `vbrt`-pushed session (not just the mock); check scroll cost on a long session.
+> **Stage 2 — light extraction for `record` + `test` + bespoke:** ✅ shipped 2026-06-18 (mostly)
+- [x] `src/prompts.js` emits a small `u.outcomeArtifact` (deterministic; no new capture, no
+  model call): **test-status timeline** (scans the turn's `tool_result`s for an explicit
+  runner summary — counts / `PASS`·`FAIL` lines / ✓·✗ — *not* a bare exit code, which §C
+  already found "meant nothing"), **options menu** (lifts the enumerated list from the
+  prompt), and **experiment** (the author's `EXPECTED`/`ACTUAL`/`RESULT` blocks + a
+  PASS/PARTIAL/FAIL verdict). Prompt-parse families gate on `archetype` so they can't
+  false-fire; the test timeline is universal but self-gating. *(feasibility decision-record
+  deferred — the two named bespoke renderers were experiment + options.)*
+- [x] Bespoke `railExperiment` (expected→actual + verdict pill) + `railOptions` + `railTest`
+  (green→red→green dots + verdict), keyed off `u.outcomeArtifact`; the artifact drives a
+  marquee placement, overriding the family default. **Options: menu lifted verbatim, no ✓/▢ —
+  per-item executed/deferred state needs a transcript↔option semantic match and is left to the
+  provenance layer, not faked from keyword hits ([[no-brittle-text-heuristics]]).**
+- [~] Verify against a real session: the **test family is verified end-to-end on real data**
+  (3 genuine `codeswipe` prompts rendered a status timeline) + a 14-assertion extraction test
+  (incl. conservatism: prose numbers and bare exit codes don't fire). *Still open:* live visual
+  check of **experiment/options** + scroll cost — blocked on classification, because the
+  environment `ANTHROPIC_API_KEY` returns **401 invalid x-api-key** (so all archetypes are null;
+  same blocker as Stage 1's open box, now diagnosed as an invalid key, not a missing one).
 
 ### D. Scale & navigation
 - [x] **Prompt-unit sidebar + deep links** *(first pass shipped 2026-06-17)* — `Sessions |

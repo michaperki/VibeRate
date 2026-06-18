@@ -2808,19 +2808,57 @@ function railDiff(u) {
   }${tail ? `<div class="rail-dr">${esc(tail)}</div>` : ''}</div>`;
 }
 
-// Route a prompt-unit to its outcome rail. Returns the chips + any captured
-// screenshots for unrouted prompts (today's behavior, no regression).
+// Stage 2 bespoke renderers, keyed off `u.outcomeArtifact` (prompts.js). These
+// are the `test`/`record` families whose proof needs a little extraction.
+
+// Experiment-as-prompt (#4): the author's expected→actual + a verdict pill.
+function railExperiment(a) {
+  const rows = [
+    a.expected ? `<div class="rail-xrow"><span class="rail-xk">expected</span> ${esc(a.expected)}</div>` : '',
+    a.actual ? `<div class="rail-xrow"><span class="rail-xk">actual</span> ${esc(a.actual)}</div>` : '',
+  ].filter(Boolean).join('');
+  const pill = a.verdict
+    ? `<span class="rail-pill ${a.verdict === 'FAIL' ? 'fail' : a.verdict === 'PARTIAL' ? 'partial' : 'pass'}">${esc(a.verdict)}</span>`
+    : '';
+  const result = a.result ? `<span class="rail-xresult">${esc(a.result)}</span>` : '';
+  return `${rows}${pill || result ? `<div class="rail-xrow">${pill}${result}</div>` : ''}`;
+}
+
+// Test-status timeline (#10/#4): green→red→green dots + a final verdict pill.
+function railTest(a) {
+  const tl = a.segments.map((s, i) =>
+    `${i ? '<span class="rail-seg"></span>' : ''}<span class="rail-dot ${s}"></span>`).join('');
+  const pillCls = a.verdict === 'FAIL' ? 'fail' : a.verdict === 'FLAKY' ? 'flaky' : 'pass';
+  return `<div class="rail-tl">${tl}</div><div class="rail-tl-meta"><span class="rail-pill ${pillCls}">${esc(a.verdict)}</span>${
+    a.label ? `<span class="rail-tl-label">${esc(a.label)}</span>` : ''
+  }</div>`;
+}
+
+// Options menu (#8): the choices the prompt put on the table, lifted verbatim.
+// No ✓/▢ — per-item execution state is deferred (provenance layer), not faked.
+function railOptions(a) {
+  return `<ul class="rail-opts">${a.items.map((it) =>
+    `<li><span class="rail-opt-n">${it.n}</span> ${esc(it.text)}</li>`).join('')}</ul>`;
+}
+
+// Route a prompt-unit to its outcome rail. The Stage 2 artifact (when present)
+// drives a bespoke marquee; otherwise the Stage 1 family router picks shot/diff;
+// otherwise the flat chips + screenshots (today's behavior, no regression).
 function renderOutcomeRail(u) {
   const arch = (u.archetype && u.archetype.archetype) || null;
   const family = ARCH_FAMILY[arch] || null;
   const chips = outcomeChips(u);
   const shots = renderArtifacts(u.evidence); // evidence shows whenever captured, any archetype
+  const art = u.outcomeArtifact;
+  if (art && art.kind === 'experiment') return railFooter('expected → actual', railExperiment(art) + shots + chips);
+  if (art && art.kind === 'options') return railFooter('options on the table', railOptions(art) + shots + chips);
   if (family === 'shot' && shots) return railFooter('before / after', shots + chips);
   if (family === 'diff') {
     const body = railDiff(u);
     if (body) return railFooter('deliverable', body + shots + chips);
   }
-  return chips + shots; // link / record / test / default / unclassified → flat
+  if (art && art.kind === 'test') return railFooter('test status', railTest(art) + shots + chips);
+  return chips + shots; // link / default / unclassified → flat
 }
 
 // One prompt unit as an internal reader card. Acks ("go ahead") collapse to a slim
