@@ -11,7 +11,7 @@ import { saveBundle } from '../src/storage.js';
 import { extractGit, extractDocHistory } from '../src/git.js';
 import { extractDocsMulti } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
-import { readEvidence, recordShot, captureCapabilities } from '../src/evidence.js';
+import { readEvidence, recordShot, captureCapabilities, installCapture } from '../src/evidence.js';
 import { buildBundle } from '../src/bundle.js';
 import { pushBundle, apiBase, resolveApi, login, flushOutbox, outboxCount, publishProject, saveProjectRef, loadProjectRef } from '../src/push.js';
 import { redactBundle } from '../src/redact.js';
@@ -338,16 +338,16 @@ async function cmdAdd(args = []) {
         console.log(C.yellow(`\n⚠ \`vbrt watch\` is live (pid ${watching.pid}) — it's already streaming this repo.`));
         console.log(C.dim('  This manual push is redundant; only push by hand if watch errored. Proceeding anyway…'));
       }
-      const { id, url, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
+      const { id, url, viewUrl, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
       saveProjectRef(cwd, { id, url, apiUrl: resolveApi(), visibility });
       if (visibility === 'public') {
         console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (public) — view & share at:`));
         console.log(`  ${C.cyan(url)}`);
         console.log(C.dim(`  Your projects: ${dashboardUrl}`));
       } else {
-        console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (private) — only you can see it:`));
-        console.log(`  ${C.cyan(url)}`);
-        console.log(C.dim(`  It's private. Make this link shareable without re-uploading: ${C.bold('vbrt publish --public')}`));
+        console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (private) — open it (no sign-in needed):`));
+        console.log(`  ${C.cyan(viewUrl || url)}`);
+        console.log(C.dim(`  Only you can see it. Share with others (no re-upload): ${C.bold('vbrt publish --public')}`));
       }
       if (newToken) {
         console.log(C.dim(`  (saved an access token to ${tokenPath})`));
@@ -401,7 +401,7 @@ async function cmdShot(args = []) {
   if (!target && !opts.image) {
     console.log(C.yellow('Usage: vbrt shot <url|image.png> [--image <file>] [--label before|after] [--note "…"] [--viewport 1280x800] [--clip [seconds]]'));
     console.log(C.dim('  Pass a local dev URL (captured via Playwright if installed) or an image the agent already took.'));
-    console.log(C.dim('  --clip records a short motion clip of a URL (gif if ffmpeg is installed, else webm).'));
+    console.log(C.dim('  --clip records a motion clip of a URL; [seconds] is a CAP — it auto-stops when motion settles (gif if ffmpeg, else webm).'));
     process.exitCode = 1;
     return;
   }
@@ -423,7 +423,8 @@ async function cmdShot(args = []) {
       clip,
     });
     const kind = rec.media === 'video' ? 'clip (webm)' : clip ? 'clip (gif)' : 'artifact';
-    console.log(C.green(`\n✓ Captured ${kind}${rec.label ? ` (${rec.label})` : ''} → ${path.relative(cwd, rec.file)}`));
+    const dur = clip && rec.durationMs ? ` · ${(rec.durationMs / 1000).toFixed(1)}s (${rec.settled ? 'auto-stopped when motion settled' : 'hit --clip cap; raise it if the motion was cut off'})` : '';
+    console.log(C.green(`\n✓ Captured ${kind}${rec.label ? ` (${rec.label})` : ''}${dur} → ${path.relative(cwd, rec.file)}`));
     console.log(C.dim(`  bound to ${rec.session ? `session ${rec.session.id}` : '(no active session found — will attach by time)'}${rec.note ? ` · "${rec.note}"` : ''}`));
     // Before the first commit, evidence can't tie to a code checkpoint — nudge, don't fail.
     if (isGitRepo(cwd) && !rec.gitHead) {
@@ -508,10 +509,11 @@ function isGitRepo(cwd) {
 // boring and predictable. Reports repo / watch / capture / clip / fallback and
 // prints the exact command pattern to use — so it never rediscovers the Playwright
 // resolution detour the hard way.
-async function cmdDoctor() {
+async function cmdDoctor(args = []) {
   const cwd = process.cwd();
+  const fix = args.includes('--fix');
   const ok = (b) => (b ? C.green('✓') : C.yellow('✗'));
-  console.log(`\n${C.bold('vbrt doctor')} — ${C.cyan(cwd)}\n`);
+  console.log(`\n${C.bold('vbrt doctor')}${fix ? C.dim(' --fix') : ''} — ${C.cyan(cwd)}\n`);
 
   const repo = isGitRepo(cwd);
   console.log(`  ${ok(repo)} git repo            ${repo ? C.dim('initialized') : C.yellow('not a git repo — run `git init` so commits/brain timeline are captured')}`);
@@ -524,17 +526,33 @@ async function cmdDoctor() {
   console.log(`  ${ok(watch.active)} vbrt watch         ${watch.active ? C.dim(`live (pid ${watch.pid}) — DON'T run \`push --all\`; watch streams changes`) : C.dim('not running — push with `vbrt push --all` when done')}`);
 
   console.log(C.dim('\n  capture (checking Playwright + browser; may take a few seconds)…'));
-  const cap = await captureCapabilities(cwd);
-  const urlOk = cap.playwright && cap.chromium;
-  console.log(`  ${ok(urlOk)} URL capture        ${urlOk ? C.dim(`Playwright (${cap.source}) + chromium ready`) : C.yellow(cap.playwright ? `Playwright (${cap.source}) found but no browser — run \`npx playwright install chromium\`` : 'no Playwright — `npm i -D playwright && npx playwright install chromium`, or register a file (see below)')}`);
+  let cap = await captureCapabilities(cwd);
+  let urlOk = cap.playwright && cap.chromium;
+
+  // `--fix`: install Playwright + chromium in this repo, then re-probe so the
+  // verdict below reflects the fixed state.
+  if (!urlOk && fix) {
+    console.log(C.dim('\n  --fix: installing capture tooling (this can take a minute)…\n'));
+    try {
+      cap = await installCapture(cwd, (m) => console.log(C.dim('  ' + m)));
+      urlOk = cap.playwright && cap.chromium;
+      console.log(urlOk ? C.green('\n  ✓ capture tooling installed.\n') : C.yellow('\n  ✗ still not working after install — see the error below.\n'));
+    } catch (err) {
+      console.log(C.yellow(`\n  ✗ install failed: ${String(err.message || err).split('\n')[0]}\n`));
+    }
+  }
+
+  const browserNote = cap.browser ? ` (${cap.browser})` : '';
+  console.log(`  ${ok(urlOk)} URL capture        ${urlOk ? C.dim(`Playwright (${cap.source}) + chromium${browserNote} ready`) : C.yellow(cap.playwright ? `Playwright (${cap.source}) found but no browser — run \`vbrt doctor --fix\`` : 'no Playwright — run `vbrt doctor --fix` (or register a file; see below)')}`);
   console.log(`  ${ok(urlOk)} clip capture       ${urlOk ? C.dim(cap.ffmpeg ? 'records → animated .gif (ffmpeg present)' : 'records → .webm (no ffmpeg; gif unavailable but webm loops fine)') : C.dim('needs URL capture (above)')}`);
   console.log(`  ${C.green('✓')} file register      ${C.dim('always works: `vbrt shot ./shot.png --label after` (.png/.gif/.webm)')}`);
+  if (!urlOk && !fix) console.log(C.dim('      → auto-install with `vbrt doctor --fix`'));
   if (cap.error) console.log(C.dim(`      browser launch error: ${cap.error.split('\n')[0]}`));
 
   console.log(`\n  ${C.bold('Recommended capture command')}:`);
   if (urlOk) {
     console.log(`    ${C.cyan('vbrt shot http://localhost:<port> --label after --note "…"')}`);
-    console.log(C.dim('    add `--clip 4` for motion. Point at YOUR app, never VibeRate.'));
+    console.log(C.dim('    add `--clip 8` for motion — it auto-stops when motion settles, so the number is just a cap. Point at YOUR app, never VibeRate.'));
   } else {
     console.log(`    ${C.cyan('vbrt shot ./shot.png --label after --note "…"')}   ${C.dim('(take the file with your own tooling)')}`);
     console.log(C.dim('    headless capture is unavailable here — do NOT touch NODE_PATH or the skill install.'));
@@ -610,8 +628,9 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
   ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)
-  ${C.cyan('vbrt shot <url> --clip [s]')} Record a short motion clip (gif if ffmpeg, else webm)
+  ${C.cyan('vbrt shot <url> --clip [s]')} Record a motion clip (auto-stops when motion settles; [s] caps it)
   ${C.cyan('vbrt doctor')}        Preflight: repo / watch / capture readiness + the command to use
+  ${C.cyan('vbrt doctor --fix')}  Auto-install Playwright + chromium here if capture isn't ready
   ${C.cyan('vbrt status')}        Where things stand: watch, project URL, evidence, outbox, push needed?
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port
@@ -639,7 +658,7 @@ async function main() {
       await cmdShot(rest);
       break;
     case 'doctor':
-      await cmdDoctor();
+      await cmdDoctor(rest);
       break;
     case 'status':
       cmdStatus();

@@ -90,11 +90,11 @@ node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot https://<your-app>.fly.dev --
 **Motion: capture a clip** when the change is only legible animated (transitions, easing, a sort/animation running, hover/drag feedback). Records a few seconds of the URL:
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot http://localhost:5173 --clip 4 --label after --note "merge animation"
+node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot http://localhost:5173 --clip 8 --label after --note "merge animation"
 ```
 
-- `--clip [seconds]` (default 4, max 15). Produces an animated **gif** if `ffmpeg` is installed, otherwise a **webm** — both render and loop in the reader, no difference to you.
-- Keep clips short and the `--viewport` modest (e.g. `960x600`); they inline into the bundle, so smaller is better. Prefer a clip only when a still wouldn't show the point.
+- `--clip [seconds]` is a **cap, not a fixed length**. The clip records from first paint and **auto-stops once the motion settles**, so length tracks the real animation — a button toggle gives a ~1s loop, a long sim runs to the cap. You don't need to tune the app's speed to fill a fixed window (that's what left a 6s clip mostly static). Produces a **gif** (if `ffmpeg`) else a **webm**; both loop in the reader.
+- Pick the cap as "at most this long" (default 8, max 20); keep `--viewport` modest (e.g. `960x600`) since clips inline into the bundle. If the output says it *hit the cap*, the motion was still going — raise it.
 - For animated apps, games, simulations, visualizers, drag/drop, hover states, or
   transition-heavy UI, capture **at least one `--clip` after the first commit**. A
   final still alone is not enough evidence for motion-first work.

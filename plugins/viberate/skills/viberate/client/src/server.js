@@ -7,7 +7,7 @@ import { getContext } from './context.js';
 import { extractPromptUnits, buildFeed, parseCardId } from './prompts.js';
 import { getRatingSummary, getUserVote, voteCard } from './ratings.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
-import { newToken, hashToken, bearer } from './auth.js';
+import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCookie } from './auth.js';
 import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner } from './accounts.js';
 
@@ -44,15 +44,32 @@ function currentOwners(req) {
   return token ? [hashToken(token)] : null;
 }
 
+// Short-lived, project-scoped view grants. A push returns a signed `view` token so
+// the developer who pushed can open their own *private* project in a browser without
+// signing in / claiming first (the browser can't present the CLI bearer token). The
+// token is redeemed (POST /api/view) into a signed `vbrt_view` cookie that lists the
+// granted slugs. This grants *read* of named private projects only — never the
+// account, the project list, or publish — so it's safe to hand back in a link.
+const VIEW_COOKIE = 'vbrt_view';
+const VIEW_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const LIVE_WINDOW_MS = 3 * 60 * 1000; // a project pushed within this window reads as "streaming"
+
+function viewGrants(req) {
+  const payload = verifyValue(readCookie(req, VIEW_COOKIE));
+  return (payload && Array.isArray(payload.views)) ? payload.views : [];
+}
+
 // A project's reads (its page + APIs) are allowed when: we're local (single-user),
-// the project is published public, or the requester owns it (session or token).
-// Private projects are invisible to everyone but their owner — push ≠ publish.
+// the project is published public, the requester owns it (session or token), or the
+// requester holds a valid view grant for this specific project.
+// Private projects are otherwise invisible to everyone but their owner — push ≠ publish.
 function canRead(project, req) {
   if (!HOSTED) return true;
   if (!project) return false;
   if (project.visibility === 'public') return true;
   const owners = currentOwners(req);
-  return !!owners && owners.includes(project.owner);
+  if (owners && owners.includes(project.owner)) return true;
+  return viewGrants(req).includes(project.slug);
 }
 
 function rateLimitIngest(req, res, next) {
@@ -136,6 +153,19 @@ export function startServer(port = 4317) {
     res.json({ ok: true, projectCount: updated ? updated.ownerHashes.length : 0 });
   });
 
+  // Redeem a self-view token (from a push's `view` field) into a cookie so the
+  // pusher can browse their own private project without signing in. Merges into any
+  // existing grants so opening several private links in one browser all keep working.
+  app.post('/api/view', (req, res) => {
+    if (!HOSTED) return res.json({ ok: true }); // local: everything is readable anyway
+    const token = req.body && req.body.token;
+    const payload = token ? verifyValue(String(token)) : null;
+    if (!payload || !payload.grant) return res.status(400).json({ error: 'invalid or expired view token' });
+    const views = Array.from(new Set([...viewGrants(req), payload.grant]));
+    setCookie(res, VIEW_COOKIE, signValue({ views }, VIEW_TTL_MS), { maxAgeMs: VIEW_TTL_MS });
+    res.json({ ok: true, id: payload.grant });
+  });
+
   // "Connect CLI": mint a fresh token already bound to the signed-in account, so
   // a web-first user can `vbrt login <token>` and push straight into their account.
   app.post('/api/tokens', (req, res) => {
@@ -187,7 +217,10 @@ export function startServer(port = 4317) {
       const requestedVisibility = HOSTED ? (req.query.public === '1' ? 'public' : 'private') : 'public';
       const { id, visibility } = ingestBundle(bundle, { owner, visibility: requestedVisibility });
       const url = `${req.protocol}://${req.get('host')}/p/${id}`;
-      res.status(201).json({ id, url, visibility, ...(minted ? { token: minted } : {}) });
+      // A self-view token so the pusher can open a private project immediately,
+      // without signing in first (redeemed by the viewer via POST /api/view).
+      const view = HOSTED && visibility !== 'public' ? signValue({ grant: id }, VIEW_TTL_MS) : null;
+      res.status(201).json({ id, url, visibility, ...(view ? { view } : {}), ...(minted ? { token: minted } : {}) });
     } catch (err) {
       res.status(500).json({ error: String(err.message || err) });
     }
@@ -220,7 +253,10 @@ export function startServer(port = 4317) {
 
   app.get('/api/projects/:slug', (req, res) => {
     const project = guardRead(req, res);
-    if (project) res.json(project);
+    // `streaming`: pushed within the live window (e.g. a `vbrt watch` is sending
+    // deltas) → the viewer auto-enables Live so you don't hand-click "Go live".
+    // Self-clears once pushes stop. Single source of the window threshold.
+    if (project) res.json({ ...project, streaming: (Date.now() - (project.lastPushAt || 0)) < LIVE_WINDOW_MS });
   });
 
   app.get('/api/projects/:slug/activity', (req, res) => {

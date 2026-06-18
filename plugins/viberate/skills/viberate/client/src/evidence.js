@@ -52,34 +52,82 @@ async function resolvePlaywright(cwd) {
   }
 }
 
+// Portable headless launch args. WSL/Snap/Docker/CI all tend to hang or crash on a
+// bare `chromium.launch()` — the sandbox can't initialize and the default /dev/shm is
+// too small. This set is the standard fix and is harmless on a normal desktop, so we
+// always apply it. Both the probe and the real capture launch through `launchForCapture`
+// so a green `vbrt doctor` genuinely predicts that `vbrt shot` will work.
+const LAUNCH_ARGS = ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'];
+
+// Launch the first browser that actually starts, trying portable candidates in order:
+// Playwright's bundled chromium first (most reproducible across machines), then a
+// system Chrome channel if one is installed. Returns the live browser + which won, so
+// the probe can report it. Throws the last error if nothing launches.
+async function launchForCapture(pw) {
+  const candidates = [
+    { which: 'bundled chromium', opts: { args: LAUNCH_ARGS, chromiumSandbox: false } },
+    { which: 'system chrome', opts: { channel: 'chrome', args: LAUNCH_ARGS, chromiumSandbox: false } },
+  ];
+  let lastErr = null;
+  for (const c of candidates) {
+    try {
+      return { browser: await pw.chromium.launch(c.opts), which: c.which };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('no working chromium');
+}
+
 // One message for the "no headless capture available" case — tells the agent the
 // two things that actually work and the two things that don't (so it stops trying
 // to patch NODE_PATH or the skill install, the costly detour we saw in practice).
 const PW_HELP =
-  'Headless capture needs Playwright + a browser. In THIS repo run:\n' +
-  '    npm i -D playwright && npx playwright install chromium\n' +
-  '  then re-run the same `vbrt shot` command — vbrt resolves Playwright from the repo.\n' +
+  'Headless capture needs Playwright + a browser. Easiest: run `vbrt doctor --fix`\n' +
+  '  (installs Playwright + chromium in THIS repo), then re-run the same `vbrt shot`.\n' +
+  '  Manual equivalent: `npm i -D playwright && npx playwright install chromium`.\n' +
   '  Or skip headless capture entirely: take the screenshot/clip yourself and register the\n' +
   '  file with `vbrt shot ./shot.png --label after` (also accepts .gif / .webm).\n' +
   '  Do NOT edit NODE_PATH or the skill install — that is never the fix.';
 
 // Probe what capture can actually do from here, for `vbrt doctor`. Resolves
-// Playwright and (if found) does a real chromium launch — the browser binary is a
-// separate install, so "module present" isn't enough to know URL/clip capture works.
+// Playwright and (if found) launches a browser the SAME way capture will — the
+// browser binary is a separate install, and a bare launch can hang where a hardened
+// one works, so "module present" (or even "default launch") isn't enough to trust.
 export async function captureCapabilities(cwd) {
-  const out = { playwright: false, source: null, chromium: false, ffmpeg: hasFfmpeg(), error: null };
+  const out = { playwright: false, source: null, chromium: false, browser: null, ffmpeg: hasFfmpeg(), error: null };
   const { module: pw, source } = await resolvePlaywright(cwd);
   if (!pw) return out;
   out.playwright = true;
   out.source = source;
   try {
-    const browser = await pw.chromium.launch();
+    const { browser, which } = await launchForCapture(pw);
     await browser.close();
     out.chromium = true;
+    out.browser = which;
   } catch (err) {
     out.error = err.message;
   }
   return out;
+}
+
+// `doctor --fix`: install Playwright (as a repo dev-dep) and the chromium binary when
+// capture isn't ready. Explicit and opt-in — never runs as a side effect of `shot`.
+// Streams install output through `log`; returns a fresh probe so the caller can
+// confirm capture now works. Resolves Playwright from the repo afterward, matching
+// where `captureUrl`/`captureClip` look.
+export async function installCapture(cwd, log = () => {}) {
+  const run = (cmd, args) => execFileSync(cmd, args, { cwd, stdio: 'inherit' });
+  const before = await captureCapabilities(cwd);
+  if (!before.playwright) {
+    log('• installing Playwright (repo dev dependency)…');
+    run('npm', ['i', '-D', 'playwright']);
+  } else {
+    log(`• Playwright already present (${before.source})`);
+  }
+  log('• installing the chromium browser binary…');
+  run('npx', ['--yes', 'playwright', 'install', 'chromium']);
+  return captureCapabilities(cwd);
 }
 
 function gitHead(cwd) {
@@ -160,9 +208,8 @@ function dataUrl(imgPath) {
 async function captureUrl(url, viewport, cwd) {
   const { module: pw } = await resolvePlaywright(cwd);
   if (!pw) throw new Error(PW_HELP);
-  const { chromium } = pw;
   const [w, h] = String(viewport || '1280x800').split('x').map(Number);
-  const browser = await chromium.launch();
+  const { browser } = await launchForCapture(pw);
   try {
     const page = await browser.newPage({ viewport: { width: w || 1280, height: h || 800 } });
     await page.goto(url, { waitUntil: 'networkidle' });
@@ -173,30 +220,49 @@ async function captureUrl(url, viewport, cwd) {
   }
 }
 
-// Record a short motion clip of a URL. Playwright records native webm (no extra
-// deps); if system ffmpeg is present we transcode to an animated .gif (smaller,
-// renders in a plain <img>), otherwise we keep the webm (renders as <video>).
-// Returns a { dataUrl, media } pair so the caller/viewer knows how to render it.
-async function captureClip(url, { viewport, seconds = 4, fps = 12, cwd } = {}) {
+// Record a motion clip of a URL — **length tracks the actual motion**, not a fixed
+// timer. We record from first paint and auto-stop once the page holds still, so a
+// button toggle yields a ~1s loop and a long simulation runs out to the cap, with no
+// per-app speed tuning (the failure mode that left 5s of static maze in a 6s clip).
+// `seconds` is the upper bound. Playwright records native webm; with system ffmpeg we
+// transcode to an animated gif. Returns { dataUrl, media, durationMs }.
+async function captureClip(url, { viewport, seconds = 8, fps = 12, cwd } = {}) {
   const { module: pw } = await resolvePlaywright(cwd);
   if (!pw) throw new Error(PW_HELP);
-  const { chromium } = pw;
   const [w, h] = String(viewport || '960x600').split('x').map(Number);
   const width = w || 960;
   const height = h || 600;
-  const secs = Math.min(15, Math.max(1, Number(seconds) || 4)); // cap so files stay inline-able
+  const capMs = Math.min(20, Math.max(1, Number(seconds) || 8)) * 1000; // hard upper bound
+  const POLL_MS = 200;   // how often we compare frames for motion
+  const STILL_MS = 700;  // "settled" once this long passes with no visible change
+  const MIN_MS = 800;    // floor so even a quick toggle leaves a watchable loop
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vbrt-clip-'));
-  const browser = await chromium.launch();
+  const { browser } = await launchForCapture(pw);
   let webmPath;
+  let durationMs = 0;
+  let settled = false;
   try {
     const context = await browser.newContext({
       viewport: { width, height },
       recordVideo: { dir: tmp, size: { width, height } },
     });
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: 'networkidle' });
+    await page.goto(url, { waitUntil: 'load' }); // start near first paint, not network-idle
     const video = page.video();
-    await page.waitForTimeout(secs * 1000);
+    // Compare successive frames; a small fixed-quality JPEG is byte-identical for
+    // identical pixels, so equal buffers ⇒ nothing moved. Stop once the page has held
+    // still for STILL_MS (past the MIN_MS floor), or at the cap for endless motion.
+    const startedAt = Date.now();
+    let prev = await page.screenshot({ type: 'jpeg', quality: 40 });
+    let stillFor = 0;
+    while (Date.now() - startedAt < capMs) {
+      await page.waitForTimeout(POLL_MS);
+      const frame = await page.screenshot({ type: 'jpeg', quality: 40 });
+      stillFor = frame.equals(prev) ? stillFor + POLL_MS : 0;
+      prev = frame;
+      if (Date.now() - startedAt >= MIN_MS && stillFor >= STILL_MS) { settled = true; break; }
+    }
+    durationMs = Date.now() - startedAt;
     await context.close(); // finalizes the webm; path() resolves after close
     webmPath = video ? await video.path() : null;
   } finally {
@@ -217,13 +283,13 @@ async function captureClip(url, { viewport, seconds = 4, fps = 12, cwd } = {}) {
       if (buf.length > MAX_CLIP_BYTES) {
         throw new Error(`clip too large (${Math.round(buf.length / 1024)}KB > ${Math.round(MAX_CLIP_BYTES / 1024)}KB cap) — try a shorter --clip or smaller --viewport`);
       }
-      return { dataUrl: `data:image/gif;base64,${buf.toString('base64')}`, media: 'image' };
+      return { dataUrl: `data:image/gif;base64,${buf.toString('base64')}`, media: 'image', durationMs, settled };
     }
     const buf = fs.readFileSync(webmPath);
     if (buf.length > MAX_CLIP_BYTES) {
       throw new Error(`clip too large (${Math.round(buf.length / 1024)}KB > ${Math.round(MAX_CLIP_BYTES / 1024)}KB cap) — try a shorter --clip or smaller --viewport`);
     }
-    return { dataUrl: `data:video/webm;base64,${buf.toString('base64')}`, media: 'video' };
+    return { dataUrl: `data:video/webm;base64,${buf.toString('base64')}`, media: 'video', durationMs, settled };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -242,11 +308,15 @@ export async function recordShot(cwd, { target, image, label = null, note = '', 
   const mediaOf = (src) => (/^data:video\//i.test(src) ? 'video' : 'image');
   let img;
   let media;
+  let durationMs = null;
+  let settled = false;
   if (clip) {
     if (!isUrl) throw new Error('--clip needs a URL to record (pass an http(s) URL)');
-    const out = await captureClip(target, { viewport, seconds: clip === true ? 4 : Number(clip), cwd });
+    const out = await captureClip(target, { viewport, seconds: clip === true ? 8 : Number(clip), cwd });
     img = out.dataUrl;
     media = out.media;
+    durationMs = out.durationMs;
+    settled = out.settled;
   } else if (image) {
     img = dataUrl(image);
     media = mediaOf(img);
@@ -277,7 +347,7 @@ export async function recordShot(cwd, { target, image, label = null, note = '', 
     image: img,
   };
   fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(rec));
-  return { ...rec, file: path.join(dir, `${id}.json`) };
+  return { ...rec, file: path.join(dir, `${id}.json`), durationMs, settled };
 }
 
 // All recorded artifacts for a repo, oldest→newest (so before/after pair in order),
