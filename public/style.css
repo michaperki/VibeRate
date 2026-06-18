@@ -769,8 +769,27 @@ pre.code {
 body.view-home #home { display: block; }
 body.view-home #sessions, body.view-home #conversation { display: none; }
 body.view-project #home { display: none; }
+body.view-project:not(.hosted) #sidebar { display: none; }
+body.hosted #sidebar { display: none; }
 #brand { cursor: pointer; }
 #brand:hover .brand-sub { color: var(--accent); }
+
+.project-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 12px; padding: 4px 2px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.back-projects {
+  width: 30px; height: 30px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: #0c0e13; color: var(--text); cursor: pointer;
+  font: inherit; font-size: 16px; line-height: 1;
+}
+.back-projects:hover { border-color: var(--accent); color: #fff; }
+.project-bar-title { min-width: 0; }
+.pb-name { font-weight: 700; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
 
 /* Public surfaces (/explore, /c/<id>): no workspace sidebar — a landing-style
    centered column with a top nav. */

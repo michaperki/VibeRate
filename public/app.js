@@ -365,7 +365,9 @@ function showHome() {
   document.body.classList.remove('view-project');
   document.body.classList.add('view-home');
   document.querySelectorAll('.proj.active').forEach((n) => n.classList.remove('active'));
+  stopLive();
   state.project = null;
+  state.session = null;
 }
 
 function showProject() {
@@ -891,6 +893,18 @@ function renderSessionList() {
       <button class="${state.railMode === 'prompts' ? 'on' : ''}" data-rail="prompts">Prompts</button>
       <button class="${state.railMode === 'sessions' ? 'on' : ''}" data-rail="sessions">Sessions</button>
     </div>`;
+  const hostedProject = document.body.classList.contains('hosted');
+  const projectBar = hostedProject ? '' : `
+    <div class="project-bar">
+      <button class="back-projects" data-back-projects title="Back to workspace">←</button>
+      <div class="project-bar-title">
+        <div class="pb-name">${esc(p.name || p.slug)}</div>
+        <div class="pb-meta">${plural((state.promptUnits || []).length, 'prompt')} · ${plural(p.sessions.length, 'session')}</div>
+      </div>
+    </div>`;
+  const paneTitle = hostedProject
+    ? `<div class="pane-title">${esc(p.name || p.slug)} · ${plural((state.promptUnits || []).length, 'prompt')} · ${plural(p.sessions.length, 'session')}</div>`
+    : '';
 
   const promptRows = () => {
     const fresh = state._liveFreshPrompts || new Set();
@@ -913,7 +927,8 @@ function renderSessionList() {
   };
 
   el('#sessions').innerHTML = `
-    <div class="pane-title">${esc(p.name || p.slug)} · ${plural((state.promptUnits || []).length, 'prompt')} · ${plural(p.sessions.length, 'session')}</div>
+    ${projectBar}
+    ${paneTitle}
     ${railToggle}
     <div class="filters">
       ${chip('all', `all ${p.sessions.length}`)}
@@ -923,6 +938,9 @@ function renderSessionList() {
     <div class="list-legend"><span class="sw legend-rainbow"></span> a colour per session · <span class="badge claude">claude</span> / <span class="badge codex">codex</span> = agent</div>
     ${brushBanner}
     ${state.railMode === 'prompts' ? promptRows() : `${list || (empties.length ? '' : '<div class="empty">No sessions in this range.</div>')}${emptyBlock}`}`;
+
+  const back = el('#sessions').querySelector('[data-back-projects]');
+  if (back) back.addEventListener('click', showHome);
 
   const bc = el('#sessions').querySelector('[data-list-brush-clear]');
   if (bc) bc.addEventListener('click', () => {
@@ -2327,7 +2345,7 @@ async function selectSession(slug, id, turnIndex = null) {
   }
   state._session = s;
   state._units = units;
-  state._unitsSig = null; // fresh session — let the first live refresh render
+  state._unitsSig = readerUnitsSignature(units);
   renderSessionReader();
 }
 
@@ -2391,9 +2409,119 @@ function renderSessionReader() {
   updateLiveReadout();
 }
 
-// A live update while reading a session: refetch its prompt units and re-render,
-// flashing any new cards and following the conversation (scroll to the new turns
-// if you were already near the bottom — like a live chat).
+function readerUnitSignature(u) {
+  return JSON.stringify({
+    id: u.cardId || u.id || '',
+    prompt: u.prompt || '',
+    isAck: !!u.isAck,
+    context: u.context || null,
+    docRefs: u.docRefs || [],
+    outcomes: u.outcomes || {},
+    evidence: (u.evidence || []).map((e) => [e.label, e.note, e.viewport, e.media, (e.image || '').length]),
+    before: u.before || null,
+    after: u.after || null,
+  });
+}
+
+function readerUnitsSignature(units) {
+  return (units || []).map(readerUnitSignature).join('|');
+}
+
+function readerEndMarker(s) {
+  const end = endState(s.messages);
+  const endIcon = end.cls === 'pending' ? '<span class="work-dot" aria-hidden="true"></span>' : '';
+  return `<div class="end-marker ${end.cls}">${endIcon}${end.text}</div>`;
+}
+
+function refreshSessionToolbar() {
+  const toolbar = el('#conversation .conv-toolbar');
+  if (!toolbar) return false;
+  const s = state._session;
+  const stats = statsFor(s.messages);
+  const dur = fmtDuration(new Date(s.endedAt) - new Date(s.startedAt));
+  const filesList = [...stats.files].slice(0, 40);
+  toolbar.innerHTML = `
+    <div class="conv-head">
+      <h2>${esc(s.title)}</h2>
+      <div class="meta">
+        <span class="badge ${s.source}">${s.source}</span>
+        ${fmtDate(s.startedAt)} → ${fmtDate(s.endedAt)} · ${dur} ·
+        ${plural(stats.userTurns, 'turn')} · ${plural(stats.toolCalls, 'tool')}
+      </div>
+      <div class="chips">
+        ${statChips(stats)}
+        ${stats.files.size ? `<span class="chip files" id="files-toggle">${plural(stats.files.size, 'file')} touched ▾</span>` : ''}
+      </div>
+      <div class="files-list" id="files-list" hidden>${filesList.map((f) => `<div>${esc(f)}</div>`).join('')}</div>
+    </div>
+    <div class="nav">
+      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — follow this conversation's turns as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}<span class="live-ago"></span></button>
+      <span class="spacer"></span>
+      <button id="nav-prev" title="Previous prompt (k)">◀ prev</button>
+      <span id="nav-counter" class="counter"></span>
+      <button id="nav-next" title="Next prompt (j)">next ▶</button>
+      <button id="nav-final" title="Jump to final reply">⤓ final</button>
+      <button id="expand-all">expand all</button>
+      <button id="collapse-all">collapse all</button>
+    </div>`;
+  return true;
+}
+
+function copyDetailsState(from, to) {
+  const oldDetails = from ? [...from.querySelectorAll('details')] : [];
+  const newDetails = to ? [...to.querySelectorAll('details')] : [];
+  newDetails.forEach((d, i) => { if (oldDetails[i]) d.open = oldDetails[i].open; });
+}
+
+function refreshSessionReaderInPlace(oldUnits, newUnits, oldCount, nearBottom, oldScroll) {
+  const body = el('#conversation .conv-body');
+  if (!body) return false;
+  const wasEmpty = body.querySelector('.empty');
+  if (wasEmpty && newUnits.length) body.innerHTML = '';
+  let marker = body.querySelector('.end-marker');
+
+  for (let i = 0; i < newUnits.length; i++) {
+    const existing = document.getElementById(`turn-${i}`);
+    const oldSig = oldUnits[i] ? readerUnitSignature(oldUnits[i]) : null;
+    const newSig = readerUnitSignature(newUnits[i]);
+    if (existing && oldSig === newSig) continue;
+
+    state._readerFresh = i >= oldCount ? new Set([i]) : null;
+    const wrap = document.createElement('template');
+    wrap.innerHTML = renderReaderCard(newUnits[i], i).trim();
+    const next = wrap.content.firstElementChild;
+    state._readerFresh = null;
+    if (existing) {
+      copyDetailsState(existing, next);
+      existing.replaceWith(next);
+    } else body.insertBefore(next, marker || null);
+  }
+
+  for (let i = newUnits.length; ; i++) {
+    const stale = document.getElementById(`turn-${i}`);
+    if (!stale) break;
+    stale.remove();
+  }
+
+  const wrap = document.createElement('template');
+  wrap.innerHTML = readerEndMarker(state._session).trim();
+  const nextMarker = wrap.content.firstElementChild;
+  if (marker) marker.replaceWith(nextMarker);
+  else body.appendChild(nextMarker);
+
+  if (!newUnits.length) body.innerHTML = '<div class="empty">No prompts in this session.</div>';
+  refreshSessionToolbar();
+  wireConversation(newUnits.length);
+  const lt = el('#conversation [data-live-toggle]');
+  if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderSessionReader(); };
+  updateLiveReadout();
+  const pane = el('#conversation');
+  if (pane) pane.scrollTop = nearBottom ? pane.scrollHeight : oldScroll;
+  return true;
+}
+
+// A live update while reading a session: refetch its prompt units and patch the
+// reader in place, so open details and reader scroll state survive follow mode.
 async function refreshLiveSession() {
   const slug = state.project;
   const id = state.session;
@@ -2407,20 +2535,19 @@ async function refreshLiveSession() {
   const oldCount = (state._units || []).length;
   // Skip a pointless re-render when this session didn't actually change (e.g. the
   // push was a brain-doc edit).
-  const sig = units.map((u) => `${u.id}:${u.after ? u.after.stepCount : 0}:${(u.after && u.after.verdict || '').length}`).join('|');
+  const sig = readerUnitsSignature(units);
   if (sig === state._unitsSig) return;
   state._unitsSig = sig;
+  const oldUnits = state._units || [];
   state._session = s;
   state._units = units;
   const pane = el('#conversation');
   const oldScroll = pane ? pane.scrollTop : 0;
   const nearBottom = pane ? pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 160 : true;
-  state._readerFresh = units.length > oldCount
-    ? new Set(Array.from({ length: units.length - oldCount }, (_, k) => oldCount + k))
-    : null;
-  renderSessionReader(); // (resets scroll to top)
-  state._readerFresh = null;
-  if (pane) pane.scrollTop = nearBottom ? pane.scrollHeight : oldScroll; // follow, else hold position
+  if (!refreshSessionReaderInPlace(oldUnits, units, oldCount, nearBottom, oldScroll)) {
+    renderSessionReader();
+    if (pane) pane.scrollTop = nearBottom ? pane.scrollHeight : oldScroll;
+  }
 }
 
 // A prompt-time context-fullness gauge — how full the model's window was when the
