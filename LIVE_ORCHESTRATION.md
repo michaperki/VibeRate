@@ -113,7 +113,18 @@ the CC status line. **Not** achievable: a smooth per-*token* counter mid-respons
 (hooks are event-driven, not token deltas) or the CC spinner's gerunds ("Pondering…",
 which are internal UI). Codex writes its log per event already, so it needs no hook.
 
-## 8. `vbrt watch` terminal output → live TUI (proposed, 2026-06-18)
+## 8. `vbrt watch` terminal output → live TUI ✅ (first pass shipped 2026-06-18)
+
+> **Shipped:** `vbrt watch --tui` — a dependency-free ANSI dashboard: header (repo · URL ·
+> uptime · hooks-live), one boxed panel **per agent** (status pulse working/paused/idle ·
+> current action · context bar `57% · 115k tok · opus-4-8`), and a footer (last push · outbox
+> · Ctrl-C). Alt-screen buffer with guaranteed cursor/teardown restore on exit. Hook events
+> now carry `sid` (`src/hooks.js`) so the repo's merged stream groups back into per-agent
+> panels; events without `sid` fold into one panel. **Deferred (as planned):** Codex
+> log-tail fallback (CC-only for now — no hooks stream from Codex), and promoting `--tui`
+> from opt-in to default. Verified against a synthetic two-agent stream (working + idle,
+> different models/contexts); borders measured to terminal width.
+
 
 **The gap.** The terminal running `vbrt watch` is the *one* surface that doesn't show
 the live agent activity — it shows a scrolling push log and nothing else:
