@@ -2241,15 +2241,25 @@ function renderRibbon(sessions) {
 
   const N = 120;
   const bins = new Array(N).fill(0);
+  const binSrc = Array.from({ length: N }, () => ({})); // per-bin source tallies → color the heat like the convo blocks
   for (const s of sessions)
     for (const m of s.msgs || []) {
       let bi = Math.floor((pct(m.t) / 100) * N);
       bi = Math.max(0, Math.min(N - 1, bi));
       bins[bi]++;
+      binSrc[bi][s.source] = (binSrc[bi][s.source] || 0) + 1;
     }
   const maxBin = Math.max(1, ...bins);
+  // A message bar takes the color of the agent that sent the most messages in that
+  // bin (claude / codex), matching the convo blocks below — so the two lanes read as
+  // the same threads. Mixed bins fall to whichever agent dominates the slice.
+  const binColor = (i) => {
+    let best = null; let bestN = -1;
+    for (const k in binSrc[i]) if (binSrc[i][k] > bestN) { bestN = binSrc[i][k]; best = k; }
+    return SRC_COLOR[best] || 'var(--accent)';
+  };
   const heat = bins
-    .map((n, i) => (n ? `<span class="rib-h" style="left:${(i / N) * 100}%;height:${4 + Math.round((Math.sqrt(n) / Math.sqrt(maxBin)) * 22)}px" title="${plural(n, 'msg')}"></span>` : ''))
+    .map((n, i) => (n ? `<span class="rib-h" style="left:${(i / N) * 100}%;height:${4 + Math.round((Math.sqrt(n) / Math.sqrt(maxBin)) * 22)}px;background:${binColor(i)}" title="${plural(n, 'msg')}"></span>` : ''))
     .join('');
 
   const maxCount = Math.max(1, ...sessions.map((s) => s.userCount));

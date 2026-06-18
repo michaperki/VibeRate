@@ -99,6 +99,9 @@ Social features all require a shared backend, so a thin deploy gates most of wha
    - **Duration-based convo bars** ✅ — timeline convo blocks now span their real
      start→end instead of a fixed count-width stub at the start, so message bars no
      longer float over empty space with no convo beneath them.
+   - **Agent-colored message lane** ✅ — the timeline's message heat is now colored by
+     the agent that sent it (claude / codex), matching the convo blocks below, so the
+     two lanes read as the same threads.
    - **Web-view layout fills the canvas** ✅ — `layoutGraph` spreads to encompass the
      available width instead of clustering nodes mid-canvas.
 
