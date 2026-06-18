@@ -149,7 +149,13 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   - **Motion-aware clips** ✅ — `--clip [s]` is now a *cap*; the clip records from first
     paint and **auto-stops when motion settles**, so length tracks the real animation
     (button toggle → ~1s, long sim → cap) with no per-app speed tuning.
-  - diff/test/provenance families still tracked in `PROJECT_VIEW_PLAN.md §C`.
+  - **Polymorphic outcome rail** ✅ Stages 1–2 shipped (router + shot/diff/test/experiment/
+    options families; server-side intent classifier, Haiku 4.5). **Test family hardened
+    2026-06-18** (`684cece`): it was firing fabricated "FAIL — N passed, M failed" verdicts
+    and "PASS passing" pills on *any* tool output (a `✓`, a stray "passed"/"failed" token in
+    a diff/Read/`vbrt status`). Now gated on a real test command — same don't-guess-from-text
+    principle as the chip work below. **provenance** + **multi-viewport** families still open
+    in `PROJECT_VIEW_PLAN.md §C`.
 - **Agent ergonomics — "make capture boring"** ✅ first pass, from experiment-3
   feedback: VibeRate was costing the agent tokens, not just collecting work. Fixed:
   (a) `vbrt shot` now resolves Playwright from the **repo's** `node_modules`, not just

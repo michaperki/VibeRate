@@ -195,13 +195,23 @@ concept it changed — that link is the "living history."
 >
 > **Stage 2 — light extraction for `record` + `test` + bespoke:** ✅ shipped 2026-06-18 (mostly)
 - [x] `src/prompts.js` emits a small `u.outcomeArtifact` (deterministic; no new capture, no
-  model call): **test-status timeline** (scans the turn's `tool_result`s for an explicit
-  runner summary — counts / `PASS`·`FAIL` lines / ✓·✗ — *not* a bare exit code, which §C
-  already found "meant nothing"), **options menu** (lifts the enumerated list from the
+  model call): **test-status timeline** (reads a runner summary — counts / `PASS`·`FAIL`
+  lines — out of a `tool_result`), **options menu** (lifts the enumerated list from the
   prompt), and **experiment** (the author's `EXPECTED`/`ACTUAL`/`RESULT` blocks + a
   PASS/PARTIAL/FAIL verdict). Prompt-parse families gate on `archetype` so they can't
-  false-fire; the test timeline is universal but self-gating. *(feasibility decision-record
-  deferred — the two named bespoke renderers were experiment + options.)*
+  false-fire. *(feasibility decision-record deferred — the two named bespoke renderers
+  were experiment + options.)*
+  - ⚠️ **Test family was NOT self-gating — fixed 2026-06-18 (commit `684cece`).** The
+    original "universal but self-gating" claim was wrong: `testStatusOf` ran over *every*
+    `tool_result`, so a stray "passed"/"failed" token or any `✓` character in unrelated
+    output (a `git diff`, a file Read, `vbrt status`) fabricated a verdict — a read-only
+    review session got stamped **"FAIL — 14 passed, 2 failed"** (numbers scavenged from two
+    unrelated spots in one blob) and almost every card showed a bogus "PASS passing" pill.
+    Now **gated on a real test command**: a verdict is read only when the preceding
+    `tool_use` was a recognized runner (`npm/yarn/pnpm test`, `jest`, `vitest`, `pytest`,
+    `go test`, `cargo test`, `make test`, … across Claude `Bash` + Codex
+    `shell`/`local_shell`/`exec`); the bare `✓`/`✗` heuristic is gone. Same principle as
+    options/experiment: don't guess pass/fail from arbitrary text ([[no-brittle-text-heuristics]]).
 - [x] Bespoke `railExperiment` (expected→actual + verdict pill) + `railOptions` + `railTest`
   (green→red→green dots + verdict), keyed off `u.outcomeArtifact`; the artifact drives a
   marquee placement, overriding the family default. **Options: menu lifted verbatim, no ✓/▢ —
@@ -209,8 +219,11 @@ concept it changed — that link is the "living history."
   provenance layer, not faked from keyword hits ([[no-brittle-text-heuristics]]).**
 - [~] Verify against a real session: the **test family is verified end-to-end on real data**
   (3 genuine `codeswipe` prompts rendered a status timeline) + a 14-assertion extraction test
-  (incl. conservatism: prose numbers and bare exit codes don't fire). *Still open:* live visual
-  check of **experiment/options** + scroll cost — pending a classified bundle. (Earlier all
+  (incl. conservatism: prose numbers and bare exit codes don't fire). The command-gate fix
+  (`684cece`) was verified by a regex harness — real runners match, `git status`/`vbrt
+  status`/`npm install`/`npm run build`/grep/Read don't. *Still open:* live visual check of
+  **experiment/options** + scroll cost — pending a classified bundle; an automated extraction
+  test suite (none exists yet) would have caught the test-gating regression. (Earlier all
   archetypes were null because the API key returned 401; the key was refreshed 2026-06-18 and the
   host redeployed, so classification runs at ingest again.)
 
