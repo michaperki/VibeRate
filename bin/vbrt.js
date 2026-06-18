@@ -338,16 +338,16 @@ async function cmdAdd(args = []) {
         console.log(C.yellow(`\n⚠ \`vbrt watch\` is live (pid ${watching.pid}) — it's already streaming this repo.`));
         console.log(C.dim('  This manual push is redundant; only push by hand if watch errored. Proceeding anyway…'));
       }
-      const { id, url, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
+      const { id, url, viewUrl, dashboardUrl, newToken, tokenPath, visibility, linkUrl } = await pushBundle(bundle, { isPublic });
       saveProjectRef(cwd, { id, url, apiUrl: resolveApi(), visibility });
       if (visibility === 'public') {
         console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (public) — view & share at:`));
         console.log(`  ${C.cyan(url)}`);
         console.log(C.dim(`  Your projects: ${dashboardUrl}`));
       } else {
-        console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (private) — only you can see it:`));
-        console.log(`  ${C.cyan(url)}`);
-        console.log(C.dim(`  It's private. Make this link shareable without re-uploading: ${C.bold('vbrt publish --public')}`));
+        console.log(C.green(`\n✓ Pushed project "${bundle.project.slug}" (private) — open it (no sign-in needed):`));
+        console.log(`  ${C.cyan(viewUrl || url)}`);
+        console.log(C.dim(`  Only you can see it. Share with others (no re-upload): ${C.bold('vbrt publish --public')}`));
       }
       if (newToken) {
         console.log(C.dim(`  (saved an access token to ${tokenPath})`));

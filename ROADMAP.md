@@ -2,10 +2,12 @@
 
 Canonical frame: see `PRODUCT_STRATEGY.md`.
 
-VibeRate is the hosted viewer and feedback layer for terminal-agent development:
-agents publish the work behind a repo — prompts, decisions, screenshots, diffs,
-commits, and brain docs — so developers and reviewers can watch, understand, and
-discuss how the project was built.
+VibeRate is an **Agentic IDE / work environment** for terminal-agent development:
+it captures the work behind a repo — prompts, decisions, screenshots, diffs,
+commits, and brain docs — so a developer can watch, understand, and drive how the
+project gets built. A **social / learning layer** (feedback, sharing, discovery) sits
+on top as a later byproduct, not the core: the first job is making the single-developer
+capture → understand → drive loop frictionless and robust.
 
 Working category remains open. "Agentic Code Viewer" and "Agentic Work
 Environment" are useful probes, but the current product copy should stay concrete:
@@ -25,13 +27,13 @@ publish, watch, review, and understand agent work.
 
 Social features all require a shared backend, so a thin deploy gates most of what follows.
 
-- **Deploy the host** — viewer + ingest on a real URL; swap file store for a DB (projects keyed by id).
-- **Publish the marketplace** — push repo to GitHub; verify `/plugin marketplace add` → `/plugin install`.
-- **Default endpoint** — point the skill at the deployed URL so the localhost step disappears.
-- **Identity (gist → claim)** — anonymous push returns an unlisted link; optional "claim your account" attaches projects to an owner (token flow).
+- **Deploy the host** ✅ — viewer + ingest live on a real URL (`vbrt.fly.dev`); infra in `DEPLOY.md` / `Dockerfile` / `fly.toml`. Store is JSON files on a Fly persistent volume (keyed by project id) — we kept the file store on durable storage rather than swapping to a DB; revisit a DB only if the file store strains.
+- **Publish the marketplace** ◐ — repo pushed to GitHub (`github.com/michaperki/VibeRate`) with `marketplace.json`; still to verify the `/plugin marketplace add` → `/plugin install` round-trip from a clean machine.
+- **Default endpoint** ✅ — skill points at the deployed URL by default (`DEFAULT_API = https://vbrt.fly.dev`); the localhost step is gone (`VBRT_API_URL` overrides for a local host).
+- **Identity (gist → claim)** ✅ — anonymous push mints a gist-style owner token (`auth.js`); a full "claim your account" flow (`accounts.js` + GitHub/Google OAuth in `oauth.js`) links a signed-in user to their pushed projects.
 - **Live read-only monitor (`vbrt watch`)** — ✅ **shipped** (brain + conversation stream live, hands-free, delta pushes, viewer follows). Spec `STREAMING.md` archived → graveyard ghost. Streaming follow-ups, only if needed:
   - SSE/WebSocket (drop polling) if polling ever feels laggy.
-  - Reader refinement — append new turns instead of full re-render (preserve expanded `<details>` while following).
+  - Reader refinement — ✅ live session updates patch the reader in place, preserving expanded `<details>` and scroll position while following.
 
 ## Next priorities (accepted order)
 
@@ -48,10 +50,42 @@ Social features all require a shared backend, so a thin deploy gates most of wha
    preview before broader social. ◐ First pass shipped: hosted JSON/session/message/
    evidence/image caps, in-memory upload rate limiting, server-side bundle checks,
    and `vbrt push --dry-run`.
+4. **Onboarding / setup simplification** *(now-priority)* — today the first run is a
+   gauntlet: sign up at `vbrt.fly.dev`, authenticate the terminal, `vbrt push`,
+   `vbrt watch`, then go to the site and click the **Live** toggle, all in order,
+   before convos/brain/artifacts appear. Chosen direction: **flow B** — one command,
+   private-by-default, but immediately viewable by the pusher (no forced sign-in),
+   with "claim to keep/share" as an optional upgrade.
+   - **Self-view without sign-in** ✅ — the real blocker was that a browser can't
+     present the CLI's bearer token, so viewing your own *private* push forced an
+     OAuth + claim dance. Fixed: a push now returns a short-lived, project-scoped
+     signed **view token** (`/p/<id>#v=…`), redeemed client-side (`POST /api/view`)
+     into an HttpOnly `vbrt_view` cookie that `canRead` honors. Grant is read-only and
+     per-project — it never unlocks the account list, publish, or other projects
+     (covered by an 11-case end-to-end test). CLI prints the openable link on push.
+   - **Auto-Live when actively streaming** ✅ — ingest stamps `lastPushAt`; the project
+     API returns a `streaming` flag (pushed within a 3-min window — the one place the
+     threshold lives), and the viewer auto-enables Live on open when it's set. A
+     `vbrt watch` keeps it true via its delta pushes; it self-clears once pushes stop,
+     so archived projects don't poll. Verified both sides of the window.
+   - Later: fold token claim into an optional one-click upgrade; tighten first-run copy
+     so the no-account path is obvious.
+5. **Robustness / stress-testing the capture+viewer loop** *(now-priority)* — exercise
+   the system the way real devs actually work, not just the happy path. Run new
+   experiments across project shapes, and probe the edge cases that break capture or
+   the viewer: **`git reset`** / force-push / rebase rewriting history, branch
+   switches, amended/squashed commits, multiple agents in one repo, very long or
+   resumed sessions, deleted/renamed brain docs, watch left running across reboots,
+   pushing the same project from two machines. Capture each failure mode as a fix or a
+   documented limitation.
 
-## Phase 2 — Feedback / sharing (the core product)
+## Phase 2 — Social / learning layer (later — byproduct of the Agentic IDE, not the core)
 
-- **Feedback** — comment / give feedback on a shared project or a specific prompt/turn.
+> The core product is the **Agentic IDE / work environment** (capture → understand →
+> drive agent work). Feedback and sharing are a valuable *learning* layer we add once
+> the IDE loop is frictionless and battle-tested — not the first priority.
+
+- **Feedback** ◐ — first pass shipped: +1/−1 voting on individual prompt cards (`ratings.js`, one vote per card, score = ups − downs). Still to come: threaded **comments** on a project or a specific prompt/turn, and surfacing controversy/agreement.
 - **Sharing controls** — unlisted vs public; what conversation data is exposed (pairs with redaction).
 - **Notifications** — "someone reviewed this" once prompt/project comments exist.
 - **Fork** — copy someone's prompt(s)/session into your own space to adapt and re-run. Defer until the fork unit is clear.
@@ -135,13 +169,14 @@ Social features all require a shared backend, so a thin deploy gates most of wha
     tool, not the output log, is the source of truth.
   - Later, if needed: `doctor --fix`, SSE/WebSocket streaming, coalescing watch deltas.
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
-- **Collapse the repo-selector sidebar on drill-in** — once you click into a repo, hide the picker for a focused view, with an obvious "back to repos" affordance. (Hosted `/p/:id` already runs picker-less; this brings the same focus to the local multi-project view.)
-- **Legibility pass (external review, 2026-06)** — first-contact gaps on an otherwise polished UI; full breakdown + ranking in `PROJECT_VIEW_PLAN.md` §G:
-  - **Color/dot legend** — per-session identity hues carry no key; users can't decode the primary signal *(top priority)*.
-  - **Suppress empty / duplicate sessions** — `(no prompt) · 0 msgs` cards and same-prompt-across-models dupes should collapse / cluster, not stack as full cards.
-  - **Project name-collision** — disambiguate identically-named projects (path / last-active).
-  - **Timeline legibility** — row labels + color coding readable at rest, not hover-only.
-  - **Pluralization + jargon tooltips** — `1 msg`, and one-line tooltips for "brain edits" / 🧠 / context-% gauge.
+- **"Launch terminal session" from a convo** *(idea — value TBD)* — a per-conversation button that spawns a new WSL terminal running the matching agent (e.g. Codex/Claude) with that conversation already loaded/resumed, so you can pick up an archived session live. Needs: local-only affordance (won't work for hosted/shared views), a way to map a captured session back to its agent + resume command, and a host-side launcher (the browser can't open a WSL terminal directly — likely a small local helper / protocol handler). Park as exploratory until the resume-mapping is proven.
+- **Collapse the repo-selector sidebar on drill-in** ✅ — once you click into a repo, the project picker hides for a focused view with an obvious workspace-back affordance.
+- **Legibility pass (external review, 2026-06)** — first-contact gaps on an otherwise polished UI; full breakdown + ranking in `PROJECT_VIEW_PLAN.md` §G. Mostly shipped on audit (2026-06-17); only duplicate-clustering remains:
+  - **Color/dot legend** ✅ — two legends live: the sessions-rail `list-legend` ("a colour per session · claude / codex = agent") and the activity-timeline `ribbonLegend()`, which decodes every mark at rest. (Per-session hues are identity tags, not a categorical scale, so no hue-by-hue key is needed — a third legend would be noise.)
+  - **Suppress empty / duplicate sessions** ◐ — empty sessions ✅ collapse into a `<details>` group ("N empty sessions · you sent no prompt"). **Remaining:** cluster same-prompt-across-models duplicates so parallel-agent runs don't stack as full cards (needs care not to hide useful parallel work).
+  - **Project name-collision** ✅ — identically-named projects are disambiguated (path / last-active) in the project list.
+  - **Timeline legibility** ✅ — each lane carries a persistent left-edge label (code / brain / commits / messages / convos) and `ribbonLegend()` keys the colors, so the timeline reads at rest, not hover-only.
+  - **Pluralization + jargon tooltips** ✅ — `plural()`/`plw()` give `1 msg`; one-line `jargon` tooltips on 🧠 brain edits, brain history, and the context-% gauge.
   - *Keep (don't regress):* session detail view, CLAUDE/CODEX badges + filter pills, Web/Tree/Recent (Tree most legible), dark/purple theme.
 
 ## Open questions / to weigh

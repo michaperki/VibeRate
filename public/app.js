@@ -593,6 +593,10 @@ async function selectProject(slug) {
     });
 
   state._brainEntrance = true; // play the "just changed" entrance once, on open
+  // Auto-follow a project that's actively streaming (a `vbrt watch` is pushing
+  // deltas) so you don't have to hand-click "Go live". The server's freshness
+  // window decides; live quietly goes idle on its own once pushes stop.
+  if (state.projectData.streaming && !state.live) startLive();
   renderSessionList();
   renderTimeline();
 }
@@ -3024,6 +3028,14 @@ async function boot() {
   if (m) {
     document.body.classList.add('hosted');
     showProject();
+    // Self-view handoff: a push hands back /p/<id>#v=<token>. Redeem it into a
+    // view cookie so the owner can read their own private project without signing
+    // in, then strip the token from the URL before anyone can copy it out.
+    const vm = location.hash.match(/[#&]v=([^&]+)/);
+    if (vm) {
+      try { await apiPost('/api/view', { token: decodeURIComponent(vm[1]) }); } catch { /* fall through to the private notice */ }
+      history.replaceState(null, '', location.pathname);
+    }
     try {
       await selectProject(m[1]);
     } catch (e) {

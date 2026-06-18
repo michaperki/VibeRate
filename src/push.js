@@ -155,10 +155,14 @@ export async function pushBundle(bundle, { apiUrl = resolveApi(), token = loadTo
     newToken = true;
   }
   const effToken = out.token || token || null;
+  // A self-view link the pusher can open immediately, even on a private project —
+  // the `#v=` fragment is redeemed client-side into a short-lived view cookie.
+  const viewUrl = out.view ? `${out.url}#v=${out.view}` : out.url;
   return {
     ...out,
     token: effToken,
     newToken,
+    viewUrl,
     dashboardUrl: `${apiUrl}/app`,
     tokenPath: credsPath(),
     linkUrl: effToken ? `${apiUrl}/link#${effToken}` : null,

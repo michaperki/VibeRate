@@ -129,6 +129,7 @@ export function saveSessions(cwd, sessions, opts = {}) {
     String(b.startedAt || '').localeCompare(String(a.startedAt || '')),
   );
   manifest.updatedAt = new Date().toISOString();
+  manifest.lastPushAt = Date.now(); // last bundle ingest — drives the viewer's "is this streaming?" auto-Live (distinct from updatedAt, which a visibility toggle also bumps)
   ensureDir(dir);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
