@@ -191,6 +191,15 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .conv-head h2 { margin: 0 0 6px; font-size: 17px; }
 .conv-head .meta { color: var(--muted); font-size: 12px; }
 .conv-head .meta .badge { margin-right: 6px; }
+/* Breadcrumb back to the project dashboard from inside a conversation (keeps live on) */
+.back-dash {
+  display: inline-flex; align-items: center; margin: 0 0 8px; padding: 3px 9px;
+  font: inherit; font-size: 11.5px; font-weight: 600; line-height: 1;
+  color: var(--muted); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.back-dash:hover { border-color: var(--accent); color: #fff; }
 .hint { color: var(--muted); font-size: 12px; margin-top: 6px; font-style: italic; }
 
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }

@@ -2329,6 +2329,15 @@ function brainDetailHtml(c) {
 
 // ---------- conversation rendering ----------
 
+// Return from a conversation to the project dashboard (brain + timeline) without
+// leaving the project, so live keeps streaming. Previously the only way back was
+// out to the workspace, which dropped live and forced re-picking the project.
+function backToDashboard() {
+  state.session = null;
+  renderSessionList(); // drop the active-session highlight in the rail
+  renderTimeline();    // re-render the dashboard in place; pollLive now follows it
+}
+
 async function selectSession(slug, id, turnIndex = null) {
   // Keep streaming on (if it was) so the reader can *follow* a live conversation.
   state.session = id;
@@ -2374,6 +2383,7 @@ function renderSessionReader() {
   el('#conversation').innerHTML = `
     <div class="conv-toolbar">
       <div class="conv-head">
+        <button class="back-dash" data-back-dash title="Back to ${esc(state.projectData.name)} — brain &amp; timeline">← dashboard</button>
         <h2>${esc(s.title)}</h2>
         <div class="meta">
           <span class="badge ${s.source}">${s.source}</span>
@@ -2446,6 +2456,7 @@ function refreshSessionToolbar() {
   const filesList = [...stats.files].slice(0, 40);
   toolbar.innerHTML = `
     <div class="conv-head">
+      <button class="back-dash" data-back-dash title="Back to ${esc(state.projectData.name)} — brain &amp; timeline">← dashboard</button>
       <h2>${esc(s.title)}</h2>
       <div class="meta">
         <span class="badge ${s.source}">${s.source}</span>
@@ -2698,6 +2709,8 @@ function wireConversation(turnCount) {
   };
   updateCounter();
 
+  const backDash = pane.querySelector('[data-back-dash]');
+  if (backDash) backDash.onclick = backToDashboard;
   el('#nav-prev').onclick = () => goto(state.currentTurn - 1);
   el('#nav-next').onclick = () => goto(state.currentTurn + 1);
   el('#nav-final').onclick = () => {
