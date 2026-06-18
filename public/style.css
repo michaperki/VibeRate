@@ -753,7 +753,6 @@ pre.code {
 .lay-btn { font: inherit; font-size: 11px; font-weight: 500; color: var(--muted); background: none; border: 0; padding: 3px 9px; border-radius: 5px; cursor: pointer; line-height: 1.4; }
 .lay-btn:hover { color: var(--text); }
 .lay-btn.on { color: var(--text); background: var(--accent); }
-.doc-reader-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--accent); margin: 0 0 8px; }
 
 /* doc reader as a floating overlay in front of the network */
 .brain-wrap { position: relative; }
@@ -820,19 +819,42 @@ pre.code {
 .brain-peek .bp-h.l2 { padding-left: 10px; }
 .brain-peek .bp-h.l3 { padding-left: 20px; color: var(--dim, #6b7280); }
 .brain-peek .bp-flat { font-size: 10.5px; color: var(--dim, #6b7280); font-style: italic; }
-.doc-backdrop { position: absolute; inset: 0; background: rgba(8, 10, 14, 0.45); backdrop-filter: blur(1px); border-radius: 10px; z-index: 1; animation: docfade 0.15s ease; }
-.doc-overlay {
-  position: absolute; top: 8px; right: 8px; bottom: 8px; width: min(58%, 460px);
-  display: flex; flex-direction: column; z-index: 2;
-  padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px;
-  background: rgba(18, 21, 28, 0.97); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
-  animation: docslide 0.18s ease;
-}
-.doc-overlay .docview { flex: 1; max-height: none; border: 0; padding: 0 6px 0 0; background: none; }
-.doc-close { font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 0 4px; border-radius: 5px; }
-.doc-close:hover { color: var(--text); background: var(--border); }
+/* Brain-doc lightbox: a brain node opens its doc full-screen (modeled on the
+   media lightbox), not in a cramped in-panel side panel. Plan docs get a parsed
+   completion view; any doc can expand to its full markdown. */
+#doclightbox { position: fixed; inset: 0; z-index: 1000; display: none; align-items: flex-start; justify-content: center; background: rgba(7, 8, 11, 0.86); backdrop-filter: blur(3px); padding: 5vh 4vw; overflow: auto; animation: docfade 0.15s ease; }
+#doclightbox.open { display: flex; }
+.dl-shell { width: min(900px, 100%); max-height: 90vh; display: flex; flex-direction: column; background: #12151c; border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6); overflow: hidden; animation: docslide 0.18s ease; }
+.dl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); flex: none; }
+.dl-title { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
+.dl-close { font-size: 18px; line-height: 1; color: var(--text); background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; flex: none; }
+.dl-close:hover { background: rgba(255, 255, 255, 0.16); }
+.dl-body { padding: 20px 24px; overflow: auto; }
+.dl-summary { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.dl-ring { flex: none; }
+.dl-ring-pct { font: 700 13px ui-monospace, Menlo, monospace; }
+.dl-sum-meta { flex: 1; }
+.dl-sum-counts { font-size: 14px; color: var(--text); margin-bottom: 9px; }
+.dl-sum-counts b { color: #fff; }
+.dl-remaining { color: #f0a93b; }
+.dl-alldone { color: #2ecf8f; }
+.dl-bar { height: 7px; border-radius: 4px; background: #2a2f3c; overflow: hidden; }
+.dl-bar span { display: block; height: 100%; }
+.dl-sec { margin: 0 0 17px; }
+.dl-sec-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font: 600 11.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--muted); text-transform: uppercase; margin-bottom: 7px; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+.dl-sec-n { color: var(--dim); font-weight: 500; flex: none; }
+.dl-checks { list-style: none; margin: 0; padding: 0; }
+.dl-check { display: flex; gap: 10px; align-items: baseline; font-size: 13.5px; line-height: 1.5; color: #cdd2de; padding: 3px 0; }
+.dl-check .dl-box { flex: none; color: #f0a93b; font-family: ui-monospace, Menlo, monospace; }
+.dl-check.done { color: var(--dim); }
+.dl-check.done .dl-box { color: #2ecf8f; }
+.dl-check.done .dl-txt { text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.22); }
+.dl-expand { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 1px dashed var(--border); border-radius: 7px; padding: 7px 12px; cursor: pointer; margin-top: 4px; }
+.dl-expand:hover { color: var(--text); border-color: var(--muted); }
+.dl-md { margin-top: 16px; }
+.dl-md.docview { max-height: none; border: 0; padding: 0; background: none; }
 @keyframes docfade { from { opacity: 0; } }
-@keyframes docslide { from { opacity: 0; transform: translateX(12px); } }
+@keyframes docslide { from { opacity: 0; transform: translateY(10px); } }
 
 /* brain-change lane on the ribbon */
 .rib-brain { height: 14px; }

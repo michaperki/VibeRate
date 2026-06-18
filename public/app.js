@@ -1187,11 +1187,7 @@ function renderTimeline() {
     .querySelectorAll('[data-bh-doc]')
     .forEach((n) => (n.onclick = () => {
       const node = currentDocNode(n.dataset.bhDoc);
-      if (!node) return;
-      state.docTab = node.name;
-      state.docOpen = true;
-      rerenderCenterpiece();
-      el('#conversation .centerpiece')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (node) openDocLightbox(node);
     }));
   wireDocTabs();
   wireActivity();
@@ -1557,8 +1553,6 @@ function renderCenterpiece() {
   }
   const g = state.docGraph;
   const files = state.docs.files;
-  // Resolve from graph nodes so an archived ghost opens its (historical) content.
-  const active = g.nodes.find((n) => n.name === state.docTab) || files[0] || g.nodes[0];
 
   // Time-travel: render the graph "as of" the selected brain commit. Nodes born
   // after that point are hidden; the docs changed *at* that commit get a ring.
@@ -1666,12 +1660,6 @@ function renderCenterpiece() {
       <div class="brain-wrap">
         <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${timeAxis}${edgesSvg}${nodesSvg}</svg>
         <div class="brain-peek" id="brainPeek" hidden></div>
-        ${state.docOpen ? `
-        <div class="doc-backdrop" data-doc-close></div>
-        <div class="doc-overlay">
-          <div class="doc-reader-head"><span>${esc(active.name)}</span><button class="doc-close" data-doc-close title="Close">✕</button></div>
-          <div class="docview markdown">${renderMarkdown(active.content)}</div>
-        </div>` : ''}
       </div>
       ${tickerHtml()}
       ${tt ? renderTimeTravel(ttLine) : ''}
@@ -1799,15 +1787,8 @@ function wireDocTabs() {
   const root = el('#conversation');
   root.querySelectorAll('[data-doc]').forEach((b) => {
     b.onclick = () => {
-      state.docTab = b.dataset.doc;
-      state.docOpen = true; // open the reader overlay for this node
-      rerenderCenterpiece();
-    };
-  });
-  root.querySelectorAll('[data-doc-close]').forEach((b) => {
-    b.onclick = () => {
-      state.docOpen = false;
-      rerenderCenterpiece();
+      const node = (state.docGraph?.nodes || []).find((n) => n.name === b.dataset.doc);
+      if (node) openDocLightbox(node);
     };
   });
   root.querySelectorAll('[data-layout]').forEach((b) => {
@@ -2980,6 +2961,105 @@ document.addEventListener('click', (e) => {
     openLightbox(node.getAttribute('data-lightbox'), node.getAttribute('data-cap') || '', media);
   }
 });
+
+// ---------- brain-doc lightbox ----------
+// Clicking a brain node opens its doc in a full-screen overlay (modeled on the
+// media lightbox above) instead of a cramped in-panel side panel — a doc deserves
+// the whole viewport to read. Plan/checklist docs (the ones that carry a completion
+// ring) get a bespoke view: the completion broken out cleanly into done vs.
+// remaining, with an "expand to full markdown" toggle for the raw doc.
+
+// Parse a checklist doc into sections of checkbox items grouped by the nearest
+// heading above them (box regex mirrors completionOf, so the ring and this view
+// always agree on what counts).
+function parseChecklist(content) {
+  const sections = [];
+  let cur = { title: null, items: [] };
+  const flush = () => { if (cur.items.length) sections.push(cur); };
+  for (const raw of String(content || '').split('\n')) {
+    const h = raw.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (h) { flush(); cur = { title: h[2].trim(), items: [] }; continue; }
+    const box = raw.match(/^[ \t>*+-]*\[([ xX])\]\s*(.*)$/);
+    if (box) cur.items.push({ done: /[xX]/.test(box[1]), text: box[2].trim() || '(untitled)' });
+  }
+  flush();
+  return sections.filter((s) => s.items.length);
+}
+
+// A small completion ring that echoes the node's own ring, for the plan header.
+function ringSvg(pct, size = 56) {
+  const r = size / 2 - 5;
+  const c = 2 * Math.PI * r;
+  const col = pctColor(pct);
+  return `<svg class="dl-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#2a2f3c" stroke-width="5"/>
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${col}" stroke-width="5" stroke-linecap="round"
+      stroke-dasharray="${(pct / 100 * c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
+    <text x="${size / 2}" y="${size / 2}" class="dl-ring-pct" text-anchor="middle" dominant-baseline="central" fill="${col}">${pct}%</text>
+  </svg>`;
+}
+
+// The lightbox body: a parsed plan view for checklist docs, else the full markdown.
+function docLightboxHtml(node) {
+  const comp = completionOf(node.content);
+  if (!comp) return `<div class="dl-md docview markdown">${renderMarkdown(node.content || '')}</div>`;
+  const remaining = comp.total - comp.done;
+  const secs = parseChecklist(node.content).map((s) => {
+    const done = s.items.filter((i) => i.done).length;
+    return `<div class="dl-sec">
+      ${s.title ? `<div class="dl-sec-h"><span>${esc(s.title)}</span><span class="dl-sec-n">${done}/${s.items.length}</span></div>` : ''}
+      <ul class="dl-checks">${s.items.map((i) =>
+        `<li class="dl-check${i.done ? ' done' : ''}"><span class="dl-box">${i.done ? '✓' : '▢'}</span><span class="dl-txt">${esc(i.text)}</span></li>`).join('')}</ul>
+    </div>`;
+  }).join('');
+  return `<div class="dl-plan">
+    <div class="dl-summary">${ringSvg(comp.pct)}
+      <div class="dl-sum-meta">
+        <div class="dl-sum-counts"><b>${comp.done}</b> of ${comp.total} done · ${
+          remaining ? `<span class="dl-remaining">${remaining} remaining</span>` : '<span class="dl-alldone">complete</span>'
+        }</div>
+        <div class="dl-bar"><span style="width:${comp.pct}%;background:${pctColor(comp.pct)}"></span></div>
+      </div>
+    </div>
+    <div class="dl-secs">${secs}</div>
+    <button class="dl-expand" data-dl-expand>▸ Expand to full markdown</button>
+    <div class="dl-md docview markdown" hidden>${renderMarkdown(node.content || '')}</div>
+  </div>`;
+}
+
+function openDocLightbox(node) {
+  if (!node) return;
+  state.docTab = node.name;
+  state.docOpen = true; // suppresses hover-peek; the overlay sits above the graph
+  let box = el('#doclightbox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'doclightbox';
+    box.innerHTML = '<div class="dl-shell"><div class="dl-head"><span class="dl-title"></span><button class="dl-close" title="Close (Esc)" aria-label="Close">✕</button></div><div class="dl-body"></div></div>';
+    box.addEventListener('click', (ev) => {
+      if (ev.target === box || ev.target.closest('.dl-close')) { closeDocLightbox(); return; }
+      const ex = ev.target.closest('[data-dl-expand]');
+      if (ex) {
+        const md = box.querySelector('.dl-md');
+        if (md.hasAttribute('hidden')) { md.removeAttribute('hidden'); ex.textContent = '▾ Collapse markdown'; }
+        else { md.setAttribute('hidden', ''); ex.textContent = '▸ Expand to full markdown'; }
+      }
+    });
+    document.body.appendChild(box);
+  }
+  box.querySelector('.dl-title').textContent = node.base || node.name;
+  box.querySelector('.dl-body').innerHTML = docLightboxHtml(node);
+  box.querySelector('.dl-body').scrollTop = 0;
+  box.classList.add('open');
+}
+
+function closeDocLightbox() {
+  const b = el('#doclightbox');
+  if (!b) return;
+  b.classList.remove('open');
+  state.docOpen = false;
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDocLightbox(); });
 
 function wireConversation(turnCount) {
   const pane = el('#conversation');
