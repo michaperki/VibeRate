@@ -3,6 +3,12 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { PROJECTS_DIR, slugify } from './paths.js';
 
+// A hook fires per tool action, so a "working" agent emits events frequently; the only
+// silent gap is pure model thinking between tool calls, rarely past ~2 min. So once the
+// live stream goes this long with no new event we stop reporting "working" — the session
+// is idle, finished, or gone (a hard exit leaves no marker). See LIVE_ORCHESTRATION §8a.
+const WORKING_TTL_MS = 2 * 60 * 1000;
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -406,10 +412,23 @@ export function getTicker(slug, limit = 16) {
     for (let i = ev.length - 1; i >= 0; i--) if (typeof ev[i].ctx === 'number') { ctxEv = ev[i]; break; }
     let lastTool = null;
     for (let i = ev.length - 1; i >= 0; i--) if (ev[i].ev === 'tool') { lastTool = ev[i]; break; }
-    const idle = last.ev === 'idle';
+    // Liveness is INFERRED from events, never asserted — a hard exit (Ctrl-C, terminal
+    // close, crash) fires no hook, so the last event just stops. We must not let a stale
+    // `tool`/`prompt` read as "working" forever (the bug this guards). So:
+    //   end  → 'ended' (graceful SessionEnd close)
+    //   idle → 'idle'  (a Stop fired: finished a turn)
+    //   otherwise → 'working' ONLY while recent; past WORKING_TTL with no new event we
+    //   stop claiming activity and fall back to 'idle' (a long-thinking agent self-heals
+    //   the instant its next event lands). Clients also get `ts` to show "last move Nm ago".
+    const age = Date.now() - (last.t || 0);
+    const state = last.ev === 'end' ? 'ended'
+      : last.ev === 'idle' ? 'idle'
+      : age > WORKING_TTL_MS ? 'idle'
+      : 'working';
     const live = {
-      state: idle ? 'idle' : 'working',
-      action: idle || !lastTool ? null : { cat: lastTool.cat, verb: lastTool.verb, label: lastTool.target || '' },
+      state,
+      stale: state === 'idle' && last.ev !== 'idle' && last.ev !== 'end', // went quiet mid-work
+      action: state !== 'working' || !lastTool ? null : { cat: lastTool.cat, verb: lastTool.verb, label: lastTool.target || '' },
       ctx: ctxEv ? ctxEv.ctx : null,
       ctxPct: ctxEv ? ctxEv.ctxPct : null,
       model: ctxEv ? ctxEv.model : null,

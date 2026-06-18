@@ -105,6 +105,29 @@ retired (its content folded in below). Two surfaces total:
   created from a WSL-home path (`/home/.../horsey_v2`) still attaches to the project
   captured from the Windows mount (`/mnt/c/.../horsey_v2`).
 
+## Principles
+
+**Liveness is inferred, never asserted.** We learn "what an agent is doing" from a stream
+of discrete events (hooks → `.vbrt/stream.jsonl`; or parsed transcript turns). There is **no
+authoritative "session alive / ended" signal**: a hard exit (Ctrl-C, terminal close, crash,
+reboot) fires *no* hook — not `Stop`, not `SessionEnd` — so the event stream simply stops
+mid-action. `Stop` is end-of-*turn*, not end-of-session, so even a clean "idle" is ambiguous.
+
+The trap (which we shipped and had to fix — see LIVE_ORCHESTRATION §8a): deriving a status as
+`last.ev === 'idle' ? 'idle' : 'working'`. A session killed mid-tool keeps a `tool` as its last
+event and reads **"working" forever** — and a still-running `vbrt watch` keeps the project
+"streaming", so it never ages out on its own.
+
+Rules for any new live/status surface:
+- **A non-terminal last event (`tool`/`prompt`) only means "working" while it is recent.** Gate
+  it on an age/TTL (`WORKING_TTL_MS`, `LIVE_WORKING_TTL_MS`); past that, downgrade to idle/stale —
+  never claim activity from a stale event. A long-thinking agent self-heals on its next event.
+- **Always surface "last move Nm ago"** (the event timestamp) so a human can judge a frozen panel.
+- **Handle `end` (graceful `SessionEnd`) explicitly** — auto-hide / "closed". It only covers
+  clean exits; hard kills still need manual dismissal (the `vbrt watch` TUI: number-key dismiss).
+- **Prefer "show + let the user dismiss" over a fixed auto-evict** — a live session can sit idle
+  for a long time legitimately, so a timeout must not *remove* it, only stop it reading "working".
+
 ## Status
 
 - Tier 2 (Project): built, incl. per-project agent memory.

@@ -55,6 +55,17 @@ function bar(pct, width = 16) {
   return color('█'.repeat(fill)) + C.dim('░'.repeat(width - fill));
 }
 const ktok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
+// Coarse "how long since this agent last moved" — the signal the user reads to tell a
+// genuinely-idle live session from one whose terminal was killed mid-action.
+function ago(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h${String(m % 60).padStart(2, '0')}m`;
+  return `${Math.floor(h / 24)}d${String(h % 24).padStart(2, '0')}h`;
+}
 const shortModel = (m) => String(m || '').replace(/^claude-/, '').replace(/-\d{8}$/, '') || '—';
 const shortSid = (s) => (s ? String(s).slice(0, 6) : '—');
 const agentTint = (src) => (src === 'codex' ? C.yellow : C.cyan);
@@ -74,9 +85,23 @@ function agentsFromStream(events, now) {
   }
   for (const a of byId.values()) {
     const age = now - a.last;
-    a.status = a.ev === 'idle' ? 'idle' : age < 12000 ? 'working' : 'paused';
+    // `ended` = a SessionEnd hook fired (graceful close) → auto-hidden by visibleAgents.
+    // `idle` = finished a turn (Stop) but session still open. working/paused split on recency.
+    a.status = a.ev === 'end' ? 'ended' : a.ev === 'idle' ? 'idle' : age < 12000 ? 'working' : 'paused';
   }
   return [...byId.values()].sort((x, y) => y.last - x.last);
+}
+
+// The panels the TUI actually draws: every agent in the stream window minus the ones
+// gracefully ended or hand-dismissed. A dismissal is keyed by sid + timestamp, so a
+// dismissed session that *moves again* (a newer event than the dismissal) reappears —
+// hand-clearing a session that turns out to be alive is self-correcting.
+function visibleAgents(st, now) {
+  return agentsFromStream(st.events, now).filter((a) => {
+    if (a.status === 'ended') return false;
+    const d = st.dismissed && st.dismissed[a.sid || '_'];
+    return !(d != null && a.last <= d);
+  });
 }
 
 // Build the full frame as an array of lines (no I/O), so it's easy to reason about
@@ -102,16 +127,19 @@ function tuiFrame(st, sessions) {
   lines.push(`${st.hooks ? C.green('● hooks live') : C.yellow('○ no hooks')} ${C.dim(st.hooks ? '(real-time)' : '— run `vbrt hooks --install` for real-time; showing log-tail lag')}`);
   lines.push('');
 
-  const agents = agentsFromStream(st.events, now);
+  const agents = visibleAgents(st, now);
+  st.visible = agents.map((a) => a.sid || '_'); // index→sid map for number-key dismissal
   if (!agents.length) {
     lines.push(top(C.dim('agents')));
     lines.push(mid(C.dim('no agent activity yet — start a session in this repo')));
     lines.push(bot);
   }
-  for (const a of agents) {
+  agents.forEach((a, i) => {
     const src = srcOf(a.sid);
     const dot = a.status === 'working' ? C.green('●') : a.status === 'paused' ? C.yellow('◐') : C.dim('○');
-    const label = `${agentTint(src)(src)} ${C.dim('· ' + shortSid(a.sid))}  ${dot} ${a.status === 'working' ? C.green('working') : a.status === 'paused' ? C.yellow('paused') : C.dim('idle')}`;
+    const word = a.status === 'working' ? C.green('working') : a.status === 'paused' ? C.yellow('paused') : C.dim('idle');
+    const num = i < 9 ? C.dim(`[${i + 1}]`) : C.dim('[·]'); // only 1–9 are dismiss-able by key
+    const label = `${num} ${agentTint(src)(src)} ${C.dim('· ' + shortSid(a.sid))}  ${dot} ${word} ${C.dim('· ' + ago(now - a.last) + ' ago')}`;
     lines.push(top(label));
     lines.push(mid(a.action ? a.status === 'working' ? a.action : C.dim(a.action) : C.dim('—')));
     const gauge = a.ctxPct != null
@@ -119,14 +147,14 @@ function tuiFrame(st, sessions) {
       : C.dim('ctx —  (no context reading yet)');
     lines.push(mid(gauge));
     lines.push(bot);
-  }
+  });
   lines.push('');
   const push = st.lastPush
     ? `${C.dim('last push')} ${new Date(st.lastPush.t).toLocaleTimeString()} ${C.dim('·')} ${st.lastPush.kind} ${C.dim('·')} ${st.lastPush.count} session(s)`
     : C.dim('last push — none yet');
   const q = st.queued ? C.yellow(`· ${st.queued} queued`) : '';
   lines.push(`${push} ${q}`);
-  lines.push(C.dim('Ctrl-C to stop'));
+  lines.push(C.dim(agents.length ? '[1–9] dismiss a dead panel · Ctrl-C to stop' : 'Ctrl-C to stop'));
   return lines;
 }
 
@@ -277,7 +305,19 @@ async function cmdWatch(args = []) {
   // TUI lifecycle: alternate screen buffer + hidden cursor while live, always
   // restored on exit (otherwise Ctrl-C leaves the terminal in a broken state).
   const streamFile = path.join(cwd, '.vbrt', 'stream.jsonl');
-  const st = { cwd, url: null, startedAt: Date.now(), hooks: false, events: [], lastPush: null, queued: 0 };
+
+  // Hand-dismissed panels survive across repaints and restarts: { sid: dismissedAtMs }.
+  // Hard-killed sessions (Ctrl-C, terminal close, restart) fire no hook, so they linger
+  // in the stream window — the user clears them with a number key; this remembers that.
+  const dismissedFile = path.join(cwd, '.vbrt', 'watch-dismissed.json');
+  let dismissed = {};
+  try { dismissed = JSON.parse(fs.readFileSync(dismissedFile, 'utf8')) || {}; } catch { /* none yet */ }
+  // Prune entries older than a week so the file can't grow without bound.
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  for (const k of Object.keys(dismissed)) if (dismissed[k] < weekAgo) delete dismissed[k];
+  const writeDismissed = () => { try { fs.writeFileSync(dismissedFile, JSON.stringify(dismissed)); } catch { /* best-effort */ } };
+
+  const st = { cwd, url: null, startedAt: Date.now(), hooks: false, events: [], lastPush: null, queued: 0, dismissed, visible: [] };
   const enterTui = () => process.stdout.write('\x1b[?1049h\x1b[?25l');
   const leaveTui = () => process.stdout.write('\x1b[?1049l\x1b[?25h');
   const repaint = () => {
@@ -288,11 +328,33 @@ async function cmdWatch(args = []) {
     st.events = readStream(cwd, 200);
     paintFrame(tuiFrame(st, sessionsList));
   };
-  const teardown = () => { if (tui) { try { leaveTui(); } catch { /* ignore */ } } clearLock(); };
+  const teardown = () => {
+    if (tui) {
+      try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch { /* ignore */ }
+      try { leaveTui(); } catch { /* ignore */ }
+    }
+    clearLock();
+  };
   process.on('exit', teardown);
   process.on('SIGINT', () => { teardown(); process.exit(0); });
   process.on('SIGTERM', () => { teardown(); process.exit(0); });
-  if (tui) { enterTui(); repaint(); process.stdout.on('resize', repaint); setInterval(repaint, 1000); }
+  if (tui) {
+    enterTui(); repaint(); process.stdout.on('resize', repaint); setInterval(repaint, 1000);
+    // Raw-mode key input: number keys dismiss the matching panel; Ctrl-C still stops
+    // (raw mode swallows the auto-SIGINT, so we handle \x03 by hand).
+    if (process.stdin.isTTY) {
+      try { process.stdin.setRawMode(true); } catch { /* not a real tty */ }
+      process.stdin.resume();
+      process.stdin.on('data', (buf) => {
+        const k = buf.toString();
+        if (k === '\x03' || k === 'q') { teardown(); process.exit(0); }
+        if (k >= '1' && k <= '9') {
+          const sid = st.visible[k.charCodeAt(0) - 49]; // '1' → index 0
+          if (sid) { dismissed[sid] = Date.now(); writeDismissed(); repaint(); }
+        }
+      });
+    }
+  }
 
   let lastSig = watchSignature(repoPaths, sessionFiles); // baseline; don't push on startup
   let pendingSince = 0;  // last time the signature changed (settle clock)
@@ -652,6 +714,7 @@ function hookSettings() {
       PostToolUse: one('*'),
       Stop: one(),
       SessionStart: one(),
+      SessionEnd: one(),
     },
   };
 }

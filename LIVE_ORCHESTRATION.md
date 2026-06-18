@@ -128,6 +128,43 @@ which are internal UI). Codex writes its log per event already, so it needs no h
 > Verified against a synthetic two-agent stream (working + idle, different models/contexts),
 > borders measured to terminal width, and both the TTY-default and piped-fallback paths.
 
+### 8a. Stale panels: liveness can't be detected, so we show + let the user dismiss (2026-06-18)
+
+**Problem.** Status was inferred purely from event recency over the last 200 stream lines,
+with no notion of a session being *gone*. `.vbrt/stream.jsonl` is a persistent file, so on a
+fresh `vbrt watch` after a reboot, prior sessions still render as panels. The killer: a
+**hard exit fires no hook** — Ctrl-C, terminal close, and computer restart all bypass `Stop`
+*and* `SessionEnd` (SIGINT/SIGHUP/SIGKILL give no chance to write). So a session killed
+mid-tool keeps its last event as a `tool` and is pinned at `paused` forever — indistinguishable
+from a dead session. Same root cause as the web ticker (`getTicker`, `src/storage.js`):
+`state = last.ev === 'idle' ? 'idle' : 'working'` with **no age check**, so a dead session
+reads "working/thinking…" indefinitely.
+
+**Why not a timeout.** A fixed staleness cutoff is wrong: a live session can sit idle for a
+long time between prompts without being dead. There is **no reliable liveness signal** — we
+can't get Claude's PID from a shell-wrapped hook, and CC doesn't pass one. So we don't guess.
+
+**What shipped instead** (`bin/vbrt.js`):
+- **Last-move time per panel** — `[n] claude · 10998f  ◐ paused · 1h30m ago`. The relative
+  inactivity (`ago(now - a.last)`) is the signal the user reads to spot a frozen/dead session.
+- **Manual dismissal** — raw-mode stdin; number keys `1–9` hide the matching panel. Persisted
+  to `.vbrt/watch-dismissed.json` as `{ sid: dismissedAtMs }` (pruned after 7 days). A dismissed
+  session that emits a **newer** event auto-resurrects, so clearing a still-alive session
+  self-corrects. (Raw mode swallows the auto-SIGINT, so `\x03`/`q` are handled by hand.)
+- **`SessionEnd` hook wired** (`src/hooks.js` → `ev: 'end'`; installed in `hookSettings`) —
+  marks a **graceful** close, and `visibleAgents` auto-hides ended panels. This only covers
+  `/exit`/clear; hard kills still rely on manual dismissal above.
+
+**Applied everywhere (2026-06-18).** Same staleness reasoning now in the **web** ticker
+(`getTicker`, `src/storage.js`: `WORKING_TTL_MS` = 2 min; handles `end`; emits `stale` + `ts`)
+and the viewer's `endState` end-marker (`public/app.js`: `LIVE_WORKING_TTL_MS` = 3 min, more
+generous for transcript flush lag). The web ticker shows `working` / `no activity · last move
+Nm ago` / `session closed` instead of a frozen "working". Codified as a principle in
+ARCHITECTURE.md ("Liveness is inferred, never asserted").
+
+**Still open (deferred):** a `/proc` open-fd liveness probe was considered but not built
+(unconfirmed whether CC holds the transcript fd open while idle).
+
 
 **The gap.** The terminal running `vbrt watch` is the *one* surface that doesn't show
 the live agent activity — it shows a scrolling push log and nothing else:

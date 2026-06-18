@@ -116,6 +116,12 @@ function eventFromPayload(p) {
       return { t, ev: 'idle', ...base };
     case 'SessionStart':
       return { t, ev: 'start', ...base };
+    case 'SessionEnd':
+      // Graceful close (/exit, clear, logout). Unlike Stop (end-of-turn → idle),
+      // this means the session is *gone* — the live dashboard auto-hides it. Hard
+      // kills (Ctrl-C, terminal close, restart) never fire this, so those linger
+      // until the user dismisses the panel by hand.
+      return { t, ev: 'end', ...base };
     case 'Notification':
       return { t, ev: 'note', text: String(p.message || '').slice(0, 120), ...base };
     default:

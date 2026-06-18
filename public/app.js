@@ -286,24 +286,34 @@ function statChips(s) {
 
 // ---------- conversation termination ----------
 
+// Transcript flush lags ~20–30s, so allow a longer quiet window than the real-time hook
+// ticker (2 min) before we stop calling a followed session "working".
+const LIVE_WORKING_TTL_MS = 3 * 60 * 1000;
+
 // `live` = we're following this session as it streams. While live, a trailing tool
 // call or assistant *narration* doesn't mean the convo ended — a working agent
 // emits text between tool batches, which used to flip the marker to "End of
 // conversation" prematurely (then more turns kept arriving). So while live those
-// both read as "Agent working…"; the definitive end only shows once streaming stops.
-function endState(messages, live = false) {
+// both read as "Agent working…".
+// BUT liveness is never asserted: a hard exit (Ctrl-C, terminal close, crash) fires no
+// hook and stops the transcript, yet a still-running `vbrt watch` keeps the project in
+// the streaming window — which used to pin this to "Agent working…" forever. So "working"
+// also requires *recent* activity (`lastActivityTs`); past the TTL we show the real end
+// state. See LIVE_ORCHESTRATION §8a.
+function endState(messages, live = false, lastActivityTs = 0) {
+  const fresh = live && lastActivityTs && (Date.now() - lastActivityTs) < LIVE_WORKING_TTL_MS;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.kind === 'text' && m.role === 'user') {
       return { cls: 'pending', text: 'Agent response pending' };
     }
     if (m.kind === 'tool_use' || m.kind === 'tool_result') {
-      return live
+      return fresh
         ? { cls: 'working', text: 'Agent working…' }
         : { cls: 'paused', text: 'Stopped while agent work was in progress' };
     }
     if (m.kind === 'text' && m.role === 'assistant') {
-      return live
+      return fresh
         ? { cls: 'working', text: 'Agent working…' }
         : { cls: 'ok', text: '■ End of conversation' };
     }
@@ -726,11 +736,21 @@ function tickerHtml() {
   if (t.live) {
     const live = t.live;
     const working = live.state === 'working';
+    const ended = live.state === 'ended';
+    // We never *assert* liveness — a hard exit fires no hook (see LIVE_ORCHESTRATION §8a),
+    // so the server downgrades a stale "working" to idle. Reflect that honestly: only the
+    // recent-working case claims activity; otherwise show when it last moved, not a guess.
+    const word = working ? 'working' : ended ? 'closed' : 'idle';
+    const lastMove = live.ts ? fmtAgo(live.ts) : null;
     const now = working
       ? (live.action
         ? `${esc(live.action.verb || 'using')} <span class="tick-label">${esc(live.action.label || live.action.cat || '')}</span>`
         : 'thinking…')
-      : 'waiting for you';
+      : ended
+        ? `session closed${lastMove ? ` · ${lastMove}` : ''}`
+        : live.stale
+          ? `no activity${lastMove ? ` · last move ${lastMove}` : ''}`
+          : 'waiting for you';
     const ctx = live.ctx != null
       ? `<span class="tick-ctx" title="context window used — ${live.ctx.toLocaleString()} tokens${live.model ? ' · ' + esc(live.model) : ''}">◔ ${fmtTokens(live.ctx)}${live.ctxPct != null ? ` · ${live.ctxPct}%` : ''}</span>`
       : '';
@@ -738,7 +758,7 @@ function tickerHtml() {
       ? `<span class="tick-trail">${items.map((it) => `<span class="tick-dot ${esc(it.cat || 'other')}" title="${esc((it.verb || '') + ' ' + (it.label || ''))}"></span>`).join('')}</span>`
       : '';
     return `<div class="brain-ticker ${working ? 'working' : 'idle'}" id="brainTicker">
-      <span class="tick-state"><span class="tick-pulse"></span>${working ? 'working' : 'idle'}</span>
+      <span class="tick-state"><span class="tick-pulse"></span>${word}</span>
       <span class="tick-now">${now}</span>
       ${trail}${ctx}
     </div>`;
@@ -2498,7 +2518,7 @@ function renderSessionReader() {
   state.turnAnchors = units.map((_, i) => `turn-${i}`);
   const pendingTurn = state._pendingTurn;
   state.currentTurn = Number.isFinite(pendingTurn) && units.length ? Math.max(0, Math.min(units.length - 1, pendingTurn)) : 0;
-  const end = endState(s.messages, state.live);
+  const end = endState(s.messages, state.live, s.endedAt ? new Date(s.endedAt).getTime() : 0);
   const dur = fmtDuration(new Date(s.endedAt) - new Date(s.startedAt));
   const filesList = [...stats.files].slice(0, 40);
 
@@ -2570,7 +2590,7 @@ function readerUnitsSignature(units) {
 }
 
 function readerEndMarker(s) {
-  const end = endState(s.messages, state.live);
+  const end = endState(s.messages, state.live, s.endedAt ? new Date(s.endedAt).getTime() : 0);
   const endIcon = endWorking(end.cls) ? '<span class="work-dot" aria-hidden="true"></span>' : '';
   return `<div class="end-marker ${end.cls}">${endIcon}${end.text}</div>`;
 }
