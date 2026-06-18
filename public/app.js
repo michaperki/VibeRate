@@ -2761,6 +2761,68 @@ function outcomeChips(u, { compact = false } = {}) {
     : '';
 }
 
+// ---------- polymorphic outcome rail (PROJECT_VIEW_PLAN §C) ----------
+// The archetype (classify.js) routes a prompt to an *artifact family* and a
+// *placement*, the resolved "per-archetype hybrid": rich families get a
+// full-width footer panel (wide artifacts want width); the banal majority stays
+// a flat chip row. Stage 1 wires the families whose proof is already in the
+// bundle — `shot` (captured before/after) and `diff` (the files the turn
+// produced). `link`/`record`/`test` route to the flat chips for now: link's real
+// proof is the Stage-3 provenance layer (commit→prompt, cross-project), the
+// console is already shown verbatim in the prompt body, and record/test artifacts
+// (checklist, status timeline) are Stage 2. So nothing regresses — unrouted
+// prompts render exactly as before.
+const ARCH_FAMILY = {
+  screenshot: 'shot', 'critique-tool': 'shot',
+  spec: 'diff', pickup: 'diff',
+  seed: 'link', handoff: 'link', positioning: 'link', 'tool-genesis': 'link',
+  options: 'record', feasibility: 'record',
+  experiment: 'test', 'console-debug': 'test',
+};
+const FAMILY_PLACEMENT = { shot: 'footer', diff: 'footer', link: 'inline', record: 'inline', test: 'chips' };
+
+function railFooter(label, body) {
+  return `<div class="outcome-rail rail-footer"><div class="rail-label">${esc(label)}</div>${body}</div>`;
+}
+
+// `diff` family: the files the turn actually produced. Real per-edit diffs are a
+// separate (deferred) item; here the proof is the deliverable file list, pulled
+// from the edit-tool actions in the after-narrative (deduped), with the counts.
+function railDiff(u) {
+  const paths = [];
+  const seen = new Set();
+  for (const s of (u.after && u.after.steps) || []) {
+    if (s.kind !== 'action') continue;
+    const [name, ...rest] = String(s.text).split(': ');
+    const path = rest.join(': ').trim();
+    if (path && classifyTool(name) === 'edit' && !seen.has(path)) { seen.add(path); paths.push(path); }
+  }
+  if (!paths.length) return '';
+  const o = u.outcomes || {};
+  const tail = [
+    o.filesChanged ? `${o.filesChanged} ${plw(o.filesChanged, 'file')}` : '',
+    o.commitsProduced ? `${o.commitsProduced} ${plw(o.commitsProduced, 'commit')}` : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="rail-diff">${paths.slice(0, 6).map((p) => `<span class="rail-file">📄 ${esc(p)}</span>`).join('')}${
+    paths.length > 6 ? `<span class="rail-file more">+${paths.length - 6}</span>` : ''
+  }${tail ? `<div class="rail-dr">${esc(tail)}</div>` : ''}</div>`;
+}
+
+// Route a prompt-unit to its outcome rail. Returns the chips + any captured
+// screenshots for unrouted prompts (today's behavior, no regression).
+function renderOutcomeRail(u) {
+  const arch = (u.archetype && u.archetype.archetype) || null;
+  const family = ARCH_FAMILY[arch] || null;
+  const chips = outcomeChips(u);
+  const shots = renderArtifacts(u.evidence); // evidence shows whenever captured, any archetype
+  if (family === 'shot' && shots) return railFooter('before / after', shots + chips);
+  if (family === 'diff') {
+    const body = railDiff(u);
+    if (body) return railFooter('deliverable', body + shots + chips);
+  }
+  return chips + shots; // link / record / test / default / unclassified → flat
+}
+
 // One prompt unit as an internal reader card. Acks ("go ahead") collapse to a slim
 // connector so the chain stays legible without giving filler a full card.
 function renderReaderCard(u, i) {
@@ -2793,8 +2855,7 @@ function renderReaderCard(u, i) {
     ${before}
     <div class="pc-prompt">${formatText(u.prompt)}</div>
     ${renderAttachments(u.attachments)}
-    ${outcomeChips(u)}
-    ${renderArtifacts(u.evidence)}
+    ${renderOutcomeRail(u)}
     ${played}
     ${link ? `<div class="pc-bar">${link}</div>` : ''}
   </article>`;
@@ -3140,8 +3201,7 @@ function renderPromptCard(c) {
     ${before}
     <div class="pc-prompt">${formatText(c.prompt)}</div>
     ${renderAttachments(c.attachments)}
-    ${outcomeChips(c)}
-    ${renderArtifacts(c.evidence)}
+    ${renderOutcomeRail(c)}
     ${played}
     <div class="pc-bar">${vote}${link}${open}</div>
   </article>`;

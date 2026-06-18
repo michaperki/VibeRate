@@ -119,7 +119,8 @@ concept it changed — that link is the "living history."
   classification remains separate below.
 - [ ] **Real diffs** per edit in the reader.
 - [ ] **Follow-up classification** — correction / continuation / approval.
-- [ ] **Prompt intent auto-tagging** — *(approach decided; not yet built)*. Classify each
+- [x] **Prompt intent auto-tagging** — *(server-side label shipped 2026-06-18; `src/classify.js`)*.
+  Classify each
   prompt-unit into the **12 `PROMPT_GALLERY.md` archetypes** (the older design/debug/refactor/
   ask/fix list is a coarser roll-up that can derive from these). **Two halves, split deliberately:**
   - **Label = server-side**, classified at ingest, keyed by `cardId` (`project~session~turn`),
@@ -146,7 +147,13 @@ concept it changed — that link is the "living history."
     output** (`{archetype, confidence}` → minimal output tokens). Whole ~3,688-prompt history ≈
     ~$1 one-time, then fractions of a cent per new prompt. If volume ever explodes, **embeddings**
     are the order-of-magnitude lever (arrives free with the deferred search/lineage vector infra).
-  - *Open:* whether the rail shows the full 12 or a coarse roll-up.
+  - *Resolved (2026-06-18):* **family roll-up + a few bespoke** — route to ~5 artifact
+    families (shot / diff / link / record / test), not 12 bespoke renderers; the 2–3
+    highest-value archetypes get a tailored marquee on top. See the rail-build checklist below.
+  - *Shipped reality vs. cost-stack above:* the classifier runs **synchronously**
+    (`messages.create`), **not** via the Batches API yet, and prompt-caches the rubric but
+    classifies one prompt per request. Batches/backfill remain the order-of-magnitude lever
+    if volume grows; the per-prompt incremental path is what's wired today.
 - [ ] **Prompt-quality-through-consequences** signals (needed clarification?
   caused rework? referenced docs? survived later commits?).
 - [x] *Decision (mock → resolved):* outcome-rail placement — **per-archetype hybrid**,
@@ -156,6 +163,43 @@ concept it changed — that link is the "living history."
   majority (#10 console-paste) collapses to a **chip row**, expandable on demand. So the
   same router that picks *what* renders also picks *how prominently*. Side rail rejected
   (cramps wide diffs/images). Toggle mock: `prototypes/outcome-placement.html`.
+
+#### Polymorphic outcome rail — build checklist *(scope: Stages 1 + 2; granularity: 5 families + a few bespoke)*
+> The archetype is already classified server-side and rendered as a head pill
+> (`renderArchetype`, `app.js`), but it does **not yet drive the rail** — every card
+> shows the same flat `outcomeChips` + before/after screenshot family. This builds the
+> router that routes on `u.archetype` to a family renderer **and** its placement.
+> Family → archetype map (mirrors the mock's filter bar):
+> `shot`→screenshot, critique-tool · `diff`→spec, pickup · `link`→seed, handoff,
+> positioning, tool-genesis · `record`→options, feasibility · `test`→experiment, console-debug.
+> Marquee bespoke within this scope: **experiment** (expected→actual verdict pill) and
+> **options** (executed checklist). positioning/tool-genesis bespoke deferred to the
+> Stage-3 provenance layer (needs commit→prompt + cross-project linkage).
+>
+> **Stage 1 — router + placement + data-ready families (no new capture):** ✅ shipped 2026-06-18
+- [x] `ARCH_FAMILY` (archetype→family) + `FAMILY_PLACEMENT` (footer / chips / inline) maps in `app.js`.
+- [x] `renderOutcomeRail(u)` — routes on `u.archetype`; falls back to today's flat `outcomeChips`
+  + screenshots for `default`/unclassified so nothing regresses (unit-tested, 12 assertions).
+- [x] **`shot`** family → labeled `before / after` **footer** wrapping captured evidence.
+- [x] **`diff`** family → `deliverable` footer listing the edit-tool file paths extracted from
+  `after.steps` (deduped) + file/commit counts. (Real per-edit diffs remain the separate item above.)
+- [~] **`link`** and **`console-debug`** deliberately route to the flat chip row in Stage 1, not a
+  bespoke artifact: link's real proof is the Stage-3 provenance layer (commit→prompt, cross-project),
+  and the console is already shown verbatim in the prompt body — a fold would only duplicate it.
+- [x] Swapped the flat `outcomeChips`/`renderArtifacts` calls in **both** card renderers
+  (`renderReaderCard`, `renderPromptCard`) for the single `renderOutcomeRail`.
+- [x] CSS: `.outcome-rail.rail-footer` panel + `.rail-diff`/`.rail-file` deliverable styling.
+- [ ] *Live visual check* against a session re-ingested **with** an API key (archetype data is
+  null on all currently-stored bundles, so the footers can't render until classify runs).
+>
+> **Stage 2 — light extraction for `record` + `test` + bespoke:**
+- [ ] `src/prompts.js` emits a small `u.outcomeArtifact`: test-status timeline (pass/fail
+  across tool outputs), options checklist (enumerated items × files/commits touched —
+  candidate to ride the existing Haiku classify call by extending its schema rather than a
+  new request), feasibility decision-record (question + `verdict`).
+- [ ] Bespoke `railExperiment` (expected→actual + PASS/PARTIAL/FAIL pill) and `railOptions`
+  (✓/▢ checklist), keyed off the new blob.
+- [ ] Verify against a real `vbrt`-pushed session (not just the mock); check scroll cost on a long session.
 
 ### D. Scale & navigation
 - [x] **Prompt-unit sidebar + deep links** *(first pass shipped 2026-06-17)* — `Sessions |

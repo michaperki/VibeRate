@@ -512,6 +512,32 @@ pre.code {
 .out-chip.shot { color: #9ecbff; border-color: rgba(158,203,255,0.28); }
 .out-chip.hot { color: #f0a93b; border-color: rgba(240,169,59,0.35); }
 .out-chip.more { color: var(--muted); }
+/* Polymorphic outcome rail (§C): the archetype routes a prompt to an artifact
+   family + placement. Rich families (shot/diff) get a full-width footer panel. */
+.outcome-rail.rail-footer {
+  margin-top: 10px; padding: 11px 13px;
+  background: #12151c; border: 1px solid var(--border); border-radius: 9px;
+}
+.outcome-rail.rail-footer .rail-label {
+  font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 9px;
+  display: flex; align-items: center; gap: 7px;
+}
+.outcome-rail.rail-footer .rail-label::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+/* footer rail keeps its inner chips/artifacts spacing modest */
+.outcome-rail.rail-footer .pc-artifacts { margin-top: 9px; }
+.outcome-rail.rail-footer .outcome-chips { margin-top: 9px; }
+/* `diff` family: the deliverable file list the turn produced */
+.rail-diff { display: flex; flex-wrap: wrap; gap: 6px; }
+.rail-file {
+  font: 11.5px ui-monospace, Menlo, monospace; color: #9fe6c8;
+  background: #0c0e13; border: 1px solid rgba(46,207,143,0.28); border-radius: 6px; padding: 2px 8px;
+}
+.rail-file.more { color: var(--muted); border-color: var(--border); }
+.rail-dr { width: 100%; font: 11px ui-monospace, Menlo, monospace; color: var(--dim); margin-top: 3px; }
+
 /* Evidence artifacts: before/after screenshots captured via `vbrt shot`. */
 .pc-artifacts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .art-shot { margin: 0; flex: 1 1 240px; min-width: 200px; max-width: 360px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #0c0e13; }
