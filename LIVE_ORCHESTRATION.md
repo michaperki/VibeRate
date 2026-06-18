@@ -113,6 +113,63 @@ the CC status line. **Not** achievable: a smooth per-*token* counter mid-respons
 (hooks are event-driven, not token deltas) or the CC spinner's gerunds ("Pondering…",
 which are internal UI). Codex writes its log per event already, so it needs no hook.
 
+## 8. `vbrt watch` terminal output → live TUI (proposed, 2026-06-18)
+
+**The gap.** The terminal running `vbrt watch` is the *one* surface that doesn't show
+the live agent activity — it shows a scrolling push log and nothing else:
+
+```
+👁  Watching … → https://vbrt.fly.dev  (16 session(s) + brain docs + git · Ctrl-C)
+  ↑ 4:57:20 PM — pushed 0 session(s) [delta] → …/p/kedJW_GdLCGx
+  ↑ 4:58:23 PM — pushed 0 session(s) [delta] → …/p/kedJW_GdLCGx
+```
+
+`cmdWatch` (`bin/vbrt.js:223`) just `console.log`s one dim line per push. Meanwhile the
+*dashboard* renders a rich ticker (status, current action, context gauge) from data the
+watcher is already shipping. So the person at the terminal sees the least.
+
+**The key finding: the data already exists locally; this is a presentation layer, not a
+capture project.** `.vbrt/stream.jsonl` (written by the CC hooks at **zero token cost**,
+`src/hooks.js`) already carries per-event, in real time:
+- `ev`: `prompt` | `tool` | `idle` | `start` | `note` → maps to a **status** (working/idle).
+- `cat` + `verb` + `target` → the **current action** ("editing src/prompts.js", "running
+  npm test", "searching renderOutcomeRail").
+- `ctx`, `ctxPct`, `model`, `output` → a **context/token gauge** (window fill, not spend).
+
+`readStream(cwd, n)` already reads it; `streamSignature` already fingerprints it. A TUI is
+a render loop over `readStream()` + `discoverSessions()` on the existing ~1s tick — no new
+capture, no new agent overhead, no server round-trip.
+
+**Proposed v1 (dependency-free ANSI redraw — matches the pure-Node ethos; no `ink`/`blessed`):**
+- Header: repo · dashboard URL · watch uptime.
+- A panel per active agent/session: agent badge (claude/codex) · status pulse
+  (working/idle) · current action (verb + target) · context bar (`84k / 200k · 42%`) ·
+  model.
+- Footer: last push (time · full/delta · N sessions) · outbox queued · `Ctrl-C to stop`.
+
+**Honest unknowns / prerequisites (so this doesn't get mis-scoped):**
+1. **Per-agent boxes need session attribution first.** `stream.jsonl` is today a single
+   *merged* stream with **no session id on events** — CC hook payloads carry `session_id`,
+   but `eventFromPayload` (`src/hooks.js:95`) drops it. To draw a box *per agent* we add an
+   `sid` field and group by it. Without that we get one aggregate "current activity" panel,
+   not per-agent boxes. (Small, well-contained change.)
+2. **Codex emits no hook stream** (it logs per event, no hooks). Codex agents would be
+   absent from a hook-only TUI unless we also derive their status from the session-log tail
+   — the same fallback `getTicker` already does. v1 could be CC-only and say so.
+3. **Hooks must be installed** (`vbrt hooks --install`) for the rich stream; without it the
+   TUI degrades to the ~20–30s-lagged log tail. The TUI should detect "no hooks" and nudge.
+4. **Full-screen TUI vs. the scrolling log.** A redraw (alt-buffer) replaces the push-log
+   history some people want. → ship as **`vbrt watch --tui`** opt-in first (keep the current
+   line log as default), promote to default once it's proven. Needs resize handling + a
+   clean teardown that restores the terminal on Ctrl-C alongside the existing lock cleanup.
+5. **"Token count" is context-window fill, not dollar spend.** We have per-step `output`
+   tokens and `ctx`/`ctxPct`; we do **not** have cumulative cost without a pricing table.
+   Label it honestly ("ctx 42%", "out 1.2k tok"), don't imply a running bill.
+
+**Why it's worth doing:** highest "wow per hour" on the live-orchestration surface because
+the hard part (real-time, zero-cost capture) is already shipped — this just stops the watch
+terminal from being the blindest seat in the house. Builds directly on #2 and #7.
+
 ## 6. Brain "Web" view clustering ✅
 
 Specific to `layoutGraph` (Web only; Tree/Recent have their own axes). After the force

@@ -104,7 +104,15 @@ Social features all require a shared backend, so a thin deploy gates most of wha
      two lanes read as the same threads.
    - **Web-view layout fills the canvas** ✅ — `layoutGraph` spreads to encompass the
      available width instead of clustering nodes mid-canvas.
-   - **Real-time ticker via Claude Code hooks** ✅ — CC flushes its session log in
+   - **`vbrt watch` terminal → live TUI** ◯ *(proposed, now-priority)* — the watch
+    terminal is the blindest seat: it shows only a scrolling push log while the dashboard
+    renders a rich ticker from data the watcher already ships. A dependency-free ANSI TUI
+    — a panel per agent with status / current action / context-token gauge — is a
+    *presentation layer* over the existing `.vbrt/stream.jsonl` (`readStream`) +
+    `discoverSessions`, **no new capture or agent overhead**. Prereqs/unknowns (per-agent
+    `sid` attribution, Codex-has-no-hooks, `--tui` opt-in vs. the scrolling log, "ctx fill
+    ≠ dollar spend") are worked out in `LIVE_ORCHESTRATION.md §8`.
+  - **Real-time ticker via Claude Code hooks** ✅ — CC flushes its session log in
      chunks (~20–30s lag); `vbrt hooks --install` wires `Pre/PostToolUse` /
      `UserPromptSubmit` / `Stop` hooks that fire `vbrt hook` (zero token cost — runs in
      the harness, not the model), appending live activity to `.vbrt/stream.jsonl`. The
