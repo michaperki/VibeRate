@@ -12,6 +12,14 @@
 // live). `--plugin` builds into plugins/viberate/skills/viberate so the
 // marketplace plugin ships a self-contained, working skill — run it before
 // committing/publishing. Or pass any path (e.g. a project's .claude/skills).
+//
+// ⚠️ The installed skill is a COPY, not a live link. Edits to skill/SKILL.md or src/*
+// do NOT reach agents until you re-run this — and it installs PER AGENT, so rebuild
+// into BOTH skill dirs after any change:
+//   node scripts/build-skill.mjs                            # ~/.claude/skills/viberate
+//   node scripts/build-skill.mjs ~/.codex/skills/viberate   # ~/.codex/skills/viberate
+// (The PATH `vbrt` CLI is npm-linked and stays current, which masks a stale skill —
+// a stale skill once silently invalidated an experiment run. See README "Agent skill".)
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

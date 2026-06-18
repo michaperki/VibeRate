@@ -66,6 +66,25 @@ Uploads are redacted for obvious secrets before leaving the machine, but hosted
 projects are private by default. Use `vbrt publish --public` when the existing
 link should be shareable, or `vbrt publish --private` to make it owner-only again.
 
+## Agent skill
+
+The `vbrt` CLI is also packaged as an **agent skill** (Claude Code / Codex) so an agent
+can capture and publish its own session. Build/install it from the repo:
+
+```bash
+node scripts/build-skill.mjs                            # → ~/.claude/skills/viberate
+node scripts/build-skill.mjs ~/.codex/skills/viberate   # → ~/.codex/skills/viberate
+```
+
+> ⚠️ **Pitfall — the skill is a COPY, not a live link.** Editing `skill/SKILL.md` (or
+> `src/*`) in the repo has **no effect on installed agents** until you rebuild, and the
+> skill installs **per agent** — you must rebuild into **both** the Claude and Codex
+> dirs above. The `vbrt` CLI on your `PATH` is often `npm link`-ed to the repo and stays
+> current on its own, which makes it easy to *assume* the skill updated too — it didn't.
+> A stale skill silently invalidated a whole experiment run (the agent never saw the
+> clip / `vbrt doctor` guidance and we drew false conclusions from it). **After any
+> `SKILL.md` or capture-code change, re-run both build commands** before trusting a run.
+
 ## Layout
 
 ```

@@ -101,10 +101,18 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   artifact families. ✅ First pass shipped.
 - **Live dashboard re-entry** ✅ — clicking the active project in the project rail
   from a conversation now returns to the AI brain/dashboard without turning live off.
-- **Evidence artifacts** — `vbrt shot` before/after screenshots ✅ + motion clips
-  (`--clip`, gif via ffmpeg or webm fallback) ✅ shipped and exercised on the
-  sorting-visualizer experiment; diff/test/provenance families still tracked in
-  `PROJECT_VIEW_PLAN.md §C`.
+- **Back-to-dashboard from a conversation** ✅ — a "← dashboard" breadcrumb in the
+  reader returns to the project's brain/timeline without leaving the project (live stays
+  on); previously the only way back was out to the workspace, which dropped live.
+- **Evidence artifacts** — `vbrt shot` before/after screenshots ✅ + motion clips ✅
+  (`--clip`, gif via ffmpeg or webm fallback). Hardened across the Maze series (exp 5):
+  - **Cross-env capture** ✅ — one hardened headless launch (`--no-sandbox` etc.) shared
+    by the `doctor` probe and real capture (so doctor predicts `shot`), + `vbrt doctor
+    --fix` to install Playwright + chromium on demand. Fixes WSL/Snap/Docker/CI hangs.
+  - **Motion-aware clips** ✅ — `--clip [s]` is now a *cap*; the clip records from first
+    paint and **auto-stops when motion settles**, so length tracks the real animation
+    (button toggle → ~1s, long sim → cap) with no per-app speed tuning.
+  - diff/test/provenance families still tracked in `PROJECT_VIEW_PLAN.md §C`.
 - **Agent ergonomics — "make capture boring"** ✅ first pass, from experiment-3
   feedback: VibeRate was costing the agent tokens, not just collecting work. Fixed:
   (a) `vbrt shot` now resolves Playwright from the **repo's** `node_modules`, not just

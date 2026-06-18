@@ -81,6 +81,15 @@ side. (Lone shots stand alone.)
 - [x] Reader render — before/after strip on the prompt card (`renderArtifacts` in
       `public/app.js`, `.pc-artifacts` styles), click-to-zoom.
 - [x] Rebuild skill bundle so the agent's `shot`/`push` include `evidence.js`.
+  - ⚠️ **Pitfall (2026-06-18): the installed skill is a copy — rebuild it, per agent.**
+    The Maze run 3 looked like "the agent ignores the clip / `doctor` guidance," but the
+    agent had loaded a **stale `~/.codex/skills/viberate/SKILL.md`** (half the size of the
+    repo's — no clip mandate, no "run `doctor` first"). `skill/SKILL.md` and `src/*` only
+    reach agents via `node scripts/build-skill.mjs <dir>`, and it must be run into **both**
+    `~/.claude/skills/viberate` and `~/.codex/skills/viberate`. The `vbrt` CLI is `npm
+    link`-ed to the repo and stays live, which masks the staleness. Rule: rebuild both
+    skill dirs after any `SKILL.md`/capture change, and verify the installed skill is
+    current before drawing conclusions from an experiment run.
 - [x] **Motion clips** — `vbrt shot <url> --clip [seconds]` records via Playwright
       → animated gif (if `ffmpeg`) or webm (`media: 'video'`); the reader + lightbox
       render both as looping media. (`captureClip` in `src/evidence.js`.)
@@ -118,6 +127,21 @@ side. (Lone shots stand alone.)
       issues are polish-level **workflow defaults** (lean docs harder, public/private
       clarity, require a clip on animated apps, commit-before-capture, end with
       `vbrt status`) — tracked in `ROADMAP.md` Phase 3, not artifact-capture problems.
+- [x] **Maze series (experiment 5, runs 1–4, 2026-06-18)** — drove the capture loop to
+      actually work for motion-first apps across Codex runs. Findings + fixes shipped:
+      - **Cross-env capture was broken** — bare `chromium.launch()` hung under WSL/Snap.
+        Fixed: one hardened launch config (`--no-sandbox --disable-dev-shm-usage
+        --disable-gpu`) shared by the probe *and* `shot`/`clip` (`launchForCapture`), so a
+        green `vbrt doctor` truly predicts capture. Plus `vbrt doctor --fix` to install
+        Playwright + chromium on demand. (`src/evidence.js`, `bin/vbrt.js`.)
+      - **Agent never reached for the clip path** — until the installed skill was rebuilt
+        (it was stale; see the per-agent rebuild pitfall above). Once current, the agent
+        ran `vbrt doctor` first and captured a clip.
+      - **Fixed-length clips left long static tails** — a 6s clip of an animation that
+        finished in <1s was mostly a frozen solved maze. Fixed: **motion-aware capture** —
+        `--clip [s]` is now a *cap*; the clip records from first paint and **auto-stops
+        when frames settle**, so length tracks real motion (button toggle → ~1s; long sim
+        → cap). `captureClip` in `src/evidence.js`; CLI reports the auto-stopped duration.
 - [ ] *Then:* viewport set / multi-shot; the other artifact families (diff,
       test-status, provenance) — mostly auto-derived, tracked in §C.
 
