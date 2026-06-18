@@ -138,8 +138,15 @@ concept it changed — that link is the "living history."
     #4 pasted result+verdict, #10 console block), which an LLM reads natively and a text embedding
     blurs. **Embeddings deferred** until search (§D) + cross-project lineage (§C / gallery takeaway
     #4) are built — then the vectors pay for three features at once, not just the label.
-  - *Open:* model tier (Haiku 4.5 cheap-bulk vs Sonnet 4.6 vs Opus 4.8 — leaning Haiku); whether the
-    rail shows the full 12 or a coarse roll-up.
+  - **Model = Haiku 4.5** (`claude-haiku-4-5`) — cheapest in the catalog ($1/$5 per MTok), the
+    right floor for a high-volume classifier. Cost stack to keep "reads every message" tiny:
+    **Batches API** (50% off — it's a non-latency-sensitive ingest pass), **prompt-cache the
+    12-archetype rubric** (stable prefix → ~0.1× on every call, the biggest lever), classify
+    **substantive prompt-units only**, **once per `cardId`** (incremental), and **structured
+    output** (`{archetype, confidence}` → minimal output tokens). Whole ~3,688-prompt history ≈
+    ~$1 one-time, then fractions of a cent per new prompt. If volume ever explodes, **embeddings**
+    are the order-of-magnitude lever (arrives free with the deferred search/lineage vector infra).
+  - *Open:* whether the rail shows the full 12 or a coarse roll-up.
 - [ ] **Prompt-quality-through-consequences** signals (needed clarification?
   caused rework? referenced docs? survived later commits?).
 - [x] *Decision (mock → resolved):* outcome-rail placement — **per-archetype hybrid**,
@@ -318,4 +325,5 @@ the prompt-unit / brain prototypes) — don't pick unilaterally.
   soft scores + confidence), **capture is skill-side** (archetype-aware *evidence hints*, not a
   naming obligation on the working agent). LLM over embeddings for the label (taxonomy is
   half-structural); embeddings deferred to the search/lineage layer. No keyword heuristics over
-  prompt text ([[no-brittle-text-heuristics]]). *Open:* model tier (leaning Haiku 4.5).
+  prompt text ([[no-brittle-text-heuristics]]). **Model = Haiku 4.5** (cheapest; batched +
+  rubric-cached + incremental keeps it ~$1 for the whole history). Fully resolved.
