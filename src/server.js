@@ -246,10 +246,12 @@ export function startServer(port = 4317) {
         const session = getSession(slug, summary.id);
         if (session) units.push(...extractPromptUnits(session, summary.id, slug, { evidence, git }));
       }
-      const map = await classifyUnits(units, getClassify(slug));
+      const existing = getClassify(slug);
+      const map = await classifyUnits(units, existing);
+      console.error(`[classify] ${slug}: ${units.length} units, ${Object.keys(map).length - Object.keys(existing).length} newly tagged`);
       saveClassify(slug, map);
-    } catch {
-      /* classification is best-effort; never surface to ingest */
+    } catch (e) {
+      console.error('[classify] project failed:', e && (e.message || e));
     }
   }
 

@@ -100,7 +100,10 @@ export async function classifyUnit(u) {
     const out = JSON.parse(text);
     if (!VALID.has(out.archetype)) return null;
     return { archetype: out.archetype, confidence: out.confidence, rationale: out.rationale };
-  } catch {
+  } catch (e) {
+    // Best-effort: swallow so it never breaks ingest, but log so failures are
+    // observable (a silent classifier looks identical to a dormant one).
+    console.error('[classify] call failed:', e && (e.status || ''), e && (e.message || e));
     return null;
   }
 }
