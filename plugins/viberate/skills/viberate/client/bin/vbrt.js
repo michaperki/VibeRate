@@ -158,10 +158,18 @@ async function cmdWatch(args = []) {
   process.on('SIGTERM', () => { clearLock(); process.exit(0); });
 
   let lastSig = watchSignature(repoPaths, sessionFiles); // baseline; don't push on startup
-  let pendingSince = 0;
+  let pendingSince = 0;  // last time the signature changed (settle clock)
+  let changedSince = 0;  // first change since the last push (max-wait clock)
   let busy = false;
-  let rediscoverIn = 10; // re-scan for new session files every ~20s
-  const DEBOUNCE = 1500;
+  let rediscoverIn = 20; // re-scan for new session files every ~20s (1s ticks)
+  // Settle the burst before pushing (DEBOUNCE), but never wait longer than MAX_WAIT:
+  // an agent in YOLO / skip-permissions mode appends to its session log on every tick,
+  // so the signature never goes quiet and a pure debounce would only push once the
+  // agent *pauses* — which is why an early-written plan.md used to surface only after
+  // the implementation finished. MAX_WAIT forces a push mid-burst so the live view
+  // tracks the agent in near-real-time.
+  const DEBOUNCE = 1200;
+  const MAX_WAIT = 3000;
 
   // Delta push: only parse + send the sessions whose log changed since the last
   // push (the first push sends all, to sync the project). The server merges by
@@ -175,14 +183,19 @@ async function cmdWatch(args = []) {
     writeLock(); // refresh heartbeat even while idle so doctor sees a live watcher
     if (busy) return;
     if (--rediscoverIn <= 0) {
-      rediscoverIn = 10;
+      rediscoverIn = 20;
       try { sessionFiles = (await discoverSessions(cwd)).map((s) => s.file); } catch { /* keep old list */ }
     }
     let sig;
     try { sig = watchSignature(repoPaths, sessionFiles); } catch { return; }
-    if (sig !== lastSig) { lastSig = sig; pendingSince = Date.now(); return; } // changed — wait to settle
-    if (!pendingSince || Date.now() - pendingSince < DEBOUNCE) return;
+    const now = Date.now();
+    if (sig !== lastSig) { lastSig = sig; pendingSince = now; if (!changedSince) changedSince = now; } // mark a change
+    if (!changedSince) return; // nothing pending
+    const settled = now - pendingSince >= DEBOUNCE;        // burst went quiet, or
+    const maxedOut = now - changedSince >= MAX_WAIT;       // we've waited long enough mid-burst
+    if (!settled && !maxedOut) return;
     pendingSince = 0;
+    changedSince = 0;
     busy = true;
     try {
       const sessions = await discoverSessions(cwd);
@@ -208,7 +221,7 @@ async function cmdWatch(args = []) {
     }
     busy = false;
   };
-  setInterval(tick, 2000);
+  setInterval(tick, 1000);
 }
 
 async function cmdAdd(args = []) {
