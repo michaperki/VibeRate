@@ -406,7 +406,8 @@ async function cmdShot(args = []) {
     if (a.startsWith('--')) {
       const k = a.slice(2);
       const v = args[i + 1] && !args[i + 1].startsWith('--') ? args[++i] : true;
-      opts[k] = v;
+      if (k === 'click') (opts.click = opts.click || []).push(v); // repeatable: click in sequence
+      else opts[k] = v;
     } else pos.push(a);
   }
   const target = pos[0];
@@ -417,8 +418,9 @@ async function cmdShot(args = []) {
     return;
   }
   if (!target && !opts.image) {
-    console.log(C.yellow('Usage: vbrt shot <url|image.png> [--image <file>] [--label before|after] [--note "…"] [--viewport 1280x800] [--clip [seconds]]'));
-    console.log(C.dim('  Pass a local dev URL (captured via Playwright if installed) or an image the agent already took.'));
+    console.log(C.yellow('Usage: vbrt shot <url|image.png> [--image <file>] [--label before|after] [--note "…"] [--viewport 1280x800] [--clip [seconds]] [--click <selector> …] [--wait <selector|ms>]'));
+    console.log(C.dim('  Pass a URL (captured via Playwright if installed) or an image the agent already took.'));
+    console.log(C.dim('  --click <selector> drives the page to a state the URL can\'t reach (open a modal, click into a view); repeat to chain clicks. --wait holds for a selector or N ms before the shot.'));
     console.log(C.dim('  --clip records a motion clip of a URL; [seconds] is a CAP — it auto-stops when motion settles (gif if ffmpeg, else webm).'));
     process.exitCode = 1;
     return;
@@ -439,6 +441,10 @@ async function cmdShot(args = []) {
       session: opts.session === true ? null : opts.session || null,
       pair: opts.pair === true ? null : opts.pair || null,
       clip,
+      // Reach a state a URL can't on its own: click selectors in order, then wait
+      // for a selector (or N ms). Pass --click more than once to chain clicks.
+      click: opts.click || null,
+      wait: opts.wait === true ? null : opts.wait || null,
     });
     const kind = rec.media === 'video' ? 'clip (webm)' : clip ? 'clip (gif)' : 'artifact';
     const dur = clip && rec.durationMs ? ` · ${(rec.durationMs / 1000).toFixed(1)}s (${rec.settled ? 'auto-stopped when motion settled' : 'hit --clip cap; raise it if the motion was cut off'})` : '';

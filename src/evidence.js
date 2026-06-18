@@ -202,10 +202,30 @@ function dataUrl(imgPath) {
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
+// Drive the page to the state we actually want to capture before shooting: click
+// selectors in order (Playwright auto-waits for each to be actionable), then wait
+// for a final selector — or a bare millisecond delay if `wait` is all digits. This
+// is a thin pass-through to page.click / page.waitForSelector, the cheap way to
+// reach a state a URL alone can't (open a modal, click into a view) without the
+// agent hand-rolling a browser script. `click` may be a single selector or a list
+// (applied in sequence, e.g. open a menu → pick an item).
+async function applyInteractions(page, { click, wait } = {}) {
+  const clicks = (click == null ? [] : Array.isArray(click) ? click : [click]).filter((s) => s && s !== true);
+  for (const sel of clicks) {
+    await page.click(String(sel), { timeout: 10000 });
+    await page.waitForTimeout(250); // small settle so the next click / the shot sees the result
+  }
+  if (wait != null && wait !== true) {
+    const w = String(wait);
+    if (/^\d+$/.test(w)) await page.waitForTimeout(Number(w));
+    else await page.waitForSelector(w, { timeout: 10000 });
+  }
+}
+
 // Capture a URL with Playwright *if it's installed*; otherwise tell the caller to
 // pass --image with a screenshot the agent already took. The lazy import keeps the
 // pushed skill bundle dependency-free (same pattern as @inquirer/express).
-async function captureUrl(url, viewport, cwd) {
+async function captureUrl(url, viewport, cwd, interact = null) {
   const { module: pw } = await resolvePlaywright(cwd);
   if (!pw) throw new Error(PW_HELP);
   const [w, h] = String(viewport || '1280x800').split('x').map(Number);
@@ -213,6 +233,7 @@ async function captureUrl(url, viewport, cwd) {
   try {
     const page = await browser.newPage({ viewport: { width: w || 1280, height: h || 800 } });
     await page.goto(url, { waitUntil: 'networkidle' });
+    if (interact) await applyInteractions(page, interact);
     const buf = await page.screenshot({ type: 'png' });
     return `data:image/png;base64,${buf.toString('base64')}`;
   } finally {
@@ -226,7 +247,7 @@ async function captureUrl(url, viewport, cwd) {
 // per-app speed tuning (the failure mode that left 5s of static maze in a 6s clip).
 // `seconds` is the upper bound. Playwright records native webm; with system ffmpeg we
 // transcode to an animated gif. Returns { dataUrl, media, durationMs }.
-async function captureClip(url, { viewport, seconds = 8, fps = 12, cwd } = {}) {
+async function captureClip(url, { viewport, seconds = 8, fps = 12, cwd, click = null, wait = null } = {}) {
   const { module: pw } = await resolvePlaywright(cwd);
   if (!pw) throw new Error(PW_HELP);
   const [w, h] = String(viewport || '960x600').split('x').map(Number);
@@ -248,6 +269,7 @@ async function captureClip(url, { viewport, seconds = 8, fps = 12, cwd } = {}) {
     });
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'load' }); // start near first paint, not network-idle
+    if (click || wait) await applyInteractions(page, { click, wait }); // e.g. click "play", then record the motion it triggers
     const video = page.video();
     // Compare successive frames; a small fixed-quality JPEG is byte-identical for
     // identical pixels, so equal buffers ⇒ nothing moved. Stop once the page has held
@@ -298,7 +320,7 @@ async function captureClip(url, { viewport, seconds = 8, fps = 12, cwd } = {}) {
 // Record one screenshot artifact into the repo's evidence sidecar. `target` is an
 // image path or http(s) URL; `image` forces an explicit file. Binds to the active
 // session so artifacts land on the right conversation even with several running.
-export async function recordShot(cwd, { target, image, label = null, note = '', viewport = null, session = null, pair = null, clip = null } = {}) {
+export async function recordShot(cwd, { target, image, label = null, note = '', viewport = null, session = null, pair = null, clip = null, click = null, wait = null } = {}) {
   const dir = evidenceDir(cwd);
   fs.mkdirSync(dir, { recursive: true });
   ensureGitignore(cwd);
@@ -312,7 +334,7 @@ export async function recordShot(cwd, { target, image, label = null, note = '', 
   let settled = false;
   if (clip) {
     if (!isUrl) throw new Error('--clip needs a URL to record (pass an http(s) URL)');
-    const out = await captureClip(target, { viewport, seconds: clip === true ? 8 : Number(clip), cwd });
+    const out = await captureClip(target, { viewport, seconds: clip === true ? 8 : Number(clip), cwd, click, wait });
     img = out.dataUrl;
     media = out.media;
     durationMs = out.durationMs;
@@ -321,7 +343,7 @@ export async function recordShot(cwd, { target, image, label = null, note = '', 
     img = dataUrl(image);
     media = mediaOf(img);
   } else if (isUrl) {
-    img = await captureUrl(target, viewport, cwd);
+    img = await captureUrl(target, viewport, cwd, { click, wait });
     media = 'image';
   } else if (target) {
     img = dataUrl(target);

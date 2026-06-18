@@ -107,6 +107,27 @@ node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot http://localhost:5173 --clip 
   transition-heavy UI, capture **at least one `--clip` after the first commit**. A
   final still alone is not enough evidence for motion-first work.
 
+### Capturing a state behind an interaction
+
+If the shot needs a state the URL alone can't show — a modal open, a menu expanded, a
+detail/lightbox you reach by clicking — drive the page there with `--click`, then
+`--wait` for the state to settle. Don't hand-roll a browser script for this; that's
+what these flags are for.
+
+```bash
+node "${CLAUDE_SKILL_DIR}/client/bin/vbrt.js" shot https://<your-app> \
+  --click '.theme-menu' --click 'text=Dark' \
+  --wait '.app.theme-dark' --label after --note "dark mode"
+```
+
+- `--click <selector>` clicks it (Playwright auto-waits for it to be actionable); pass
+  `--click` more than once to click **in sequence** (open a menu → pick an item).
+- `--wait <selector|ms>` holds until that element appears (or N milliseconds) before the
+  shot — use it so the final state has rendered.
+- Works with `--clip` too: click to *start* an animation, then record what it triggers.
+- **Prefer a URL param** if your app has one (`?theme=dark` is cheaper and reusable);
+  reach for `--click`/`--wait` only when no param gets you to the state.
+
 ### If capture fails — the decision tree (don't improvise)
 
 URL/clip capture needs Playwright **and** a browser binary. If `vbrt shot <url>` reports

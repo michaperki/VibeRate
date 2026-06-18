@@ -70,6 +70,8 @@ side. (Lone shots stand alone.)
 ## Implementation checklist
 
 - [x] `vbrt shot` CLI — url/image, `--label/--note/--viewport/--session/--pair`,
+      `--click`/`--wait` (drive the page to a state a URL can't reach — modal/menu/detail
+      view — via a thin `page.click`/`page.waitForSelector` pass-through),
       arg validation, friendly usage. (`bin/vbrt.js`)
 - [x] `src/evidence.js` — `recordShot` (sidecar + inline image), `resolveActiveSession`
       (most-recently-active log, parsed for the exact stored id), `readEvidence`,
