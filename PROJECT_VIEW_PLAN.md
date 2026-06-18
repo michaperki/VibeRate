@@ -119,7 +119,27 @@ concept it changed — that link is the "living history."
   classification remains separate below.
 - [ ] **Real diffs** per edit in the reader.
 - [ ] **Follow-up classification** — correction / continuation / approval.
-- [ ] **Prompt intent auto-tagging** (design / debug / refactor / ask / fix).
+- [ ] **Prompt intent auto-tagging** — *(approach decided; not yet built)*. Classify each
+  prompt-unit into the **12 `PROMPT_GALLERY.md` archetypes** (the older design/debug/refactor/
+  ask/fix list is a coarser roll-up that can derive from these). **Two halves, split deliberately:**
+  - **Label = server-side**, classified at ingest, keyed by `cardId` (`project~session~turn`),
+    **cached + incremental** (classify once per prompt; only new prompts on later pushes), as
+    **soft scores per archetype + a top pick + confidence**, with a `default`/none bucket for the
+    banal majority (#10 console-paste). Lives server-side so it gives **coverage** (backfills the
+    ~3,688-prompt history, ~61 repos — instruction-tagging can't touch old prompts), **consistency**
+    (one rubric across claude/codex/future agents), and **zero working-agent token cost**.
+  - **Capture = skill-side**, as archetype-*aware evidence hints* (action, not a naming
+    obligation): "producing a deliverable file → capture the file + a dry-run"; "visual change →
+    before/after". Same gallery insight expressed as evidence the agent already wants to grab, so it
+    doesn't put a 12-way taxonomy on the working agent's critical path (preserves "make capture
+    boring", [[viberate-positioning]]).
+  - **Method = LLM classifier** (first-party Claude) over the 12 prose definitions — beats
+    embedding-nearest-centroid here because the taxonomy is half *structural* (#8 enumerated options,
+    #4 pasted result+verdict, #10 console block), which an LLM reads natively and a text embedding
+    blurs. **Embeddings deferred** until search (§D) + cross-project lineage (§C / gallery takeaway
+    #4) are built — then the vectors pay for three features at once, not just the label.
+  - *Open:* model tier (Haiku 4.5 cheap-bulk vs Sonnet 4.6 vs Opus 4.8 — leaning Haiku); whether the
+    rail shows the full 12 or a coarse roll-up.
 - [ ] **Prompt-quality-through-consequences** signals (needed clarification?
   caused rework? referenced docs? survived later commits?).
 - [x] *Decision (mock → resolved):* outcome-rail placement — **per-archetype hybrid**,
@@ -293,3 +313,9 @@ the prompt-unit / brain prototypes) — don't pick unilaterally.
   panel for rich artifacts (screenshots, diffs), collapsible chip row for the banal
   majority (#10 console-paste); not one global mode. Side rail rejected (cramps wide
   artifacts). Mock: `prototypes/outcome-placement.html`.
+- Intent classification (C) → resolved (approach): **label is server-side** (LLM classifier
+  over the 12 `PROMPT_GALLERY.md` archetypes, at ingest, `cardId`-keyed, cached/incremental,
+  soft scores + confidence), **capture is skill-side** (archetype-aware *evidence hints*, not a
+  naming obligation on the working agent). LLM over embeddings for the label (taxonomy is
+  half-structural); embeddings deferred to the search/lineage layer. No keyword heuristics over
+  prompt text ([[no-brittle-text-heuristics]]). *Open:* model tier (leaning Haiku 4.5).
