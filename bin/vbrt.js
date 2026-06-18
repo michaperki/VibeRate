@@ -636,6 +636,7 @@ async function cmdDoctor(args = []) {
   if (urlOk) {
     console.log(`    ${C.cyan('vbrt shot http://localhost:<port> --label after --note "…"')}`);
     console.log(C.dim('    add `--clip 8` for motion — it auto-stops when motion settles, so the number is just a cap. Point at YOUR app, never VibeRate.'));
+    console.log(C.dim('    if the state is behind an interaction (modal/menu/detail view): add `--click <sel>` (repeatable) + `--wait <sel|ms>` to reach it.'));
   } else {
     console.log(`    ${C.cyan('vbrt shot ./shot.png --label after --note "…"')}   ${C.dim('(take the file with your own tooling)')}`);
     console.log(C.dim('    headless capture is unavailable here — do NOT touch NODE_PATH or the skill install.'));
