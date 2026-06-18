@@ -528,6 +528,8 @@ pre.code {
 .art-tag { font: 600 9px ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .04em; color: var(--bg); background: var(--accent); border-radius: 4px; padding: 1px 6px; }
 .art-before .art-tag { background: #8b92a5; }
 .art-after .art-tag { background: var(--codex); }
+.pc-arch { font: 600 10px ui-monospace, Menlo, monospace; color: #cdd2de; background: rgba(124,92,255,0.14); border: 1px solid rgba(124,92,255,0.32); border-radius: 5px; padding: 1px 7px; cursor: help; }
+.pc-arch.conf-low { opacity: 0.6; }
 .out-chip.attach { color: #d7b3ff; border-color: rgba(180,130,255,0.30); }
 .att-shot .att-tag { background: #7c5cff; }
 .att-shot { flex: 0 1 200px; min-width: 160px; max-width: 280px; }

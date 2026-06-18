@@ -2725,6 +2725,21 @@ function contextGauge(ctx) {
   </span>`;
 }
 
+// Intent archetype (classify.js) → a small pill on the card head. Labels mirror
+// the 12 PROMPT_GALLERY archetypes; `default` (banal/none) renders nothing.
+const ARCH_LABEL = {
+  seed: '💡 seed', pickup: '📋 pickup', screenshot: '🎨 redesign', experiment: '🧪 experiment',
+  handoff: '🔀 handoff', 'critique-tool': '🔧 critique→tool', positioning: '🧭 positioning',
+  options: '🗳 options', spec: '📐 spec', 'console-debug': '🐛 debug', feasibility: '🤔 feasibility',
+  'tool-genesis': '✨ tool-genesis',
+};
+function renderArchetype(a) {
+  if (!a || !a.archetype || a.archetype === 'default') return '';
+  const label = ARCH_LABEL[a.archetype] || a.archetype;
+  const title = `${a.confidence || ''} confidence${a.rationale ? ' — ' + a.rationale : ''}`;
+  return `<span class="pc-arch arch-${esc(a.archetype)} conf-${esc(a.confidence || '')}" title="${esc(title)}">${esc(label)}</span>`;
+}
+
 function outcomeChips(u, { compact = false } = {}) {
   const o = (u && u.outcomes) || {};
   const chips = [];
@@ -2774,7 +2789,7 @@ function renderReaderCard(u, i) {
   const when = u.ts ? `<span class="pc-when">${fmtTime(u.ts)}</span>` : '';
   const link = u.cardId ? `<a class="pc-link" href="/c/${esc(u.cardId)}" title="permalink" target="_blank" rel="noopener">🔗</a>` : '';
   return `<article class="turn pcard rcard${fresh}" id="${anchor}">
-    <div class="pc-head">${docs}${contextGauge(u.context)}${when}</div>
+    <div class="pc-head">${renderArchetype(u.archetype)}${docs}${contextGauge(u.context)}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(u.prompt)}</div>
     ${renderAttachments(u.attachments)}
@@ -3121,7 +3136,7 @@ function renderPromptCard(c) {
     : '';
   const link = cid ? `<a class="pc-link" href="/c/${esc(cid)}" title="permalink">🔗</a>` : '';
   return `<article class="pcard">
-    <div class="pc-head">${proj}${docs}${when}</div>
+    <div class="pc-head">${proj}${renderArchetype(c.archetype)}${docs}${when}</div>
     ${before}
     <div class="pc-prompt">${formatText(c.prompt)}</div>
     ${renderAttachments(c.attachments)}

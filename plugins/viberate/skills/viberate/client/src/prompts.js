@@ -1,4 +1,4 @@
-import { listProjects, getSession, getGit, getEvidence } from './storage.js';
+import { listProjects, getSession, getGit, getEvidence, getClassify } from './storage.js';
 import { getRatingSummary, getUserVote } from './ratings.js';
 import { attachEvidence } from './evidence.js';
 
@@ -196,7 +196,7 @@ function finalizeEvidenceOutcomes(units) {
   }
 }
 
-export function extractPromptUnits(session, sessionId, slug = null, { evidence = null, git = null } = {}) {
+export function extractPromptUnits(session, sessionId, slug = null, { evidence = null, git = null, classify = null } = {}) {
   const turns = buildTurns(session.messages);
   const out = [];
   for (let i = 0; i < turns.length; i++) {
@@ -235,6 +235,8 @@ export function extractPromptUnits(session, sessionId, slug = null, { evidence =
       outcomes: deriveOutcomes(t.items, prompt, context),
       // Images bound to this prompt — `{src, kind}`, kind ∈ pasted | tool.
       attachments,
+      // Intent archetype (classify.js) — { archetype, confidence, rationale } or null.
+      archetype: classify && slug ? classify[makeCardId(slug, sessionId, i)] || null : null,
       chars: prompt.length,
     });
   }
@@ -253,7 +255,7 @@ export function buildFeed(limit = 60, { publicOnly = true, userId = null } = {})
     for (const s of p.sessions || []) {
       const sess = getSession(p.slug, s.id);
       if (!sess) continue;
-      for (const u of extractPromptUnits(sess, s.id, p.slug, { evidence: getEvidence(p.slug), git: getGit(p.slug) })) {
+      for (const u of extractPromptUnits(sess, s.id, p.slug, { evidence: getEvidence(p.slug), git: getGit(p.slug), classify: getClassify(p.slug) })) {
         if (u.isAck || u.isNoise || u.chars < 20) continue;
         cards.push({
           ...u,

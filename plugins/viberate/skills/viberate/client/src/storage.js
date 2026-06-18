@@ -182,6 +182,20 @@ export function getGit(slug) {
   return readJson(path.join(projectDir(slug), 'git.json'), null);
 }
 
+// Intent classification: a map of cardId -> { archetype, confidence, rationale },
+// built incrementally at ingest (see classify.js). Keyed by cardId so a prompt is
+// classified once, ever, and survives re-pushes.
+export function saveClassify(slug, map) {
+  if (!map) return;
+  const dir = projectDir(slug);
+  ensureDir(dir);
+  fs.writeFileSync(path.join(dir, 'classify.json'), JSON.stringify(map));
+}
+
+export function getClassify(slug) {
+  return readJson(path.join(projectDir(slug), 'classify.json'), {});
+}
+
 // Agent/AI-architecture markdown snapshots captured at add-time.
 export function saveDocs(cwd, docs, slug = slugify(cwd)) {
   if (!docs || docs.length === 0) return;

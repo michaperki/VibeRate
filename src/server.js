@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listProjects, getProject, getSession, getActivity, getTicker, getGit, getDocs, getDocHistory, getMemory, getEvidence, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
+import { listProjects, getProject, getSession, getActivity, getTicker, getGit, getDocs, getDocHistory, getMemory, getEvidence, getClassify, saveClassify, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
+import { classifyUnits, hasKey } from './classify.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
 import { extractPromptUnits, buildFeed, parseCardId } from './prompts.js';
@@ -221,10 +222,36 @@ export function startServer(port = 4317) {
       // without signing in first (redeemed by the viewer via POST /api/view).
       const view = HOSTED && visibility !== 'public' ? signValue({ grant: id }, VIEW_TTL_MS) : null;
       res.status(201).json({ id, url, visibility, ...(view ? { view } : {}), ...(minted ? { token: minted } : {}) });
+      // Fire-and-forget intent classification of any newly-ingested prompts. Keyed
+      // by cardId and merged over what's already classified, so it's incremental
+      // (only new prompts hit the model) and never blocks the push response.
+      classifyProject(id);
     } catch (err) {
       res.status(500).json({ error: String(err.message || err) });
     }
   });
+
+  // Classify the project's substantive prompt-units that aren't yet tagged, and
+  // persist the merged map. Best-effort: no key → no-op; any error is swallowed so
+  // it can never affect ingest.
+  async function classifyProject(slug) {
+    if (!hasKey()) return;
+    try {
+      const project = getProject(slug);
+      if (!project) return;
+      const git = getGit(slug);
+      const evidence = getEvidence(slug);
+      const units = [];
+      for (const summary of project.sessions || []) {
+        const session = getSession(slug, summary.id);
+        if (session) units.push(...extractPromptUnits(session, summary.id, slug, { evidence, git }));
+      }
+      const map = await classifyUnits(units, getClassify(slug));
+      saveClassify(slug, map);
+    } catch {
+      /* classification is best-effort; never surface to ingest */
+    }
+  }
 
   // Read guard: resolves the project and enforces visibility. Returns null (and
   // sends 404 — we don't reveal that a private project exists) when not allowed.
@@ -320,7 +347,7 @@ export function startServer(port = 4317) {
     if (!guardRead(req, res)) return;
     const session = getSession(req.params.slug, req.params.id);
     if (!session) return res.status(404).json({ error: 'not found' });
-    res.json(extractPromptUnits(session, req.params.id, req.params.slug, { evidence: getEvidence(req.params.slug), git: getGit(req.params.slug) }));
+    res.json(extractPromptUnits(session, req.params.id, req.params.slug, { evidence: getEvidence(req.params.slug), git: getGit(req.params.slug), classify: getClassify(req.params.slug) }));
   });
 
   // Project-level prompt-unit rail: all prompts across sessions, newest first.
@@ -329,11 +356,12 @@ export function startServer(port = 4317) {
     if (!project) return;
     const evidence = getEvidence(req.params.slug);
     const git = getGit(req.params.slug);
+    const classify = getClassify(req.params.slug);
     const units = [];
     for (const summary of project.sessions || []) {
       const session = getSession(req.params.slug, summary.id);
       if (!session) continue;
-      for (const unit of extractPromptUnits(session, summary.id, req.params.slug, { evidence, git })) {
+      for (const unit of extractPromptUnits(session, summary.id, req.params.slug, { evidence, git, classify })) {
         if (unit.isNoise) continue;
         units.push({
           ...unit,
@@ -364,7 +392,7 @@ export function startServer(port = 4317) {
     if (!project || !canRead(project, req)) return res.status(404).json({ error: 'not found' });
     const session = getSession(slug, sessionId);
     if (!session) return res.status(404).json({ error: 'not found' });
-    const unit = extractPromptUnits(session, sessionId, slug, { evidence: getEvidence(slug), git: getGit(slug) }).find((u) => u.index === index);
+    const unit = extractPromptUnits(session, sessionId, slug, { evidence: getEvidence(slug), git: getGit(slug), classify: getClassify(slug) }).find((u) => u.index === index);
     if (!unit) return res.status(404).json({ error: 'not found' });
     const summary = (project.sessions || []).find((s) => s.id === sessionId) || {};
     const user = currentUser(req);
