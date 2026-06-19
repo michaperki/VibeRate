@@ -47,8 +47,10 @@ const state = {
   driveDefaultCwd: null, // health.defaultCwd — prefill for a new session's cwd
   driveBin: null, // health.bin — the claude binary the host will spawn
   drive: null, // active driven session: { id, status, claudeSessionId, cwd, es }
+  driveProject: null, // slug whose workspace the current/next driven session runs in
   _driveOpen: false, // the Drive view owns #conversation (suppress timeline re-renders)
   _driveLive: { text: null, thinking: null }, // streaming partial bubbles being filled
+  _drivePoll: null, // setTimeout handle while polling a workspace clone
 };
 
 // ---------- helpers ----------
@@ -425,7 +427,9 @@ function showHome() {
   document.querySelectorAll('.proj.active').forEach((n) => n.classList.remove('active'));
   stopLive();
   if (state.drive && state.drive.es) state.drive.es.close();
+  if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
   state.drive = null;
+  state.driveProject = null;
   state._driveOpen = false;
   state.project = null;
   state.session = null;
@@ -1153,7 +1157,7 @@ function renderSessionList() {
   if (back) back.addEventListener('click', showHome);
 
   const driveNew = el('#sessions').querySelector('[data-drive-new]');
-  if (driveNew) driveNew.addEventListener('click', openDriveStart);
+  if (driveNew) driveNew.addEventListener('click', () => openDriveForProject(state.project));
 
   const bc = el('#sessions').querySelector('[data-list-brush-clear]');
   if (bc) bc.addEventListener('click', () => {
@@ -2629,7 +2633,7 @@ function backToDashboard() {
 
 async function selectSession(slug, id, turnIndex = null) {
   // Leaving Drive (if open) for a historical convo: tear down its stream first.
-  if (state._driveOpen) { if (state.drive && state.drive.es) state.drive.es.close(); state.drive = null; state._driveOpen = false; }
+  if (state._driveOpen) { if (state.drive && state.drive.es) state.drive.es.close(); if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; } state.drive = null; state.driveProject = null; state._driveOpen = false; }
   // Keep streaming on (if it was) so the reader can *follow* a live conversation.
   state.session = id;
   state._pendingTurn = Number.isFinite(turnIndex) ? turnIndex : null;
@@ -3342,55 +3346,146 @@ function driveBanner(msg, kind) {
   b.classList.toggle('hidden', !msg);
 }
 
-// Take over #conversation with the new-session form. Stops the bundle live-poll so
-// its timeline re-render can't clobber the Drive view (the SSE gives liveness here).
-function openDriveStart() {
-  stopLive();
-  state.session = null;
-  state._driveOpen = true;
-  if (state.drive && state.drive.es) { state.drive.es.close(); }
-  state.drive = null;
-  const opts = DRIVE_PERMS.map(([v, label]) => `<option value="${v}">${esc(label)}</option>`).join('');
-  el('#conversation').innerHTML = `
+// Shared Drive shell — toolbar (title + meta) over a body. Takes over #conversation.
+function driveShell(title, metaHtml, bodyHtml) {
+  return `
     <div class="dv-wrap">
       <div class="conv-toolbar dv-toolbar">
         <div class="conv-head">
           <button class="back-dash" data-back-dash title="Back to dashboard">← dashboard</button>
-          <h2>✦ New agent session</h2>
-          <div class="meta">browser → <code>${esc(state.driveBin || 'claude')}</code> · runs on the host, streams here</div>
+          <h2>${title}</h2>
+          <div class="meta">${metaHtml}</div>
         </div>
       </div>
-      <div class="dv-body dv-start">
-        <div id="dv-banner" class="dv-banner hidden"></div>
-        <label for="dv-cwd">Working directory</label>
-        <input id="dv-cwd" value="${esc(state.driveDefaultCwd || '')}" placeholder="/path/to/project" />
-        <label for="dv-perm">Permission mode</label>
-        <select id="dv-perm">${opts}</select>
-        <div class="dv-warn" id="dv-permwarn"></div>
-        <label for="dv-prompt">First message</label>
-        <textarea id="dv-prompt" placeholder="What should the agent do?"></textarea>
-        <div class="dv-actions"><button id="dv-start">Start session</button></div>
-      </div>
+      ${bodyHtml}
     </div>`;
+}
+
+// Enter Drive for a project: take over #conversation, then gate on the project's
+// workspace (the checkout on the host). Ready → prompt form; otherwise → a one-time
+// "set up workspace" (clone) step. Stops the bundle live-poll so it can't repaint
+// over us (the SSE gives liveness once a session is live).
+function openDriveForProject(slug) {
+  stopLive();
+  if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
+  state.session = null;
+  state._driveOpen = true;
+  if (state.drive && state.drive.es) state.drive.es.close();
+  state.drive = null;
+  state.driveProject = slug || null;
+  el('#conversation').innerHTML = driveShell('✦ Drive', 'checking workspace…', '<div class="dv-body"><div class="empty">Checking workspace…</div></div>');
+  el('#conversation').scrollTop = 0;
+  wireDriveBackDash();
+  if (!slug) return renderDrivePrompt(null, null); // ad-hoc session in the host default cwd
+  refreshDriveWorkspace(slug);
+}
+
+async function refreshDriveWorkspace(slug) {
+  let st;
+  try { st = await driveApi('/workspace/' + encodeURIComponent(slug)); }
+  catch (e) {
+    if (state.driveProject === slug) el('#conversation').innerHTML = driveShell('✦ Drive', 'workspace', `<div class="dv-body"><div class="dv-banner bad">${esc(e.message)}</div></div>`), wireDriveBackDash();
+    return;
+  }
+  if (state.driveProject !== slug || !state._driveOpen) return;
+  const ws = st.workspace;
+  if (ws && ws.status === 'ready') return renderDrivePrompt(slug, st);
+  if (ws && ws.status === 'cloning') return renderDriveCloning(slug, st);
+  return renderDriveSetup(slug, st); // none | error
+}
+
+// One-time setup: clone the project's repo onto the host volume.
+function renderDriveSetup(slug, st) {
+  const ws = (st && st.workspace) || {};
+  const repo = (ws.repo || (st && st.suggestedRepo) || '');
+  const errored = ws.status === 'error';
+  el('#conversation').innerHTML = driveShell(
+    '✦ Set up workspace',
+    `${esc((st && st.name) || slug)} · clone the repo onto the host so the agent can work on it`,
+    `<div class="dv-body dv-start">
+       <div id="dv-banner" class="dv-banner ${errored ? '' : 'hidden'} ${errored ? 'bad' : ''}">${errored ? esc('Last clone failed: ' + (ws.error || 'unknown error')) : ''}</div>
+       <p class="dim-note">This happens once. The checkout lives on the volume and every Drive
+         session for this project runs there — no re-cloning per conversation.</p>
+       <label for="dv-repo">Git repository</label>
+       <input id="dv-repo" value="${esc(repo)}" placeholder="https://github.com/owner/repo.git" />
+       <label for="dv-branch">Branch <span class="dim-note">(optional — default branch if blank)</span></label>
+       <input id="dv-branch" value="${esc(ws.branch || '')}" placeholder="main" />
+       <div class="dv-warn">Private repos need a <code>GITHUB_TOKEN</code> secret on the instance.</div>
+       <div class="dv-actions"><button id="dv-clone">Clone &amp; continue</button></div>
+     </div>`,
+  );
+  el('#conversation').scrollTop = 0;
+  wireDriveBackDash();
+  el('#dv-clone').addEventListener('click', async () => {
+    const repoVal = el('#dv-repo').value.trim();
+    if (!repoVal) return driveBanner('a repo URL is required', 'bad');
+    el('#dv-clone').disabled = true;
+    try {
+      await drivePost('/workspace/' + encodeURIComponent(slug) + '/setup', { repo: repoVal, branch: el('#dv-branch').value.trim() || undefined });
+      renderDriveCloning(slug, { name: st && st.name, workspace: { status: 'cloning', repo: repoVal } });
+    } catch (e) { driveBanner(e.message, 'bad'); el('#dv-clone').disabled = false; }
+  });
+}
+
+// Cloning in progress — poll until the workspace flips to ready/error.
+function renderDriveCloning(slug, st) {
+  const ws = (st && st.workspace) || {};
+  el('#conversation').innerHTML = driveShell(
+    '✦ Cloning…',
+    `${esc((st && st.name) || slug)} · <code>${esc(ws.repo || '')}</code>`,
+    `<div class="dv-body"><div class="dv-cloning"><span class="dv-spin"></span> Cloning the repository onto the host… this can take a moment.</div></div>`,
+  );
+  wireDriveBackDash();
+  if (state._drivePoll) clearTimeout(state._drivePoll);
+  state._drivePoll = setTimeout(() => { if (state.driveProject === slug && state._driveOpen) refreshDriveWorkspace(slug); }, 1500);
+}
+
+// Ready (or ad-hoc): the first-message form. `st` null → ad-hoc session in the host
+// default cwd; otherwise the session runs in the project's bound workspace.
+function renderDrivePrompt(slug, st) {
+  const ws = (st && st.workspace) || null;
+  const opts = DRIVE_PERMS.map(([v, label]) => `<option value="${v}">${esc(label)}</option>`).join('');
+  const where = ws
+    ? `workspace <code>${esc(ws.dir || '')}</code>${ws.head ? ' · ' + esc(ws.head) : ''}`
+    : `host default <code>${esc(state.driveDefaultCwd || '')}</code>`;
+  const syncBtn = ws ? '<button id="dv-sync" class="ghost" title="git fetch + reset to the remote tip">Sync</button>' : '';
+  el('#conversation').innerHTML = driveShell(
+    '✦ New agent session',
+    `browser → <code>${esc(state.driveBin || 'claude')}</code> · ${where}`,
+    `<div class="dv-body dv-start">
+       <div id="dv-banner" class="dv-banner hidden"></div>
+       <label for="dv-perm">Permission mode</label>
+       <select id="dv-perm">${opts}</select>
+       <div class="dv-warn" id="dv-permwarn"></div>
+       <label for="dv-prompt">First message</label>
+       <textarea id="dv-prompt" placeholder="What should the agent do?"></textarea>
+       <div class="dv-actions"><button id="dv-start">Start session</button>${syncBtn}</div>
+     </div>`,
+  );
   el('#conversation').scrollTop = 0;
   wireDriveBackDash();
   el('#dv-perm').addEventListener('change', (e) => {
     el('#dv-permwarn').textContent = e.target.value === 'bypassPermissions'
-      ? '⚠ The agent can run any shell command and edit any file with no confirmation. Local machine only.' : '';
+      ? '⚠ The agent can run any shell command and edit any file with no confirmation.' : '';
   });
   const start = async () => {
     const prompt = el('#dv-prompt').value.trim();
     if (!prompt) return;
     el('#dv-start').disabled = true;
     try {
-      const s = await drivePost('/sessions', {
-        cwd: el('#dv-cwd').value.trim(), prompt, permissionMode: el('#dv-perm').value,
-      });
-      enterDrive(s);
+      const body = { prompt, permissionMode: el('#dv-perm').value };
+      if (slug) body.projectSlug = slug; else body.cwd = state.driveDefaultCwd || undefined;
+      enterDrive(await drivePost('/sessions', body));
     } catch (e) { driveBanner(e.message, 'bad'); el('#dv-start').disabled = false; }
   };
   el('#dv-start').addEventListener('click', start);
   el('#dv-prompt').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') start(); });
+  const sync = el('#dv-sync');
+  if (sync) sync.addEventListener('click', async () => {
+    sync.disabled = true; driveBanner('Syncing…', 'ok');
+    try { await drivePost('/workspace/' + encodeURIComponent(slug) + '/sync'); refreshDriveWorkspace(slug); }
+    catch (e) { driveBanner(e.message, 'bad'); sync.disabled = false; }
+  });
 }
 
 // Enter a live driven session: render the transcript shell + composer, open the stream.
@@ -3433,7 +3528,7 @@ function renderDriveView() {
   driveSetStatus(d.status || 'starting');
   el('#dv-send').addEventListener('click', driveSend);
   el('#dv-stop').addEventListener('click', () => state.drive && drivePost('/sessions/' + state.drive.id + '/stop').catch((e) => driveBanner(e.message, 'bad')));
-  el('#dv-new').addEventListener('click', openDriveStart);
+  el('#dv-new').addEventListener('click', () => openDriveForProject(state.driveProject || state.project));
   el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
 }
 
@@ -3455,7 +3550,9 @@ function wireDriveBackDash() {
 // Leave Drive, tear down the stream, hand #conversation back to the dashboard.
 function exitDrive() {
   if (state.drive && state.drive.es) state.drive.es.close();
+  if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
   state.drive = null;
+  state.driveProject = null;
   state._driveOpen = false;
   renderTimeline();
 }

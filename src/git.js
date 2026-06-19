@@ -21,6 +21,13 @@ export async function extractGit(cwd, max = 4000) {
   } catch {
     return null;
   }
+  // The origin remote (if any) — lets hosted Drive prefill a one-click clone of
+  // this repo onto the volume. Best-effort; many repos have no origin.
+  let origin = null;
+  try {
+    const { stdout } = await exec('git', ['-C', cwd, 'remote', 'get-url', 'origin']);
+    origin = stdout.trim() || null;
+  } catch { /* no origin remote */ }
   try {
     const { stdout } = await exec(
       'git',
@@ -56,7 +63,7 @@ export async function extractGit(cwd, max = 4000) {
         return c;
       })
       .filter((c) => !Number.isNaN(c.t));
-    return { cwd, capturedAt: new Date().toISOString(), commits };
+    return { cwd, capturedAt: new Date().toISOString(), commits, origin };
   } catch {
     return null;
   }

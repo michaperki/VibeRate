@@ -8,6 +8,7 @@
 
 import fs from 'node:fs';
 import { startSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk } from './agent.js';
+import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { currentUser } from './oauth.js';
 
 // Local guard: refuse any request whose TCP peer isn't loopback. We deliberately
@@ -59,11 +60,48 @@ export function mountAgent(app, opts = {}) {
     res.json(listSessions());
   });
 
-  // Start a new driven session (spawns the real claude binary for turn 1).
+  // Start a new driven session (spawns the real claude binary for turn 1). When a
+  // `projectSlug` is given, the session runs in that project's bound workspace
+  // (PLAN_DRIVE_WORKSPACES.md) — the checkout cloned onto the volume — instead of
+  // the global default cwd, so driving "in project X" actually works on X's code.
   app.post('/api/agent/sessions', guard, (req, res) => {
     try {
-      const { cwd, prompt, permissionMode } = req.body || {};
-      res.json(startSession({ cwd: cwd || defaultCwd, prompt, permissionMode }));
+      const { cwd, prompt, permissionMode, projectSlug } = req.body || {};
+      let workdir = cwd || defaultCwd;
+      if (projectSlug) {
+        const resolved = resolveProjectCwd(projectSlug);
+        if (!resolved) return res.status(409).json({ error: 'project workspace is not set up yet; clone it first' });
+        workdir = resolved;
+      }
+      res.json(startSession({ cwd: workdir, prompt, permissionMode }));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // --- Drive workspaces: bind a project to a checkout on the host -----------------
+  app.get('/api/agent/workspace/:slug', guard, (req, res) => {
+    const status = workspaceStatus(req.params.slug);
+    if (!status) return res.status(404).json({ error: 'unknown project' });
+    res.json(status);
+  });
+
+  // Clone (or re-clone) the project's repo onto the volume. Returns immediately with
+  // status `cloning`; the UI polls GET above until it flips to ready/error.
+  app.post('/api/agent/workspace/:slug/setup', guard, async (req, res) => {
+    try {
+      const { repo, branch } = req.body || {};
+      const ws = await startClone(req.params.slug, { repo, branch });
+      res.json(ws);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Refresh a ready workspace to the remote tip.
+  app.post('/api/agent/workspace/:slug/sync', guard, async (req, res) => {
+    try {
+      res.json(await syncWorkspace(req.params.slug));
     } catch (err) {
       fail(res, err);
     }

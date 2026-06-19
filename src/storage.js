@@ -32,7 +32,9 @@ function readJson(file, fallback) {
 export function saveBundle(bundle, opts = {}) {
   const { project, sessions, git, docs, memory, docHistory, evidence, stream } = bundle;
   const cwd = project.cwd;
-  const result = saveSessions(cwd, sessions, opts);
+  // Carry the repo's origin URL onto the manifest so hosted Drive can prefill a
+  // one-click clone of this project onto the volume (set once; UI can override).
+  const result = saveSessions(cwd, sessions, { ...opts, repoUrl: (git && git.origin) || null });
   if (git) saveGit(cwd, git, opts.slug);
   if (docs && docs.docs) saveDocs(cwd, docs.docs, opts.slug);
   if (docHistory) saveDocHistory(cwd, docHistory, opts.slug);
@@ -103,6 +105,7 @@ export function saveSessions(cwd, sessions, opts = {}) {
   });
   manifest.cwd = cwd;
   if (opts.name) manifest.name = opts.name;
+  if (opts.repoUrl && !manifest.repoUrl) manifest.repoUrl = opts.repoUrl; // clone prefill; set once
   if (opts.owner) manifest.owner = opts.owner; // hashed token; gist-style ownership
   if (opts.visibility && !manifest.visibility) manifest.visibility = opts.visibility; // set once at create; publish toggles it later
 
@@ -170,6 +173,28 @@ export function listProjects(owner = null) {
 
 export function getProject(slug) {
   return readJson(path.join(projectDir(slug), 'project.json'), null);
+}
+
+// --- Drive workspace binding (PLAN_DRIVE_WORKSPACES.md) -------------------------
+// A project's checkout on the Drive host lives in its manifest as
+// `workspace: { repo, branch, dir, status, head, error, updatedAt }`. The repo URL
+// to clone is prefilled from `manifest.repoUrl` (captured from the push's origin).
+
+export function getWorkspace(slug) {
+  const m = getProject(slug);
+  if (!m) return null;
+  return { workspace: m.workspace || null, suggestedRepo: m.repoUrl || null, name: m.name || slug };
+}
+
+// Merge a patch into the project's workspace binding and persist. Returns the
+// updated workspace, or null if the project doesn't exist.
+export function setWorkspace(slug, patch) {
+  const manifestPath = path.join(projectDir(slug), 'project.json');
+  const manifest = readJson(manifestPath, null);
+  if (!manifest) return null;
+  manifest.workspace = { ...(manifest.workspace || {}), ...patch, updatedAt: new Date().toISOString() };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return manifest.workspace;
 }
 
 export function getSession(slug, sessionId) {

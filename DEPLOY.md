@@ -71,6 +71,18 @@ fly ssh console -C "rm /data/claude/.credentials.json"
 fly secrets set CLAUDE_CREDENTIALS_JSON="$(cat ~/.claude/.credentials.json)"
 ```
 
+**Drive workspaces (per-project checkouts).** Driving "in project X" runs the agent
+in X's **git checkout on the volume** (`PLAN_DRIVE_WORKSPACES.md`). The first time
+you Drive a project, the UI's *Set up workspace* step clones its repo into
+`VBRT_WORKSPACES_DIR` (default `/data/workspaces/<slug>`, on the volume so it
+survives restarts) — once, not per conversation. For **private** repos, set a
+GitHub token secret; the server injects it into the clone URL and never persists or
+logs it:
+
+```bash
+fly secrets set GITHUB_TOKEN=ghp_...   # repo-scoped PAT (or a fine-grained token)
+```
+
 ## 5. Deploy
 
 ```bash
