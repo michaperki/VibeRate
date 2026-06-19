@@ -118,10 +118,13 @@ function formatAnswer(answer) {
   if (!sels.length) return 'The user dismissed the question without choosing.';
   return sels
     .map((s) => {
-      const picks = [...(s.selectedLabels || [])];
-      if (s.customText) picks.push(s.customText);
       const label = s.header || s.question || 'answer';
-      return `${label}: ${picks.length ? picks.join(', ') : '(no selection)'}`;
+      const parts = [];
+      // Keep picked options and free-text distinct so the agent doesn't read a
+      // typed note as if it were another option label.
+      if ((s.selectedLabels || []).length) parts.push(s.selectedLabels.join(', '));
+      if (s.customText) parts.push(`free-text note: "${s.customText}"`);
+      return `${label}: ${parts.length ? parts.join('; ') : '(no selection)'}`;
     })
     .join('\n');
 }
