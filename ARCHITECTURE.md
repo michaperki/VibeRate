@@ -105,6 +105,60 @@ retired (its content folded in below). Two surfaces total:
   created from a WSL-home path (`/home/.../horsey_v2`) still attaches to the project
   captured from the Windows mount (`/mnt/c/.../horsey_v2`).
 
+### Workspace memory rollup — removed (decided + shipped 2026-06-19)
+
+**Resolution:** the cross-project agent-memory section was **removed** from the workspace
+home. The workspace now shows only its faithful global **stats** (projects · sessions ·
+messages · commits); each repo's memory lives on its own project page (the 🧠 Agent
+memory card), where it's in the right context. `getWorkspaceRollup()` no longer reads any
+`memory.json` (it returns `memory: []` for client back-compat); `renderWorkspaceSection()`
+no longer renders a memory block. The investigation that led here is kept below.
+
+> **Why remove rather than filter?** The section couldn't be made *faithful* with the data
+> we capture. Saved `memory.json` is always a project's **own** project-scoped notes, so
+> there's nothing genuinely cross-cutting to aggregate; and the real global "about you"
+> facts (e.g. "works on Windows + WSL") live in the global `~/.claude/CLAUDE.md`
+> instruction store, which we don't capture. A type allow-list would just leave the
+> section near-empty and still mislabeled. A faithful "what your agent knows about *you*"
+> surface would read the global/ancestor-scoped stores — **revisit this** if/when that
+> capture exists, or repurpose the space for the future social/feed surface.
+
+**Original symptom (kept for context):** the workspace home ("Your workspace") showed a
+**Feedback** group full of project-specific notes, each tagged with a project badge. It
+felt misplaced — that guidance is about *one repo*, so it read like it belonged on the
+project dashboard, not the global "you" surface.
+
+**Why it happens — two memory paths that disagree on `scope`:**
+- The **scope-aware** path is `src/workspace.js`: a store is `workspace`-scoped only if
+  it's an ancestor dir of another store; otherwise `project`. `getProjectMemory()` even
+  *adopts* `project`-typed notes from a workspace store down onto the relevant project.
+  This is the path the architecture above describes.
+- The **workspace rollup** that actually feeds the home page is a *different* function —
+  `getWorkspaceRollup()` in `src/storage.js` (served at `/api/workspace`). It reads each
+  project's saved `memory.json` via `getMemory(slug)` and flattens **every** note,
+  grouping only by `type` (`user`/`feedback`/`project`/reference/note`) and tagging each
+  with its source projects. It **never consults `scope`** — in fact `memory.json` doesn't
+  even carry the per-note scope, which is derived from the directory tree in `workspace.js`
+  and thrown away at save time. So a project-scoped `feedback` note (e.g. VibeRate's
+  `decision-method`, `no-test-infra`) is surfaced globally.
+- Front-end: `renderWorkspaceSection()` (`public/app.js:3280`) renders those groups
+  verbatim; `order = ['user','feedback','project','reference','note']` is what names the
+  "Feedback" header. The same notes *also* render on the project page via
+  `/api/projects/:slug/memory`, so they appear in **both** places.
+
+**Net:** the rollup's design goal ("aggregate every project's memory, tagged by project")
+directly contradicts the scope principle ("project notes stay on the project"). The
+`type` grouping makes it worse — `feedback`/`project` are inherently repo-local, yet they
+get top-level global sections.
+
+**Options considered (superseded by the removal above):** (1) honor scope by carrying it
+into `memory.json` and keeping only workspace-scoped/`user` notes; (2) re-bucket by scope
+into an "about you" vs. collapsed per-project drill-in; (3) a `user`/`reference` type
+allow-list. All three still presented project memory as a global surface — and with only
+project-scoped data captured, each would have left the section near-empty or mislabeled.
+Removing it was the honest call; reintroduce a faithful version only once truly-global
+memory is captured.
+
 ## Principles
 
 **Liveness is inferred, never asserted.** We learn "what an agent is doing" from a stream

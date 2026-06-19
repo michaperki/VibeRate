@@ -529,84 +529,14 @@ async function selectProject(slug) {
     n.classList.toggle('active', n.dataset.slug === slug),
   );
   state.projectData = await api(`/api/projects/${slug}`);
+  if (slug !== state.project) return;
   state._liveStamp = state.projectData.updatedAt || null;
   state.promptUnits = [];
   state._liveSeenPrompts = null;
 
-  // Fetch per-session user-message activity once; shared by list + timeline.
-  // Degrades gracefully if the running server lacks the endpoint.
-  state.activity = { ok: false, byId: {} };
-  try {
-    const act = await api(`/api/projects/${slug}/activity`);
-    if (slug !== state.project) return;
-    state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) };
-  } catch {
-    /* old server: fall back to manifest counts */
-  }
-
-  try {
-    const units = await api(`/api/projects/${slug}/prompts`);
-    if (slug !== state.project) return;
-    state.promptUnits = units;
-  } catch {
-    state.promptUnits = [];
-  }
-
-  state.git = { ok: false, commits: [] };
-  try {
-    const g = await api(`/api/projects/${slug}/git`);
-    if (slug !== state.project) return;
-    if (g && Array.isArray(g.commits)) state.git = { ok: true, commits: g.commits };
-  } catch {
-    /* no git captured for this project */
-  }
-
-  state.docs = { ok: false, files: [] };
-  state.docTab = null;
-  state.docGraph = null;
-  try {
-    const d = await api(`/api/projects/${slug}/docs`);
-    if (slug !== state.project) return;
-    if (d && Array.isArray(d.docs) && d.docs.length) {
-      state.docs = { ok: true, files: d.docs };
-      state.docTab = d.docs[0].name;
-    }
-  } catch {
-    /* no agent docs captured for this project */
-  }
-
-  // Per-brain-doc version history (brain time-travel). Optional; absent on older
-  // captures or repos with no brain-doc changes.
-  state.docHistory = null;
-  state.timeTravel = false;
-  state.ttIndex = 0;
-  state.ttFocus = null;
-  if (state._ttPlay) { clearInterval(state._ttPlay); state._ttPlay = null; }
-  try {
-    const h = await api(`/api/projects/${slug}/dochistory`);
-    if (slug !== state.project) return;
-    if (h && h.docHistory) state.docHistory = h.docHistory;
-  } catch {
-    /* no history captured */
-  }
-
-  // Build the graph now that history is known: include archived docs (deleted in
-  // history) as nodes so they can ghost in during time travel. They're laid out
-  // with the rest but hidden outside time-travel mode.
-  if (state.docs.ok) state.docGraph = buildDocGraph([...state.docs.files, ...archivedPseudoFiles()]);
-
-  // Agent memory scoped to this project (Tier-2). Recall-only; index always loads.
-  state.projectMemory = null;
-  try {
-    const m = await api(`/api/projects/${slug}/memory`);
-    if (slug !== state.project) return;
-    state.projectMemory = m;
-  } catch {
-    /* no project memory */
-  }
-
-  // Stable color per thread (golden-angle hues stay distinct across hundreds
-  // of threads). Shared by the timeline and the session-list swatches.
+  // Stable color per thread (golden-angle hues stay distinct across hundreds of
+  // threads). Shared by the timeline and the session-list swatches; derived from
+  // the manifest, so it's ready for the early shell render below.
   state.colorById = {};
   [...state.projectData.sessions]
     .filter((s) => s.startedAt)
@@ -614,6 +544,53 @@ async function selectProject(slug) {
     .forEach((s, i) => {
       state.colorById[s.id] = colorForIndex(i);
     });
+
+  // Reset per-project view state to empty defaults up front, so the early shell
+  // render (and any failed fetch leg below) is consistent.
+  state.activity = { ok: false, byId: {} };
+  state.git = { ok: false, commits: [] };
+  state.docs = { ok: false, files: [] };
+  state.docTab = null;
+  state.docGraph = null;
+  state.docHistory = null;
+  state.timeTravel = false;
+  state.ttIndex = 0;
+  state.ttFocus = null;
+  state.projectMemory = null;
+  if (state._ttPlay) { clearInterval(state._ttPlay); state._ttPlay = null; }
+
+  // Paint the shell (sidebar session list) immediately from the manifest, so the
+  // project feels open right away instead of after the whole fetch batch. The list
+  // degrades gracefully without activity (falls back to manifest message counts).
+  renderSessionList();
+
+  // Fetch the rest in parallel — was a 6-request serial waterfall, so the open
+  // cost the *sum* of six round-trips; now it's the *max*. Commit whatever returns;
+  // a failed/absent leg keeps its empty default (mirrors refreshLive's batch).
+  const [act, units, gg, d, h, m] = await Promise.all([
+    api(`/api/projects/${slug}/activity`).catch(() => null),
+    api(`/api/projects/${slug}/prompts`).catch(() => null),
+    api(`/api/projects/${slug}/git`).catch(() => null),
+    api(`/api/projects/${slug}/docs`).catch(() => null),
+    api(`/api/projects/${slug}/dochistory`).catch(() => null),
+    api(`/api/projects/${slug}/memory`).catch(() => null),
+  ]);
+  if (slug !== state.project) return; // navigated away mid-flight
+
+  if (act) state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) };
+  if (units) state.promptUnits = units;
+  if (gg && Array.isArray(gg.commits)) state.git = { ok: true, commits: gg.commits };
+  if (d && Array.isArray(d.docs) && d.docs.length) {
+    state.docs = { ok: true, files: d.docs };
+    state.docTab = d.docs[0].name;
+  }
+  if (h && h.docHistory) state.docHistory = h.docHistory;
+  if (m) state.projectMemory = m;
+
+  // Build the graph now that docs + history are known: include archived docs
+  // (deleted in history) as nodes so they can ghost in during time travel. They're
+  // laid out with the rest but hidden outside time-travel mode.
+  if (state.docs.ok) state.docGraph = buildDocGraph([...state.docs.files, ...archivedPseudoFiles()]);
 
   state._brainEntrance = true; // play the "just changed" entrance once, on open
   // Auto-follow a project that's actively streaming (a `vbrt watch` is pushing
@@ -872,6 +849,7 @@ async function refreshLive() {
   if (sameSet) {
     streamUpdateBrain(newGraph, new Set(flash.keys()));
     refreshActivityCard();
+    refreshBrainHistoryCard(); // keep Brain history in sync without rebuilding the brain
     updateTicker();
     return;
   }
@@ -946,6 +924,37 @@ function refreshActivityCard() {
       </section>`;
   state._liveFreshConvos = state._liveFreshCommits = null; // consumed
   wireActivity();
+}
+
+// Surgically refresh the 🧠 Brain history card on a live tick. The smooth path
+// updates the brain SVG in place and must NOT call renderTimeline (that rebuilds
+// the brain and kills the in-place animation) — but Brain history only renders
+// inside renderTimeline, so without this it goes stale until you navigate away and
+// back (the reported bug). Handles all three transitions: replace, remove (history
+// emptied), and insert (the first brain-doc commit of a live session, when the card
+// didn't exist yet). Re-wires the doc chips so they still open the reader.
+function refreshBrainHistoryCard() {
+  const conv = el('#conversation');
+  if (!conv) return;
+  const existing = conv.querySelector('.brain-history');
+  const html = renderBrainHistory().trim();
+  if (!html) { if (existing) existing.remove(); return; }
+  const tmp = document.createElement('template');
+  tmp.innerHTML = html;
+  const node = tmp.content.firstElementChild;
+  if (!node) return;
+  if (existing) existing.replaceWith(node);
+  else {
+    // No card yet — drop it in right after the brain centerpiece (its place in
+    // renderTimeline), falling back to after the activity card.
+    const anchor = conv.querySelector('.centerpiece') || conv.querySelector('.dash-card.activity');
+    if (anchor) anchor.insertAdjacentElement('afterend', node);
+    else return;
+  }
+  node.querySelectorAll('[data-bh-doc]').forEach((n) => (n.onclick = () => {
+    const dn = currentDocNode(n.dataset.bhDoc);
+    if (dn) openDocLightbox(dn);
+  }));
 }
 
 // Map of node→change to flash on the next render (one-shot, from a live update).
@@ -3279,47 +3288,20 @@ async function bootDashboard() {
 // the owner's projects, each note tagged with the projects it came from.
 function renderWorkspaceSection(ws) {
   const s = (ws && ws.stats) || {};
-  const notes = (ws && ws.memory) || [];
   const lines = s.added || s.removed ? ` · <b class="diff-add">+${s.added}</b>/<b class="diff-del">−${s.removed}</b> lines` : '';
   const statLine = `<div class="ov-line1"><b>${s.projects || 0}</b> projects · <b>${s.sessions || 0}</b> sessions · <b>${s.messages || 0}</b> messages${s.commits ? ` · <b>${s.commits}</b> commits` : ''}${lines}</div>`;
 
-  const order = ['user', 'feedback', 'project', 'reference', 'note'];
-  const byType = new Map();
-  for (const n of notes) {
-    const t = n.type || 'note';
-    if (!byType.has(t)) byType.set(t, []);
-    byType.get(t).push(n);
-  }
-  const groups = order.filter((t) => byType.has(t)).concat([...byType.keys()].filter((t) => !order.includes(t)));
-  const memHtml = notes.length
-    ? groups
-        .map(
-          (t) => `<div class="atom-group">
-            <div class="atom-section">${esc(t)}</div>
-            ${byType
-              .get(t)
-              .map(
-                (n) => `<div class="atom-row">
-                  <span class="atom-text">${esc(n.title)}${n.description ? ` <span class="recall-desc">— ${esc(n.description)}</span>` : ''}</span>
-                  <span class="atom-badges">${(n.projects || [])
-                    .map((p) => `<a class="proj-badge" href="/p/${esc(p.id)}" title="${esc(p.name)}">${esc(p.name)}</a>`)
-                    .join('')}</span>
-                </div>`,
-              )
-              .join('')}
-          </div>`,
-        )
-        .join('')
-    : '<div class="empty">No memory captured yet — push a repo whose agent memory is included (the default) to see it aggregated here.</div>';
-
+  // Note: we deliberately do NOT aggregate per-project agent memory here. Saved
+  // memory is project-scoped — repo B's notes aren't relevant in repo A's workspace,
+  // and the genuinely-global "about you" facts live in a different store (global
+  // ~/.claude/CLAUDE.md) we don't capture yet. A faithful "what your agent knows
+  // about you" section would read THAT; until then each repo's memory lives on its
+  // own project page (the 🧠 Agent memory card), where it's in the right context.
+  // See ARCHITECTURE.md → "Memory model" for the decision (2026-06-19).
   return `
     <section class="home-section">
-      <h2>🧠 Across your projects <span class="dim-note">memory &amp; activity from everything you've pushed</span></h2>
+      <h2>📊 Across your projects <span class="dim-note">activity from everything you've pushed</span></h2>
       <div class="ov-stats">${statLine}</div>
-      <div class="ctx-bucket">
-        <div class="ctx-bucket-head"><span class="dim-note">agent memory — ${notes.length} note${notes.length === 1 ? '' : 's'} across your projects</span></div>
-        ${memHtml}
-      </div>
     </section>`;
 }
 

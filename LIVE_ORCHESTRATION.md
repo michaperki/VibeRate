@@ -232,3 +232,86 @@ Fix: spread more in the sim (stronger repulsion / longer edge rest length scaled
 canvas) and relax the fit so each axis fills its extent with a higher anisotropy
 allowance, while still clamping into frame. Result: the web encompasses the available
 width instead of clustering center.
+
+## 9. Opening a project is slow — the 7-request waterfall ✅ (fixed 2026-06-19)
+
+**Fixed:** `selectProject()` now (a) renders the sidebar shell from the manifest
+immediately, then (b) fetches activity/prompts/git/docs/dochistory/memory in one
+`Promise.all` (latency dropped from *sum → max* of the calls), committing whatever
+returns. Implemented options 1 + 2 below.
+
+---
+
+**Symptom:** clicking a project from the workspace takes several seconds before anything
+useful paints.
+
+**Cause:** `selectProject()` (`public/app.js:522`) fetches the project's data as a
+**serial waterfall** — each `await api(...)` blocks the next:
+
+1. `/api/projects/:slug` (manifest) → 2. `/activity` → 3. `/prompts` → 4. `/git` →
+5. `/docs` → 6. `/dochistory` → 7. `/memory`
+
+Worse, the first render (`renderSessionList()` / `renderTimeline()`) doesn't run until
+**line 623–624, after all seven return**. So the wall time is the *sum* of seven hosted
+round-trips, and the screen shows nothing until the slowest tail (`dochistory` can be
+large) lands. On fly.dev with cold reads that's the "several seconds."
+
+Note the live path already solved this: `refreshLive()` (`app.js:829`) fires the same
+calls in **one `Promise.all`** and commits whatever legs return. The initial open never
+got the same treatment.
+
+**Fix options:**
+1. **Parallelize** — wrap calls 2–7 in `Promise.all` (mirror `refreshLive`), keeping the
+   `if (slug !== state.project) return` stale-nav guard once after the batch. Cuts latency
+   from *sum → max* of the calls. Smallest, safest win.
+2. **Progressive render** — paint the session list + timeline as soon as the manifest
+   (call 1) returns, then fill git/docs/brain as each resolves. Best perceived latency;
+   the brain graph build (`app.js:596`) still needs `docs`+`dochistory`, so it stays
+   gated, but the shell appears instantly.
+3. **Server roll-up** — a single `/api/projects/:slug/full` that returns the bundle in one
+   response (fewer round-trips, one cold start). Bigger change; do 1+2 first.
+
+Recommended: **1 + 2 together** — parallelize the fetches *and* render the shell on the
+first response.
+
+## 10. Brain dot lights up but Brain history lags — stale-render on the smooth live path ✅ (fixed 2026-06-19)
+
+**Fixed:** added `refreshBrainHistoryCard()` and call it from `refreshLive()`'s smooth
+path (alongside `refreshActivityCard()`/`updateTicker()`). It surgically replaces/inserts/
+removes just the `.brain-history` card from `renderBrainHistory()` — no full
+`renderTimeline()`, so the in-place brain animation is preserved — and re-wires the
+doc-chip clicks. Handles the first-brain-commit-of-a-session case (insert after the
+centerpiece) too. The open-doc-reader staleness noted below is left as a follow-up.
+
+---
+
+**Symptom:** a brain node flashes (dot lights up) on a live tick, but the **🧠 Brain
+history** list doesn't show the matching entry until you navigate away and back.
+
+**Two coupled causes:**
+
+1. **Save vs. commit timing (inherent).** The dot reacts to a *doc content change*
+   (reachable docs update on **save**, see §1), but **Brain history** (`renderBrainHistory`,
+   `app.js:1268`) is built from **git commits** that touched brain docs. A save precedes its
+   commit, so the dot legitimately leads the history row. Not a bug by itself — but it sets
+   the expectation that the two surfaces move together, which (2) then breaks.
+
+2. **The smooth live path never re-renders Brain history (the real bug).** `renderBrainHistory()`
+   is only emitted *inside* `renderTimeline()` (`app.js:1191`). But on the common live
+   update — node set unchanged, only content/commits changed — `refreshLive()` takes the
+   **smooth path** (`app.js:872–877`): it calls `streamUpdateBrain()` + `refreshActivityCard()`
+   + `updateTicker()` and **returns without calling `renderTimeline()`**. So even once the new
+   commit *has* landed in `state.git` (updated at `app.js:842`), the Brain history card on
+   screen is stale. Only the add/remove-node branch (`app.js:893`) re-renders the timeline —
+   which is why navigating away and back (a full `renderTimeline`) "fixes" it.
+
+**Fix:** in the smooth path, surgically refresh the Brain history card the same way
+`refreshActivityCard()` / `updateTicker()` patch their cards in place — replace just the
+`.brain-history` node from `renderBrainHistory()` after `state.git` is updated. (Re-rendering
+the whole timeline here would defeat the in-place brain animation, so keep it targeted.)
+Optionally also surface the not-yet-committed save in the history as a pending row, so the
+dot and the history truly move as one (ties into §5's "one concerted update").
+
+**Also check:** an *open doc reader* (`state.docOpen`) isn't refreshed on the smooth path
+either — if a live tick changes the doc you're reading, its content can be stale until you
+reopen it. Same class of bug; worth a follow-up.

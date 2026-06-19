@@ -269,9 +269,15 @@ export function getEvidence(slug) {
 }
 
 // Overarching ("workspace") rollup across one owner's projects, built only from
-// already-pushed data — no machine-local reads. Aggregates each project's memory
-// notes into a single list tagged with which projects they came from, plus
-// headline activity stats. With `owner` null (local), spans every project.
+// already-pushed data — no machine-local reads. Returns headline activity stats.
+// With `owner` null (local), spans every project.
+//
+// We intentionally do NOT aggregate agent memory here. Saved memory is project-
+// scoped (repo B's notes aren't relevant in repo A's workspace), and the truly
+// global "about you" facts live in a store we don't capture yet — so a cross-
+// project memory blob was more confusing than faithful. Memory lives on each
+// project's page instead. See ARCHITECTURE.md → "Memory model" (2026-06-19).
+// `memory: []` is kept in the response for client back-compat.
 export function getWorkspaceRollup(owner = null) {
   const projects = listProjects(owner);
   let sessions = 0;
@@ -279,7 +285,6 @@ export function getWorkspaceRollup(owner = null) {
   let commits = 0;
   let added = 0;
   let removed = 0;
-  const memMap = new Map(); // type::title -> note + the projects it appears in
 
   for (const p of projects) {
     sessions += (p.sessions || []).length;
@@ -290,23 +295,9 @@ export function getWorkspaceRollup(owner = null) {
     }
     const g = getGit(p.slug);
     if (g && Array.isArray(g.commits)) commits += g.commits.length;
-
-    const mem = getMemory(p.slug);
-    if (mem && mem.ok) {
-      for (const n of mem.notes || []) {
-        const key = `${n.type}::${String(n.title || '').toLowerCase().trim()}`;
-        if (!memMap.has(key)) {
-          memMap.set(key, { title: n.title, description: n.description, type: n.type, body: n.body, mtime: n.mtime || 0, projects: [] });
-        }
-        const e = memMap.get(key);
-        if (!e.projects.some((x) => x.id === p.slug)) e.projects.push({ id: p.slug, name: p.name || p.slug });
-        if ((n.mtime || 0) > e.mtime) e.mtime = n.mtime;
-      }
-    }
   }
 
-  const memory = [...memMap.values()].sort((a, b) => b.mtime - a.mtime);
-  return { stats: { projects: projects.length, sessions, messages, commits, added, removed }, memory };
+  return { stats: { projects: projects.length, sessions, messages, commits, added, removed }, memory: [] };
 }
 
 // Per-session activity for the timeline: timestamps of the messages the USER
