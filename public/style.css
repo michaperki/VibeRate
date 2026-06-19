@@ -697,6 +697,19 @@ pre.code {
 .gnode.ghost .glabel { fill: var(--dim, #6b7280); text-decoration: line-through; }
 .gnode.ghost:hover { opacity: 0.75; }
 .tt-toggle.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+/* importance: a calm brightness layer (inbound references). The load-bearing spine
+   stays vivid; peripheral docs gently recede. Never resizes a node, never alarms.
+   Hover/selected restores full clarity; hidden/ghost/orphan are left to their own rules. */
+.gnode[data-imp="mid"]:not(.tt-hidden):not(.ghost):not(.orphan):not(:hover):not(.on) circle:not(.gctrack):not(.gcprog):not(.live-glow):not(.gorphan-ring) { opacity: 0.84; }
+.gnode[data-imp="lo"]:not(.tt-hidden):not(.ghost):not(.orphan):not(:hover):not(.on) circle:not(.gctrack):not(.gcprog):not(.live-glow):not(.gorphan-ring) { opacity: 0.62; }
+.gnode[data-imp="lo"]:not(.tt-hidden):not(.ghost):not(.orphan):not(:hover):not(.on) .glabel { opacity: 0.72; }
+/* orphan: the one health signal that pulses — an amber breathing ring + dashed outline.
+   "Needs a home" (link it or retire it), not "broken" — hence amber, not red. */
+.gorphan-ring { stroke: #f5b545; stroke-width: 2.5; fill: none; pointer-events: none; transform-box: fill-box; transform-origin: center; animation: orphanpulse 2.4s ease-in-out infinite; }
+@keyframes orphanpulse { 0%, 100% { opacity: 0.2; transform: scale(1); } 50% { opacity: 0.58; transform: scale(1.3); } }
+.gnode.orphan circle:not(.gctrack):not(.gcprog):not(.live-glow):not(.gorphan-ring) { opacity: 1; stroke: #f5b545; stroke-dasharray: 3 3; }
+.gnode.orphan .glabel { fill: #f5b545; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .gorphan-ring { animation: none; opacity: 0.5; } }
 
 /* time-travel control strip + diff panel under the graph */
 .tt-controls { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 11px; }
@@ -815,6 +828,13 @@ pre.code {
 .brain-peek .bp-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; color: var(--text); }
 .brain-peek .bp-meta { font-size: 10px; color: var(--dim, #6b7280); margin-left: auto; white-space: nowrap; }
 .brain-peek .bp-first { font-size: 11px; color: var(--muted); font-style: italic; margin-bottom: 6px; }
+.brain-peek .bp-health { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); margin-bottom: 6px; }
+.brain-peek .bp-health .bp-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); }
+.brain-peek .bp-health .bp-dot.t-hi { background: var(--accent); }
+.brain-peek .bp-health b { color: var(--text); font-weight: 600; }
+.brain-peek .bp-health.orphan { color: #f5b545; }
+.brain-peek .bp-health.orphan .bp-dot { background: #f5b545; }
+.brain-peek .bp-health.orphan b { color: #f7cd7e; }
 .brain-peek .bp-comp { display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: var(--muted); margin-bottom: 6px; }
 .brain-peek .bp-comp-bar { flex: 1; height: 5px; border-radius: 3px; background: #2a2f3c; overflow: hidden; }
 .brain-peek .bp-comp-bar span { display: block; height: 100%; }

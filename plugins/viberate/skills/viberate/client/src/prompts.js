@@ -134,6 +134,12 @@ function summarizeAfter(items, cap = 6) {
 function deriveOutcomes(items, prompt, ctx) {
   const files = new Set();
   const brainDocs = new Set();
+  // Per-doc read/edit identity (basenames) — the brain web joins these to nodes for
+  // the "orphan" signal (a node nothing links AND nothing reads). Kept separate from
+  // `brainDocsChanged` (a count) and only high-confidence direct file tools; shell
+  // `cat`/`rg` land in `cmd` and are deliberately not counted as reads.
+  const docsRead = new Set();
+  const docsEdited = new Set();
   let edits = 0;
   let commands = 0;
   let tools = 0;
@@ -146,7 +152,12 @@ function deriveOutcomes(items, prompt, ctx) {
       const f = toolFile(m);
       if (f) {
         files.add(f);
-        if (/\.md$/i.test(f)) brainDocs.add(f);
+        if (/\.md$/i.test(f)) {
+          const base = f.split(/[/\\]/).pop();
+          brainDocs.add(base);
+          if (cat === 'edit') docsEdited.add(base);
+          else if (cat === 'read') docsRead.add(base);
+        }
       }
     }
   }
@@ -161,6 +172,8 @@ function deriveOutcomes(items, prompt, ctx) {
     contextPct: ctx ? ctx.pct : null,
     tools,
     edits,
+    docsRead: [...docsRead],
+    docsEdited: [...docsEdited],
   };
 }
 

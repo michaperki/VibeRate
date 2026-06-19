@@ -1355,6 +1355,7 @@ function buildDocGraph(files) {
     mtime: f.mtime || 0,
     rank: i, // server priority order (entry docs first)
     archived: !!f.archived, // git-deleted ghost; self-retirement (auto-100% / markers) added below
+    inbound: 0, // # of other docs that link to this one (directed) — drives importance/orphan
     bornT: f.bornT,
     deathT: f.deathT,
   }));
@@ -1365,6 +1366,7 @@ function buildDocGraph(files) {
       if (i === j) continue;
       const re = new RegExp(nodes[j].base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       if (re.test(nodes[i].content)) {
+        nodes[j].inbound++; // doc i references doc j → an inbound link for j
         const key = i < j ? `${i}-${j}` : `${j}-${i}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -1372,12 +1374,26 @@ function buildDocGraph(files) {
         }
       }
     }
+  // Docs the agent actually read or edited across captured turns (basenames, lowercased)
+  // — the "reads" half of the orphan signal, joining prompt-unit outcomes to nodes.
+  const touched = new Set();
+  for (const u of state.promptUnits || []) {
+    const o = u.outcomes || {};
+    for (const d of o.docsRead || []) touched.add(String(d).toLowerCase());
+    for (const d of o.docsEdited || []) touched.add(String(d).toLowerCase());
+  }
+  // Only fade peripheral docs once a genuine hub exists to contrast against — a flat
+  // brain (no doc with ≥5 inbound) stays full-brightness rather than uniformly dim.
+  const hasSpine = Math.max(0, ...nodes.map((n) => n.inbound)) >= 5;
   const maxB = Math.max(...nodes.map((n) => n.bytes), 1);
   nodes.forEach((n) => {
     n.r = 9 + Math.round(Math.sqrt(n.bytes / maxB) * 14);
     n.color = docColor(n.base);
     n.role = docRole(n.base);
     n.completion = completionOf(n.content); // has checkboxes? → completion ring
+    // Importance = inbound references, as a calm brightness tier only (never resizes the
+    // node). The load-bearing spine stays vivid; peripheral docs recede. No alarm.
+    n.impTier = !hasSpine ? 'hi' : n.inbound >= 5 ? 'hi' : n.inbound >= 2 ? 'mid' : 'lo';
     // Self-retirement: a live on-disk doc that the default (auto-retire at 100%) or
     // a marker sends to the graveyard. (git-deleted docs are already archived above.)
     if (!n.archived && graveyardOf(n.content, n.completion)) {
@@ -1389,6 +1405,11 @@ function buildDocGraph(files) {
       n.bornT = Number.isFinite(born) ? born : n.mtime;
       n.deathT = n.mtime || Date.now();
     }
+    // Orphan = nothing links it AND nothing read/edited it in captured history — the one
+    // health signal that pulses, because the action is clear: link it or retire it.
+    // Exempt: archived nodes and constitution docs (always-loaded, never "retire me").
+    n.orphan = !n.archived && n.role !== 'constitution'
+      && n.inbound === 0 && !touched.has(String(n.name).toLowerCase());
   });
   const W = 760;
   const H = Math.round(Math.max(220, Math.min(760, 80 + nodes.length * 15)));
@@ -1663,11 +1684,17 @@ function renderCenterpiece() {
       const liveGlow = liveChanged.has(n.name)
         ? `<circle class="live-glow" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 9).toFixed(1)}" fill="${n.color}"/>`
         : '';
+      // Orphan = the one health signal that pulses (amber breathing ring) — only on a
+      // live, visible node. Importance tier (data-imp) drives the calm brightness layer.
+      const orphan = !hidden && !ghost && n.orphan;
+      const oring = orphan
+        ? `<circle class="gorphan-ring" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(n.r + 4).toFixed(1)}" fill="none"/>`
+        : '';
       // Hidden nodes stay in the DOM (now opacity-faded, not display:none) so the
       // node↔group indices stay aligned and birth/death can animate.
       const streamIn = state._streamIn && state._streamIn.has(n.name) ? ' stream-in' : '';
-      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}${streamIn}" data-doc="${esc(n.name)}">
-        ${liveGlow}
+      return `<g class="gnode${on}${chg ? ' just-' + ringCls : ''}${hidden ? ' tt-hidden' : ''}${ghost ? ' ghost' : ''}${orphan ? ' orphan' : ''}${streamIn}" data-doc="${esc(n.name)}" data-imp="${n.impTier || 'lo'}">
+        ${liveGlow}${oring}
         <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="${n.color}"/>
         ${lring}${cring}
         <text x="${n.x.toFixed(1)}" y="${(n.y + n.r + 12).toFixed(1)}" text-anchor="middle" class="glabel">${esc(n.base)}</text>
@@ -1789,7 +1816,15 @@ function brainPeekHtml(n) {
   const comp = n.completion
     ? `<div class="bp-comp"><span class="bp-comp-bar"><span style="width:${n.completion.pct}%;background:${pctColor(n.completion.pct)}"></span></span>${n.completion.pct}% done · ${n.completion.done}/${n.completion.total}</div>`
     : '';
+  // Quiet health line: orphan calls for action; otherwise a calm importance read. State,
+  // not score — and connectivity stays informational, never an alarm.
+  const links = n.inbound || 0;
+  const linkTxt = `${links} inbound link${links === 1 ? '' : 's'}`;
+  const health = n.orphan
+    ? `<div class="bp-health orphan"><span class="bp-dot"></span>orphaned — nothing links or reads it · <b>link it or retire it</b></div>`
+    : `<div class="bp-health"><span class="bp-dot t-${n.impTier || 'lo'}"></span>${n.impTier === 'hi' ? 'spine' : n.impTier === 'mid' ? 'connected' : 'peripheral'} · ${linkTxt}</div>`;
   return `<div class="bp-head"><span class="bp-name">${esc(n.base)}</span><span class="bp-meta">${esc(kb)} · ${all.length} section${all.length === 1 ? '' : 's'}</span></div>
+    ${health}
     ${comp}
     ${first ? `<div class="bp-first">${esc(first)}</div>` : ''}
     <div class="bp-sections">${list}</div>`;
@@ -1813,7 +1848,7 @@ function wireBrainPeek(root) {
       peek.hidden = false;
       const wb = wrap.getBoundingClientRect();
       // the body circle (not the glow/ring overlays) for anchoring
-      const body = g.querySelector('circle:not(.live-glow):not(.gring):not(.gctrack):not(.gcprog)') || g.querySelector('circle');
+      const body = g.querySelector('circle:not(.live-glow):not(.gring):not(.gctrack):not(.gcprog):not(.gorphan-ring)') || g.querySelector('circle');
       const cb = body.getBoundingClientRect();
       const pw = peek.offsetWidth;
       const ph = peek.offsetHeight;
