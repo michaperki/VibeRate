@@ -315,14 +315,18 @@ captured before/after). New observations, categorized:
   was "token-wasteful," but a `before` shot costs **0 model tokens**, just ~a Playwright
   launch; keep always-capture for correctness unless the wall-time bites.
 - [x] **Auto-graveyard at 100%** — *resolved 2026-06-19, option (c): visual retire, no
-  deletion.* VibeRate is read-only, so it never deletes repo files. A finished plan
-  (`PLAN_*.md` at 100% checkboxes) is **auto-retired** by the viewer — hidden from the live
-  web, ghosting in time-travel — with **zero agent overhead** (no marker, no `git rm`). The
-  earlier hybrid (agent adds `status: archived` on ship) was rejected: it spends user
-  context/tokens on every completed plan. Inverted to opt-*out*: `status: active` keeps a
-  finished plan live; `status: archived` retires a non-plan doc explicitly. Only `PLAN_*`
-  auto-retires, so living docs and incidentally-100% checklists (e.g. `ARTIFACTS.md`) are
-  unaffected. (`graveyardOf`/`statusMarker`/`isPlanDoc`, `app.js`; taught in `SKILL.md`.)
+  deletion; revised same day to drop the `PLAN_` gate.* VibeRate is read-only, so it never
+  deletes repo files. **Any** doc whose checklist hits 100% is **auto-retired** by the viewer
+  — hidden from the live web, ghosting in time-travel — with **zero agent overhead** (no
+  marker, no `git rm`). The earlier hybrid (agent adds `status: archived` on ship) was
+  rejected: it spends user context/tokens on every completed doc. Inverted to opt-*out*:
+  `status: active` keeps a finished checklist live; `status: archived` retires a doc that has
+  no 100% checklist. The completion ring and the graveyard are now one rule (completion *is*
+  the signal) rather than two — the old `PLAN_*`-filename gate was dropped because it
+  surprised users (e.g. `ARTIFACTS.md` carried a ring but wouldn't retire). A doc you want to
+  keep at 100% just adds `status: active`. Crossing 100% mid-live-session animates straight to
+  the graveyard (no full re-render needed). (`graveyardOf`/`statusMarker`, `app.js`; the
+  live-completion path in `refreshLive`; taught in `SKILL.md`.)
 
 ---
 

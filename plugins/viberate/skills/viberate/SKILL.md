@@ -149,19 +149,19 @@ Playwright is missing or a browser is unavailable:
 
 ## Making your work legible in VibeRate (brain conventions)
 
-VibeRate renders this repo's **brain** — the agent/architecture docs — as a live graph, and its `.md` plan docs as completion rings on a timeline. A few zero-cost conventions make your work show up well, in any project:
+VibeRate renders this repo's **brain** — the agent/architecture docs — as a live graph, and any `.md` with a checklist as completion rings on a timeline. A few zero-cost conventions make your work show up well, in any project:
 
 - **The graph is built by reachability.** A markdown doc becomes a brain node only if it has a known name (`SOUL`/`AGENTS`/`CLAUDE`/`SEED`/`CONTEXT`/`MEMORY`/`ROADMAP`/`DECISIONS`/`README`/…) **or** is **linked by name** from a doc already in the brain. So when you create a new brain doc, **reference it by its filename** from a seed (e.g. add `PLAN_x.md` to `ROADMAP.md`). An unlinked "orphan" doc won't appear in the live graph — it only surfaces once committed, via git history.
-- **Plan docs get a completion ring.** Name them `PLAN_<name>.md`, give them a `- [ ]` checklist, and **link them from `ROADMAP.md` at creation**. VibeRate draws a ring from the checked ratio. **Check the boxes as you go** and the ring fills live; write-then-complete-then-commit and it just snaps to done at the commit.
-- **Finished plans retire to the graveyard automatically — do nothing.** When a `PLAN_<name>.md`'s checklist hits **100%**, VibeRate moves it to the brain graveyard on its own: it drops out of the live web while the file stays on disk (and ghosts back in time-travel). No marker, no `git rm`, no extra step — completion *is* the signal. Only the exceptions need a one-line `status:` frontmatter:
-  - Keep a finished plan visible anyway → `status: active` (also `live`/`pinned`/`wip`).
-  - Retire a **non-plan** doc (only `PLAN_*` auto-retires) → `status: archived`.
+- **Any doc with a checklist gets a completion ring.** Give a doc a `- [ ]` checklist and **link it from a seed (e.g. `ROADMAP.md`) at creation**. VibeRate draws a ring from the checked ratio — no special filename needed (a `PLAN_<name>.md` is just a readable convention). **Check the boxes as you go** and the ring fills live; write-then-complete-then-commit and it just snaps to done at the commit.
+- **Finished checklists retire to the graveyard automatically — do nothing.** When a doc's checklist hits **100%**, VibeRate moves it to the brain graveyard on its own: it drops out of the live web while the file stays on disk (and ghosts back in time-travel). No marker, no `git rm`, no extra step — completion *is* the signal, regardless of filename. Only the exceptions need a one-line `status:` frontmatter:
+  - Keep a finished checklist visible anyway → `status: active` (also `live`/`pinned`/`wip`).
+  - Retire a doc that has no 100% checklist → `status: archived`.
   ```
   ---
   status: active
   ---
   ```
-  Never `git rm` a plan to "archive" it — that loses the doc; retirement is visual-only.
+  Never `git rm` a doc to "archive" it — that loses the doc; retirement is visual-only.
 - **Commits are the brain's checkpoints.** The live graph updates on save for reachable docs and on commit for git-derived history — so commit at meaningful boundaries (per plan / per phase). That's the timeline the viewer shows.
 - **Keep a dev journal.** A dated `DEVLOG.md` plus a `DECISIONS.md` (one line + the *why* per decision) give the brain a narrative spine and make choices traceable — the heart of "a living history of how you and your agents changed this project."
 

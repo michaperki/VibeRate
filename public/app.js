@@ -800,7 +800,11 @@ function updateLiveReadout() {
 // changed nodes so the eye catches what just happened.
 async function refreshLive() {
   const slug = state.project;
-  const before = new Map((state.docGraph?.nodes || []).map((n) => [n.name, (n.content || '').length + ':' + (n.content || '').slice(0, 64)]));
+  // Diff against the *visible* brain (archived/graveyarded nodes excluded) so a doc
+  // that crosses 100% this snapshot — and thus newly archives — reads as "gone" and
+  // animates out to the graveyard, instead of silently staying put (just filled to
+  // 100%) until the next full render.
+  const before = new Map((state.docGraph?.nodes || []).filter((n) => !n.archived).map((n) => [n.name, (n.content || '').length + ':' + (n.content || '').slice(0, 64)]));
   // Fetch the live-relevant data in parallel (was 6 serial round-trips) and only
   // commit the results that came back — a failed leg keeps the prior value.
   const [proj, act, units, gg, h, d, tk] = await Promise.all([
@@ -822,9 +826,13 @@ async function refreshLive() {
   if (tk) state.ticker = tk;
 
   const newGraph = state.docs.ok ? buildDocGraphPinned([...state.docs.files, ...archivedPseudoFiles()], state.docGraph) : state.docGraph;
+  // Visible nodes only — mirrors `before`. A node that auto-retired (hit 100%) is
+  // still in newGraph.nodes but archived, so it drops out here and the diff below
+  // treats it as removed → it streams out to the graveyard.
+  const visNodes = (newGraph?.nodes || []).filter((n) => !n.archived);
   // changed = nodes new or with different content since the last snapshot
   const flash = new Map();
-  for (const n of newGraph?.nodes || []) {
+  for (const n of visNodes) {
     const sig = (n.content || '').length + ':' + (n.content || '').slice(0, 64);
     if (!before.has(n.name)) flash.set(n.name, 'added');
     else if (before.get(n.name) !== sig) flash.set(n.name, 'modified');
@@ -845,7 +853,7 @@ async function refreshLive() {
   // → animate the brain in place (rings fill, changed nodes glow) + refresh the
   // activity card, no rebuild.
   const svg = el('#conversation .brain');
-  const sameSet = svg && before.size === newGraph.nodes.length && newGraph.nodes.every((n) => before.has(n.name));
+  const sameSet = svg && before.size === visNodes.length && visNodes.every((n) => before.has(n.name));
   if (sameSet) {
     streamUpdateBrain(newGraph, new Set(flash.keys()));
     refreshActivityCard();
@@ -856,9 +864,9 @@ async function refreshLive() {
   // Add/remove path: fade out gone nodes, then re-render with the new ones fading
   // in (positions are pinned, so existing nodes don't jump).
   state._liveFlash = flash.size ? flash : null;
-  const newNames = new Set(newGraph.nodes.map((n) => n.name));
-  state._streamIn = newGraph.nodes.some((n) => !before.has(n.name))
-    ? new Set(newGraph.nodes.filter((n) => !before.has(n.name)).map((n) => n.name))
+  const newNames = new Set(visNodes.map((n) => n.name));
+  state._streamIn = visNodes.some((n) => !before.has(n.name))
+    ? new Set(visNodes.filter((n) => !before.has(n.name)).map((n) => n.name))
     : null;
   const removed = svg ? [...before.keys()].filter((name) => !newNames.has(name)) : [];
   if (removed.length) {
@@ -1369,10 +1377,10 @@ function buildDocGraph(files) {
     n.r = 9 + Math.round(Math.sqrt(n.bytes / maxB) * 14);
     n.color = docColor(n.base);
     n.role = docRole(n.base);
-    n.completion = completionOf(n.content); // checkbox plan? → ring
-    // Self-retirement: a live on-disk doc that the default (auto-100% plan) or a
-    // marker sends to the graveyard. (git-deleted docs are already archived above.)
-    if (!n.archived && graveyardOf(n.base, n.content, n.completion)) {
+    n.completion = completionOf(n.content); // has checkboxes? → completion ring
+    // Self-retirement: a live on-disk doc that the default (auto-retire at 100%) or
+    // a marker sends to the graveyard. (git-deleted docs are already archived above.)
+    if (!n.archived && graveyardOf(n.content, n.completion)) {
       n.archived = true;
       // No deletion commit to read born/death from, so derive them: born from git
       // history, retired ≈ last edit (when it completed). In time-travel the node
@@ -1639,8 +1647,8 @@ function renderCenterpiece() {
       // Lifecycle ring (born/flash) — always in the DOM so scrubbing can replay it
       // on whichever node changed; invisible at rest (CSS opacity 0).
       const lring = `<circle class="gring${chg ? ' ' + ringCls : ''}" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r}" fill="none" stroke="${n.color}"/>`;
-      // Completion ring — included for any plan-ish node (has a % now, or is an
-      // archived doc that once did) so the scrub can fill/empty it in place.
+      // Completion ring — included for any node with a checklist (has a % now, or is
+      // an archived doc that once did) so the scrub can fill/empty it in place.
       const comp = hidden || ghost ? null : (tt ? completionAt(n, ttAsof) : n.completion);
       const ringable = n.completion || n.archived;
       const cR = (n.r + 5);
@@ -1695,7 +1703,7 @@ function renderCenterpiece() {
       <div class="dash-head"><span class="jargon" title="Your agent/brain docs (SOUL, AGENTS, CLAUDE, README, plans…) as a graph — edges mean one doc references another. Hover a node to peek inside.">🧠 AI architecture</span>
         <span class="lay-toggle">${toggle}</span>
         ${state.docHistory ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
-        ${g.nodes.some((n) => n.completion) ? '<span class="ring-key jargon" title="Ring around a node = its checklist completion (amber → green). Checklist/plan docs only.">◔ ring = % done</span>' : ''}
+        ${g.nodes.some((n) => n.completion) ? '<span class="ring-key jargon" title="Ring around a node = its checklist completion (amber → green). Any doc with checkboxes.">◔ ring = % done</span>' : ''}
         <span class="dim-note">${files.length} docs · ${g.edges.filter((e) => !g.nodes[e.i].archived && !g.nodes[e.j].archived).length} links</span></div>
       <div class="brain-wrap">
         <svg class="brain" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="xMidYMid meet">${timeAxis}${edgesSvg}${nodesSvg}</svg>
@@ -2200,10 +2208,10 @@ function ttDiffRows(name, hash) {
   return lineDiff(prev ? prev.content : '', cur.content || '');
 }
 
-// ---------- plan completion (checkbox ratio → brain node ring) ----------
+// ---------- checklist completion (checkbox ratio → brain node ring) ----------
 
 // Checkbox completion of a doc: ratio of [x] to all [ ]/[x]. null = no checkboxes
-// (→ not a checklist plan → no ring). The semantic-marker override is a follow-up.
+// (→ no checklist → no ring).
 function completionOf(content) {
   const boxes = String(content || '').match(/^[ \t>*+-]*\[([ xX])\]/gm) || [];
   if (!boxes.length) return null;
@@ -2212,7 +2220,7 @@ function completionOf(content) {
 }
 // Optional `status:` frontmatter marker that overrides the default graveyard
 // lifecycle (see graveyardOf). Returns 'keep' (force-live), 'archive' (force-
-// retired), or null. The default is auto-retire-at-100% for plan docs, so the
+// retired), or null. The default is auto-retire-at-100% for any checklist, so the
 // common case needs NO marker — markers are only for the exceptions.
 function statusMarker(content) {
   const fm = String(content || '').match(/^﻿?---\s*\n([\s\S]*?)\n---/);
@@ -2225,20 +2233,17 @@ function statusMarker(content) {
   return null;
 }
 
-// Is this a plan doc (the kind that "completes")? Plans auto-retire at 100%;
-// living docs (ROADMAP/README/…) never do. Convention: PLAN_<name>.md / PLAN-<name>.md.
-const isPlanDoc = (base) => /^PLAN[_-]/i.test(base || '');
-
 // Decide whether a *live, on-disk* doc (not git-deleted) belongs in the graveyard.
-// Default, zero-overhead: a finished plan (PLAN_*.md at 100%) auto-retires — no
-// marker, no `git rm`. Opt-out: `status: active` keeps a finished plan live. Opt-in
-// for anything else: `status: archived` retires a non-plan doc explicitly. Retiring
+// Default, zero-overhead: any finished checklist (every box checked → 100%) auto-
+// retires — no marker, no `git rm`, regardless of filename. Completion *is* the
+// signal. Opt-out: `status: active` keeps a finished checklist live. Opt-in for a
+// doc without a 100% checklist: `status: archived` retires it explicitly. Retiring
 // hides the node from the live web (like a git-deleted doc) and ghosts it in time-travel.
-function graveyardOf(base, content, completion) {
+function graveyardOf(content, completion) {
   const mark = statusMarker(content);
   if (mark === 'keep') return false; // explicit "keep alive" wins over auto-retire
-  if (mark === 'archive') return true; // explicit retire (esp. for non-plan docs)
-  return isPlanDoc(base) && !!completion && completion.pct === 100; // default
+  if (mark === 'archive') return true; // explicit retire
+  return !!completion && completion.pct === 100; // any finished checklist auto-retires
 }
 // Completion color: warm amber (low) → green (done).
 function pctColor(p) {
