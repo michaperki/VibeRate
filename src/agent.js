@@ -26,6 +26,19 @@ import fs from 'node:fs';
 
 const CLAUDE_BIN = process.env.VBRT_CLAUDE_BIN || 'claude';
 
+// Env handed to the spawned `claude`. Locally we drop the Anthropic API key so
+// the CLI uses the user's subscription login (~/.claude OAuth) instead of
+// billing API credits — see the spawn site for the full rationale. In hosted
+// mode (Fly) there is no local login, so the key is required and kept.
+function childEnv() {
+  const env = { ...process.env };
+  if (process.env.VBRT_HOSTED !== '1') {
+    delete env.ANTHROPIC_API_KEY;
+    delete env.ANTHROPIC_AUTH_TOKEN;
+  }
+  return env;
+}
+
 // Permission modes we let the UI pick. `default` denies edit/exec without an
 // approval channel (which we don't have yet) — safe but limited. The others are
 // deliberate opt-ins the user selects per session, with `bypassPermissions` the
@@ -209,8 +222,13 @@ function runTurn(session, prompt, { resume }) {
   const child = spawn(CLAUDE_BIN, args, {
     cwd: session.cwd,
     // Inherit the server's real environment so the binary picks up the user's
-    // actual local auth/config — the whole point of Fork A.
-    env: process.env,
+    // actual local auth/config — the whole point of Fork A. BUT strip the
+    // Anthropic API key locally: when `ANTHROPIC_API_KEY` is present the CLI
+    // bills it and *shadows* the subscription login, so a Max user driving from
+    // the UI would silently drain purchased API credits instead of their plan.
+    // The server still keeps the key in its own env for the Haiku classifier.
+    // Hosted (Fly) has no local subscription login, so there we keep the key.
+    env: childEnv(),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   session.child = child;
