@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VibeRate Drive — local agent runtime</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #131722; --panel2: #1a2030; --line: #232a3a;
+    --txt: #e6e9f0; --dim: #8b93a7; --accent: #7aa2ff; --green: #5bd6a0;
+    --amber: #e7b85b; --red: #ef6f6f; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .tag { font-size: 11px; color: var(--dim); border: 1px solid var(--line);
+    padding: 1px 7px; border-radius: 99px; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 20px; }
+  .banner { padding: 9px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+  .banner.bad { background: #2a1416; color: var(--red); border: 1px solid #4a2024; }
+  .banner.ok { background: #10221a; color: var(--green); border: 1px solid #1d3a2c; }
+  label { display: block; font-size: 12px; color: var(--dim); margin: 12px 0 4px; }
+  input, textarea, select { width: 100%; background: var(--panel); color: var(--txt);
+    border: 1px solid var(--line); border-radius: 7px; padding: 9px 11px; font: inherit; }
+  input, select { font-family: var(--mono); font-size: 12.5px; }
+  textarea { resize: vertical; min-height: 70px; }
+  .row { display: flex; gap: 12px; }
+  .row > * { flex: 1; }
+  button { background: var(--accent); color: #0a1020; border: 0; border-radius: 7px;
+    padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--dim); border: 1px solid var(--line); }
+  button:disabled { opacity: .45; cursor: default; }
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+  .warn { font-size: 12px; color: var(--amber); margin-top: 6px; min-height: 16px; }
+  .sessbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 14px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .pill { padding: 2px 9px; border-radius: 99px; font-weight: 600; font-size: 11px; }
+  .pill.working { background: #2a2410; color: var(--amber); }
+  .pill.idle { background: #10221a; color: var(--green); }
+  .pill.error, .pill.exited { background: #2a1416; color: var(--red); }
+  .pill.starting { background: #15202e; color: var(--accent); }
+  #transcript { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+  .ev { border: 1px solid var(--line); border-radius: 9px; padding: 10px 13px; background: var(--panel); }
+  .ev .who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--dim); margin-bottom: 4px; }
+  .ev.user { background: var(--panel2); border-color: #2a3550; }
+  .ev.user .who { color: var(--accent); }
+  .ev.assistant .who { color: var(--green); }
+  .ev .body { white-space: pre-wrap; word-break: break-word; }
+  .ev.thinking { opacity: .6; font-style: italic; }
+  .ev.tool { font-family: var(--mono); font-size: 12.5px; }
+  .ev.tool .who { color: var(--amber); }
+  .ev.toolresult { font-family: var(--mono); font-size: 12px; background: #0e1118; }
+  .ev.toolresult.err .who { color: var(--red); }
+  .ev.result { font-family: var(--mono); font-size: 12px; color: var(--dim); border-style: dashed; }
+  .ev.error { background: #2a1416; border-color: #4a2024; color: var(--red); }
+  .ev.sys { font-family: var(--mono); font-size: 11.5px; color: var(--dim); border-style: dashed; }
+  .hidden { display: none; }
+  code { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<header>
+  <h1>VibeRate Drive</h1>
+  <span class="tag">local agent runtime · PoC</span>
+  <span class="tag" id="binTag"></span>
+</header>
+<div class="wrap">
+  <div id="banner" class="banner ok hidden"></div>
+
+  <!-- New-session form -->
+  <div id="start">
+    <label for="cwd">Working directory</label>
+    <input id="cwd" placeholder="/path/to/project" />
+    <div class="row">
+      <div>
+        <label for="perm">Permission mode</label>
+        <select id="perm">
+          <option value="default">default — read/chat only (edits & shell need approval, which we don't have yet)</option>
+          <option value="plan">plan — research &amp; propose, no writes</option>
+          <option value="acceptEdits">acceptEdits — auto-accept file edits</option>
+          <option value="bypassPermissions">bypassPermissions — let it run anything (DANGER)</option>
+        </select>
+      </div>
+    </div>
+    <div class="warn" id="permWarn"></div>
+    <label for="prompt">First message</label>
+    <textarea id="prompt" placeholder="What should the agent do?"></textarea>
+    <div class="actions">
+      <button id="startBtn">Start session</button>
+    </div>
+  </div>
+
+  <!-- Live session -->
+  <div id="live" class="hidden">
+    <div class="sessbar">
+      <span class="pill" id="statusPill">—</span>
+      <span id="cwdLabel"></span>
+      <span>claude: <code id="claudeId">…</code></span>
+    </div>
+    <div id="transcript"></div>
+    <label for="followup">Message</label>
+    <textarea id="followup" placeholder="Reply to the agent…"></textarea>
+    <div class="actions">
+      <button id="sendBtn">Send</button>
+      <button id="stopBtn" class="ghost">Stop turn</button>
+      <button id="newBtn" class="ghost">New session</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (p, opts) => fetch('/api/agent' + p, opts).then(async (r) => {
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+});
+
+let session = null;
+let es = null;
+
+function banner(msg, kind) {
+  const b = $('banner');
+  b.textContent = msg; b.className = 'banner ' + kind;
+  b.classList.toggle('hidden', !msg);
+}
+
+$('perm').addEventListener('change', () => {
+  $('permWarn').textContent = $('perm').value === 'bypassPermissions'
+    ? '⚠ The agent can run any shell command and edit any file with no confirmation. Local machine only.'
+    : '';
+});
+
+function setStatus(status) {
+  const pill = $('statusPill');
+  pill.textContent = status;
+  pill.className = 'pill ' + status;
+  $('sendBtn').disabled = status === 'working' || status === 'starting';
+  $('stopBtn').disabled = !(status === 'working' || status === 'starting');
+}
+
+function addEv(cls, who, body) {
+  const div = document.createElement('div');
+  div.className = 'ev ' + cls;
+  if (who) { const h = document.createElement('div'); h.className = 'who'; h.textContent = who; div.appendChild(h); }
+  if (body != null) { const b = document.createElement('div'); b.className = 'body'; b.textContent = body; div.appendChild(b); }
+  $('transcript').appendChild(div);
+  window.scrollTo(0, document.body.scrollHeight);
+  return div;
+}
+
+function summarizeInput(input) {
+  try {
+    const s = JSON.stringify(input);
+    return s.length > 300 ? s.slice(0, 300) + '…' : s;
+  } catch { return ''; }
+}
+
+function render(ev) {
+  switch (ev.kind) {
+    case 'user_prompt': addEv('user', 'you', ev.text); break;
+    case 'assistant_text': addEv('assistant', 'claude', ev.text); break;
+    case 'thinking': addEv('thinking', 'thinking', ev.text); break;
+    case 'tool_use': addEv('tool', '⚙ ' + ev.name, summarizeInput(ev.input)); break;
+    case 'tool_result': addEv('toolresult' + (ev.isError ? ' err' : ''), ev.isError ? 'tool error' : 'tool result', ev.text); break;
+    case 'result':
+      addEv('result', 'turn complete', [
+        ev.isError ? 'error' : 'ok',
+        ev.numTurns != null ? ev.numTurns + ' turns' : null,
+        ev.durationMs != null ? (ev.durationMs / 1000).toFixed(1) + 's' : null,
+        ev.costUsd != null ? '$' + ev.costUsd.toFixed(4) : null,
+      ].filter(Boolean).join(' · '));
+      break;
+    case 'system':
+      addEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
+      if (ev.sessionId) $('claudeId').textContent = ev.sessionId;
+      break;
+    case 'error': addEv('error', 'error', ev.message); break;
+    case 'stopped': addEv('sys', 'session', 'stopped by user'); break;
+    case 'status': setStatus(ev.status); break;
+    // 'raw', 'turn_end' are intentionally not rendered.
+  }
+  if (session) { if (ev.kind === 'status') {} }
+}
+
+function openStream(id, after) {
+  if (es) es.close();
+  es = new EventSource('/api/agent/sessions/' + id + '/stream?after=' + (after || 0));
+  es.onmessage = (m) => { try { render(JSON.parse(m.data)); } catch {} };
+  es.addEventListener('error', () => {/* EventSource auto-reconnects */});
+}
+
+function enterSession(s) {
+  session = s;
+  $('start').classList.add('hidden');
+  $('live').classList.remove('hidden');
+  $('cwdLabel').textContent = s.cwd;
+  if (s.claudeSessionId) $('claudeId').textContent = s.claudeSessionId;
+  setStatus(s.status);
+  $('transcript').innerHTML = '';
+  openStream(s.id, 0);
+}
+
+$('startBtn').addEventListener('click', async () => {
+  const prompt = $('prompt').value.trim();
+  if (!prompt) return;
+  $('startBtn').disabled = true;
+  try {
+    const s = await api('/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd: $('cwd').value.trim(), prompt, permissionMode: $('perm').value }),
+    });
+    enterSession(s);
+    $('prompt').value = '';
+  } catch (e) { banner(e.message, 'bad'); }
+  finally { $('startBtn').disabled = false; }
+});
+
+$('sendBtn').addEventListener('click', async () => {
+  const prompt = $('followup').value.trim();
+  if (!prompt || !session) return;
+  try {
+    await api('/sessions/' + session.id + '/message', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    $('followup').value = '';
+  } catch (e) { banner(e.message, 'bad'); }
+});
+
+$('stopBtn').addEventListener('click', () => session && api('/sessions/' + session.id + '/stop', { method: 'POST' }).catch((e) => banner(e.message, 'bad')));
+$('newBtn').addEventListener('click', () => { if (es) es.close(); session = null; $('live').classList.add('hidden'); $('start').classList.remove('hidden'); banner('', 'ok'); });
+
+// Cmd/Ctrl+Enter to send.
+for (const [el, btn] of [['prompt', 'startBtn'], ['followup', 'sendBtn']]) {
+  $(el).addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') $(btn).click(); });
+}
+
+// Boot: health check + prefill cwd.
+api('/health').then((h) => {
+  $('binTag').textContent = 'binary: ' + h.bin;
+  if (!$('cwd').value) $('cwd').value = h.defaultCwd || '';
+}).catch((e) => banner('Agent runtime unavailable: ' + e.message, 'bad'));
+</script>
+</body>
+</html>

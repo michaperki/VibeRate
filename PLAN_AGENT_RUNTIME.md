@@ -85,9 +85,15 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
 
 ## Phasing (rough, validated against Codex's estimates)
 
-- [ ] **Local PoC (~days):** localhost-only chat, one provider, Fork A, start/resume
-      idle sessions, stream assistant text into the existing session reader. No
-      approvals, no relay.
+- [x] **Local PoC:** localhost-only chat, Claude-first, Fork A, start/resume idle
+      sessions, stream assistant text. No approvals, no relay. Shipped as
+      `src/agent.js` (spawns the real `claude` binary, one turn per message,
+      resume-by-id), `src/agentRoutes.js` (`/api/agent/*` + SSE, mounted only when
+      `!HOSTED` and loopback-guarded), and `public/drive.html` (the `/drive` chat
+      UI). Turn model is one short-lived process per message resuming by session
+      id — matches "resume an idle session by ID" and keeps a real process handle
+      for ground-truth liveness. Streaming partial tokens into the reader is the
+      obvious next polish; turn-level assistant text lands today.
 - [ ] **Approvals + interrupt** on the owned session; ownership lease + read-only
       fallback for terminal-driven sessions.
 - [ ] **Dual-provider** unified event model (the likeliest schedule overrun —

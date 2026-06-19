@@ -11,6 +11,7 @@ import { BUNDLE_SCHEMA } from './bundle.js';
 import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCookie } from './auth.js';
 import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner } from './accounts.js';
+import { mountAgent } from './agentRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -129,6 +130,12 @@ export function startServer(port = 4317) {
   app.use(express.json({ limit: JSON_LIMIT })); // bundles carry full conversations
 
   if (HOSTED) mountAuth(app); // /auth/* sign-in, /api/me, /api/auth/providers
+
+  // Local agent runtime — the "drive" half (PLAN_AGENT_RUNTIME.md). Mounts the
+  // chat/control plane and the /drive UI, but ONLY in local mode: in hosted mode
+  // these routes don't exist at all. The control plane is an RCE surface, so it's
+  // also loopback-guarded inside mountAgent. See src/agent.js.
+  if (!HOSTED) mountAgent(app, PUBLIC_DIR);
 
   // Liveness probe for the host's health checks. Cheap, no I/O.
   app.get('/healthz', (_req, res) => {
