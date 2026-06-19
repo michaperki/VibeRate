@@ -12,6 +12,7 @@ import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCoo
 import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner } from './accounts.js';
 import { mountAgent } from './agentRoutes.js';
+import { ensureSubscriptionCredentials } from './agent.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -123,6 +124,10 @@ function validateBundle(bundle) {
 }
 
 export function startServer(port = 4317) {
+  // If a subscription credential secret is provided (hosted Drive on the Max
+  // plan), seed it into the config dir before any agent turn spawns. No-ops
+  // locally where the env var is unset and ~/.claude already holds the login.
+  ensureSubscriptionCredentials();
   const app = express();
   // Behind Fly's (or any) TLS-terminating proxy, honor X-Forwarded-Proto so
   // req.protocol is 'https' — otherwise minted share links come out as http://.

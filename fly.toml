@@ -19,6 +19,11 @@ primary_region = "fra"
   # Where driven agents work — a dedicated dir on the volume, never /app (the
   # running server's own source) or /data (the project store).
   VBRT_AGENT_CWD = "/data/drive"
+  # Relocate the Claude CLI config dir onto the persistent volume so a refreshed
+  # OAuth token survives machine restarts. Seeded once at boot from the
+  # CLAUDE_CREDENTIALS_JSON secret (operator's Max login) — see src/agent.js
+  # ensureSubscriptionCredentials. Drive then runs on the subscription, not API.
+  CLAUDE_CONFIG_DIR = "/data/claude"
   # The container runs as root, and Claude Code refuses --dangerously-skip-
   # permissions (our bypassPermissions mode) as root unless it knows it's in a
   # sandbox. A Fly firecracker VM IS that sandbox boundary, so this is legit.

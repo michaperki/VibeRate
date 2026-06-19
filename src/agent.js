@@ -23,16 +23,65 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const CLAUDE_BIN = process.env.VBRT_CLAUDE_BIN || 'claude';
 
-// Env handed to the spawned `claude`. Locally we drop the Anthropic API key so
-// the CLI uses the user's subscription login (~/.claude OAuth) instead of
-// billing API credits — see the spawn site for the full rationale. In hosted
-// mode (Fly) there is no local login, so the key is required and kept.
+// Where the CLI keeps its config + OAuth credentials. Honors CLAUDE_CONFIG_DIR
+// (set to the Fly volume in hosted mode so a refreshed token survives restarts);
+// otherwise the usual ~/.claude.
+function claudeConfigDir() {
+  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+}
+
+function credentialsPath() {
+  return path.join(claudeConfigDir(), '.credentials.json');
+}
+
+// True when a subscription login (claude login OAuth token) is on disk.
+function hasSubscriptionCreds() {
+  try {
+    return fs.statSync(credentialsPath()).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// Seed subscription OAuth credentials from the CLAUDE_CREDENTIALS_JSON secret
+// into the config dir, so a hosted (Fly) Drive can run on the operator's Max
+// plan instead of API billing. This is a full-account bearer token, so it's a
+// SINGLE-OPERATOR, admin-gated affordance only — never collect other users'
+// credentials this way (use a per-user API key for that). Seed-if-missing:
+// once the CLI refreshes the token in place (durable on the volume) we leave
+// its copy alone; delete the file (or rotate the secret) to force a re-seed.
+export function ensureSubscriptionCredentials() {
+  const raw = process.env.CLAUDE_CREDENTIALS_JSON;
+  if (!raw) return;
+  try {
+    JSON.parse(raw); // guard against a malformed paste clobbering the file
+  } catch {
+    console.error('[agent] CLAUDE_CREDENTIALS_JSON is not valid JSON; ignoring');
+    return;
+  }
+  if (hasSubscriptionCreds()) return;
+  try {
+    fs.mkdirSync(claudeConfigDir(), { recursive: true });
+    fs.writeFileSync(credentialsPath(), raw, { mode: 0o600 });
+    console.log(`[agent] seeded subscription credentials into ${credentialsPath()}`);
+  } catch (e) {
+    console.error('[agent] failed to seed subscription credentials:', e && e.message);
+  }
+}
+
+// Env handed to the spawned `claude`. When a subscription login exists we drop
+// the Anthropic API key so the CLI uses that OAuth token (the user's Max plan)
+// instead of billing API credits — ANTHROPIC_API_KEY otherwise *shadows* the
+// login. With no login on disk we keep the key as the fallback. Either way the
+// server keeps the key in its own process.env for the Haiku classifier.
 function childEnv() {
   const env = { ...process.env };
-  if (process.env.VBRT_HOSTED !== '1') {
+  if (hasSubscriptionCreds()) {
     delete env.ANTHROPIC_API_KEY;
     delete env.ANTHROPIC_AUTH_TOKEN;
   }
@@ -222,12 +271,10 @@ function runTurn(session, prompt, { resume }) {
   const child = spawn(CLAUDE_BIN, args, {
     cwd: session.cwd,
     // Inherit the server's real environment so the binary picks up the user's
-    // actual local auth/config — the whole point of Fork A. BUT strip the
-    // Anthropic API key locally: when `ANTHROPIC_API_KEY` is present the CLI
-    // bills it and *shadows* the subscription login, so a Max user driving from
-    // the UI would silently drain purchased API credits instead of their plan.
-    // The server still keeps the key in its own env for the Haiku classifier.
-    // Hosted (Fly) has no local subscription login, so there we keep the key.
+    // actual auth/config — the whole point of Fork A. childEnv() drops the
+    // Anthropic API key when a subscription login is on disk so the CLI uses
+    // the Max plan rather than billing API credits (the key would otherwise
+    // shadow the login). See childEnv / ensureSubscriptionCredentials above.
     env: childEnv(),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
