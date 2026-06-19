@@ -92,21 +92,50 @@ function agentsFromStream(events, now) {
   return [...byId.values()].sort((x, y) => y.last - x.last);
 }
 
+// Codex has no hook sidecar: its rollout JSONL is itself the live event stream.
+// `cmdWatch` refreshes compact parse snapshots only when a rollout file changes;
+// adapt those snapshots to the same panel shape as Claude hook agents.
+function agentsFromCodex(states, now) {
+  const out = [];
+  for (const s of states.values()) {
+    const live = s.live || {};
+    const last = Date.parse(live.ts || s.endedAt || '') || 0;
+    if (!last || now - last > 10 * 60 * 1000) continue; // don't resurrect old rollouts
+    const age = now - last;
+    const status = live.state === 'idle' ? 'idle' : age < 12000 ? 'working' : 'paused';
+    const action = live.action ? `${live.action.verb || 'using'}${live.action.label ? ' ' + live.action.label : ''}` : null;
+    out.push({
+      sid: s.id,
+      source: 'codex',
+      last,
+      ev: live.state === 'idle' ? 'idle' : 'tool',
+      action,
+      ctxPct: live.ctxPct,
+      ctx: live.ctx,
+      model: live.model,
+      status,
+    });
+  }
+  return out;
+}
+
 // The panels the TUI actually draws: every agent in the stream window minus the ones
 // gracefully ended or hand-dismissed. A dismissal is keyed by sid + timestamp, so a
 // dismissed session that *moves again* (a newer event than the dismissal) reappears —
 // hand-clearing a session that turns out to be alive is self-correcting.
-function visibleAgents(st, now) {
-  return agentsFromStream(st.events, now).filter((a) => {
-    if (a.status === 'ended') return false;
-    const d = st.dismissed && st.dismissed[a.sid || '_'];
-    return !(d != null && a.last <= d);
-  });
+function visibleAgents(st, now, codexStates) {
+  return [...agentsFromStream(st.events, now), ...agentsFromCodex(codexStates, now)]
+    .sort((a, b) => b.last - a.last)
+    .filter((a) => {
+      if (a.status === 'ended') return false;
+      const d = st.dismissed && st.dismissed[a.sid || '_'];
+      return !(d != null && a.last <= d);
+    });
 }
 
 // Build the full frame as an array of lines (no I/O), so it's easy to reason about
 // and test by eye. `st` carries live watch state; `sessions` maps sid→source.
-function tuiFrame(st, sessions) {
+function tuiFrame(st, sessions, codexStates = new Map()) {
   const now = Date.now();
   const W = Math.max(48, Math.min((process.stdout.columns || 80), 100));
   const inner = W - 4; // content width inside "│ … │"
@@ -127,7 +156,7 @@ function tuiFrame(st, sessions) {
   lines.push(`${st.hooks ? C.green('● hooks live') : C.yellow('○ no hooks')} ${C.dim(st.hooks ? '(real-time)' : '— run `vbrt hooks --install` for real-time; showing log-tail lag')}`);
   lines.push('');
 
-  const agents = visibleAgents(st, now);
+  const agents = visibleAgents(st, now, codexStates);
   st.visible = agents.map((a) => a.sid || '_'); // index→sid map for number-key dismissal
   if (!agents.length) {
     lines.push(top(C.dim('agents')));
@@ -135,7 +164,7 @@ function tuiFrame(st, sessions) {
     lines.push(bot);
   }
   agents.forEach((a, i) => {
-    const src = srcOf(a.sid);
+    const src = a.source || srcOf(a.sid);
     const dot = a.status === 'working' ? C.green('●') : a.status === 'paused' ? C.yellow('◐') : C.dim('○');
     const word = a.status === 'working' ? C.green('working') : a.status === 'paused' ? C.yellow('paused') : C.dim('idle');
     const num = i < 9 ? C.dim(`[${i + 1}]`) : C.dim('[·]'); // only 1–9 are dismiss-able by key
@@ -261,6 +290,29 @@ function watchSignature(repoPaths, sessionFiles = []) {
   return parts.sort().join('|');
 }
 
+// New Codex rollouts are created under sessions/YYYY/MM/DD. Stat only today's
+// directory chain (local + UTC, plus yesterday for midnight edges) so a new file
+// triggers immediate rediscovery without recursively scanning hundreds of old
+// rollouts every second.
+function codexStoreSignature(now = new Date()) {
+  const days = [];
+  for (const base of [new Date(now), new Date(now.getTime() - 24 * 3600 * 1000)]) {
+    days.push([String(base.getFullYear()), String(base.getMonth() + 1).padStart(2, '0'), String(base.getDate()).padStart(2, '0')]);
+    days.push([String(base.getUTCFullYear()), String(base.getUTCMonth() + 1).padStart(2, '0'), String(base.getUTCDate()).padStart(2, '0')]);
+  }
+  const parts = [];
+  for (const root of codexRoots()) {
+    for (const segs of days) {
+      let dir = root;
+      for (const seg of segs) {
+        dir = path.join(dir, seg);
+        try { const st = fs.statSync(dir); parts.push(`${dir}:${st.mtimeMs}:${st.size}`); } catch { parts.push(`${dir}:0`); }
+      }
+    }
+  }
+  return [...new Set(parts)].sort().join('|');
+}
+
 // `vbrt watch`: poll the repo's brain inputs and re-push (debounced) when they
 // change, so the live dashboard updates while you/the agent edit. Read-only.
 async function cmdWatch(args = []) {
@@ -277,6 +329,18 @@ async function cmdWatch(args = []) {
   let sessions0 = await discoverSessions(cwd);
   let sessionFiles = sessions0.map((s) => s.file);
   let sessionsList = sessions0; // full objects, kept fresh for sid→agent mapping in the TUI
+  const codexStates = new Map(); // file → { sig, parsed live session }
+  const liveFileSig = (f) => { try { const s = fs.statSync(f); return `${s.mtimeMs}:${s.size}`; } catch { return 'gone'; } };
+  const refreshCodexStates = async () => {
+    for (const meta of sessionsList) {
+      if (meta.source !== 'codex') continue;
+      const sig = liveFileSig(meta.file);
+      const prior = codexStates.get(meta.file);
+      if (prior && prior.sig === sig) continue;
+      try { codexStates.set(meta.file, { sig, ...(await parseCodex(meta.file)) }); } catch { /* partial write; retry next tick */ }
+    }
+  };
+  await refreshCodexStates();
   const repoPaths = [...new Set([cwd, ...sessions0.map((s) => s.cwd).filter(Boolean)])];
   if (!tui) console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim(`(${sessionFiles.length} session(s) + brain docs + git · Ctrl-C to stop)`)}`);
 
@@ -326,7 +390,7 @@ async function cmdWatch(args = []) {
     st.queued = outboxCount();
     st.hooks = fs.existsSync(streamFile); // the sidecar only exists once `vbrt hook` has fired
     st.events = readStream(cwd, 200);
-    paintFrame(tuiFrame(st, sessionsList));
+    paintFrame(tuiFrame(st, sessionsList, codexStates));
   };
   const teardown = () => {
     if (tui) {
@@ -361,6 +425,7 @@ async function cmdWatch(args = []) {
   let changedSince = 0;  // first change since the last push (max-wait clock)
   let busy = false;
   let rediscoverIn = 20; // re-scan for new session files every ~20s (1s ticks)
+  let lastCodexStoreSig = codexStoreSignature();
   // Settle the burst before pushing (DEBOUNCE), but never wait longer than MAX_WAIT:
   // an agent in YOLO / skip-permissions mode appends to its session log on every tick,
   // so the signature never goes quiet and a pure debounce would only push once the
@@ -381,10 +446,13 @@ async function cmdWatch(args = []) {
   const tick = async () => {
     writeLock(); // refresh heartbeat even while idle so doctor sees a live watcher
     if (busy) return;
+    const codexSig = codexStoreSignature();
+    if (codexSig !== lastCodexStoreSig) { lastCodexStoreSig = codexSig; rediscoverIn = 1; }
     if (--rediscoverIn <= 0) {
       rediscoverIn = 20;
       try { sessionsList = await discoverSessions(cwd); sessionFiles = sessionsList.map((s) => s.file); } catch { /* keep old list */ }
     }
+    await refreshCodexStates();
     let sig;
     try { sig = watchSignature(repoPaths, sessionFiles); } catch { return; }
     const now = Date.now();

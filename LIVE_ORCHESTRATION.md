@@ -123,8 +123,11 @@ which are internal UI). Codex writes its log per event already, so it needs no h
 > panels; events without `sid` fold into one panel. **Now the default:** `vbrt watch`
 > launches the TUI on an interactive terminal; `vbrt watch --log` (alias `--no-tui`) forces
 > the plain scrolling push log, and we fall back to it automatically when stdout is
-> piped/redirected (agents, CI, `| tee`) so logs still capture cleanly. **Deferred (as
-> planned):** Codex log-tail fallback (CC-only for now — no hooks stream from Codex).
+> piped/redirected (agents, CI, `| tee`) so logs still capture cleanly. **Codex fallback
+> shipped 2026-06-19:** the watcher now parses a compact
+> live snapshot whenever a Codex rollout changes and merges it with Claude hook agents;
+> the web ticker likewise returns and renders multiple concurrent agents instead of letting
+> the presence of a Claude hook stream suppress Codex activity.
 > Verified against a synthetic two-agent stream (working + idle, different models/contexts),
 > borders measured to terminal width, and both the TTY-default and piped-fallback paths.
 

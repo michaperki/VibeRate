@@ -61,6 +61,11 @@ shared repo.
 
 ## Memory model (how the Workspace tier reads agent memory)
 
+Research into dynamic memory/document relevance, Brain-node metrics, and per-turn
+context credit assignment is documented in `CONTEXT_CREDIT_RESEARCH.md`. The current
+architecture supports useful activity and structural signals, but not authoritative
+memory-to-outcome attribution.
+
 Memory is normalized into one shape regardless of agent:
 `note = { source, authored, type, title, description, body, mtime, loading, recallCount }`.
 

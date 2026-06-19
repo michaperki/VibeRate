@@ -371,10 +371,10 @@ function toolLabel(m, cat, cwd) {
   if (inp && typeof inp === 'object') {
     const file = inp.file_path || inp.path || inp.notebook_path;
     if (file) return relPath(file, cwd);
-    if (cat === 'cmd' && inp.command) {
+    if (cat === 'cmd' && (inp.command || inp.cmd)) {
       // Drop a leading `cd <path> && ` / `; ` — it's the harness boilerplate, not
       // what the agent is actually running.
-      const cmd = String(inp.command).replace(/\s+/g, ' ').trim().replace(/^cd\s+\S+\s+(?:&&\s+|;\s+)?(?=\S)/, '');
+      const cmd = String(inp.command || inp.cmd).replace(/\s+/g, ' ').trim().replace(/^cd\s+\S+\s+(?:&&\s+|;\s+)?(?=\S)/, '');
       return cmd.slice(0, 80);
     }
     if (cat === 'search' && (inp.pattern || inp.query)) return String(inp.pattern || inp.query).slice(0, 60);
@@ -387,64 +387,93 @@ function toolLabel(m, cat, cwd) {
   return m.name || cat;
 }
 
-// Live agent ticker: what the agent is doing right now. Prefers the real-time hook
-// stream (working/idle + current action + context load, no flush lag) when present,
-// and otherwise falls back to the tail of tool calls parsed from the most-recently-
-// active session log. Read-only either way; no extra agent load. Items newest last.
+function hookTickerAgent(events, sessionId, limit) {
+  const last = events[events.length - 1];
+  let ctxEv = null;
+  for (let i = events.length - 1; i >= 0; i--) if (typeof events[i].ctx === 'number') { ctxEv = events[i]; break; }
+  let lastTool = null;
+  for (let i = events.length - 1; i >= 0; i--) if (events[i].ev === 'tool') { lastTool = events[i]; break; }
+  const age = Date.now() - (last.t || 0);
+  const state = last.ev === 'end' ? 'ended' : last.ev === 'idle' ? 'idle' : age > WORKING_TTL_MS ? 'idle' : 'working';
+  const live = {
+    state,
+    stale: state === 'idle' && last.ev !== 'idle' && last.ev !== 'end',
+    action: state !== 'working' || !lastTool ? null : { cat: lastTool.cat, verb: lastTool.verb, label: lastTool.target || '' },
+    ctx: ctxEv ? ctxEv.ctx : null,
+    ctxPct: ctxEv ? ctxEv.ctxPct : null,
+    model: ctxEv ? ctxEv.model : null,
+    ts: last.t || null,
+  };
+  const items = events
+    .filter((e) => e.ev === 'tool' && e.phase !== 'start')
+    .slice(-limit)
+    .map((e) => ({ cat: e.cat, verb: e.verb, label: e.target || '', ts: e.t || null }));
+  return { sessionId, source: 'claude', transport: 'hook', live, items };
+}
+
+function sessionTickerAgent(session, summary, limit) {
+  const items = [];
+  for (const m of session.messages || []) {
+    if (m.kind !== 'tool_use') continue;
+    const cat = classifyToolName(m.name);
+    items.push({ cat, verb: TICKER_VERB[cat], label: toolLabel(m, cat, session.cwd), ts: m.ts || null });
+  }
+  const raw = session.live || null;
+  const ts = Date.parse((raw && raw.ts) || session.endedAt || summary.endedAt || '') || null;
+  const stale = ts != null && Date.now() - ts > WORKING_TTL_MS;
+  const state = raw && raw.state === 'idle' ? 'idle' : stale ? 'idle' : 'working';
+  const live = {
+    state,
+    stale: stale && (!raw || raw.state !== 'idle'),
+    action: state === 'working' ? (raw && raw.action) || (items.length ? { cat: items.at(-1).cat, verb: items.at(-1).verb, label: items.at(-1).label } : null) : null,
+    ctx: raw && raw.ctx,
+    ctxPct: raw && raw.ctxPct,
+    model: raw && raw.model,
+    ts,
+  };
+  return { sessionId: summary.id, source: summary.source, transport: 'session', live, items: items.slice(-limit) };
+}
+
+// Live agent ticker: merge real-time Claude hook streams with Codex's per-event
+// rollout snapshots. A hook stream no longer suppresses concurrent Codex sessions.
+// `agents` is the canonical response; top-level fields mirror the newest agent for
+// backward compatibility with older viewers.
 export function getTicker(slug, limit = 16) {
   const project = getProject(slug);
   if (!project) return null;
-
+  const agents = [];
   const stored = getStream(slug);
   if (stored && Array.isArray(stored.events) && stored.events.length) {
-    const ev = stored.events;
-    const last = ev[ev.length - 1];
-    let ctxEv = null;
-    for (let i = ev.length - 1; i >= 0; i--) if (typeof ev[i].ctx === 'number') { ctxEv = ev[i]; break; }
-    let lastTool = null;
-    for (let i = ev.length - 1; i >= 0; i--) if (ev[i].ev === 'tool') { lastTool = ev[i]; break; }
-    // Liveness is INFERRED from events, never asserted — a hard exit (Ctrl-C, terminal
-    // close, crash) fires no hook, so the last event just stops. We must not let a stale
-    // `tool`/`prompt` read as "working" forever (the bug this guards). So:
-    //   end  → 'ended' (graceful SessionEnd close)
-    //   idle → 'idle'  (a Stop fired: finished a turn)
-    //   otherwise → 'working' ONLY while recent; past WORKING_TTL with no new event we
-    //   stop claiming activity and fall back to 'idle' (a long-thinking agent self-heals
-    //   the instant its next event lands). Clients also get `ts` to show "last move Nm ago".
-    const age = Date.now() - (last.t || 0);
-    const state = last.ev === 'end' ? 'ended'
-      : last.ev === 'idle' ? 'idle'
-      : age > WORKING_TTL_MS ? 'idle'
-      : 'working';
-    const live = {
-      state,
-      stale: state === 'idle' && last.ev !== 'idle' && last.ev !== 'end', // went quiet mid-work
-      action: state !== 'working' || !lastTool ? null : { cat: lastTool.cat, verb: lastTool.verb, label: lastTool.target || '' },
-      ctx: ctxEv ? ctxEv.ctx : null,
-      ctxPct: ctxEv ? ctxEv.ctxPct : null,
-      model: ctxEv ? ctxEv.model : null,
-      ts: last.t || null,
-    };
-    const items = ev
-      .filter((e) => e.ev === 'tool' && e.phase !== 'start') // completed actions; the in-flight one is `live.action`
-      .slice(-limit)
-      .map((e) => ({ cat: e.cat, verb: e.verb, label: e.target || '', ts: e.t || null }));
-    return { source: 'hook', live, items, capturedAt: stored.capturedAt };
+    const grouped = new Map();
+    for (const e of stored.events) {
+      const id = e.sid || '_';
+      if (!grouped.has(id)) grouped.set(id, []);
+      grouped.get(id).push(e);
+    }
+    for (const [sid, events] of grouped) agents.push(hookTickerAgent(events, sid === '_' ? null : `claude-${sid}`, limit));
   }
 
   const recency = (x) => new Date((x && (x.endedAt || x.startedAt)) || 0).getTime();
-  let latest = null;
-  for (const summary of project.sessions) if (!latest || recency(summary) > recency(latest)) latest = summary;
-  if (!latest) return { sessionId: null, items: [] };
-  const s = getSession(slug, latest.id);
-  if (!s) return { sessionId: latest.id, items: [] };
-  const items = [];
-  for (const m of s.messages) {
-    if (m.kind !== 'tool_use') continue;
-    const cat = classifyToolName(m.name);
-    items.push({ cat, verb: TICKER_VERB[cat], label: toolLabel(m, cat, s.cwd), ts: m.ts || null });
+  const recentCutoff = Date.now() - 10 * 60 * 1000;
+  for (const summary of project.sessions || []) {
+    if (summary.source !== 'codex' || recency(summary) < recentCutoff) continue;
+    const session = getSession(slug, summary.id);
+    if (session) agents.push(sessionTickerAgent(session, summary, limit));
   }
-  return { sessionId: latest.id, source: latest.source, endedAt: latest.endedAt, items: items.slice(-limit) };
+
+  // Old captures may have neither hooks nor Codex `live` snapshots. Preserve the
+  // previous single-session fallback so their ticker does not disappear.
+  if (!agents.length) {
+    let latest = null;
+    for (const summary of project.sessions || []) if (!latest || recency(summary) > recency(latest)) latest = summary;
+    if (latest) {
+      const session = getSession(slug, latest.id);
+      if (session) agents.push(sessionTickerAgent(session, latest, limit));
+    }
+  }
+  agents.sort((a, b) => (b.live?.ts || 0) - (a.live?.ts || 0));
+  const primary = agents[0] || { sessionId: null, source: null, live: null, items: [] };
+  return { ...primary, agents, capturedAt: stored && stored.capturedAt };
 }
 
 // Shorten an absolute edited-file path to repo-relative for display.

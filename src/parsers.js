@@ -236,6 +236,27 @@ function codexPushOutput(parts, output) {
   parts.push({ role: 'tool', kind: 'tool_result', text });
 }
 
+const CODEX_VERB = { edit: 'editing', read: 'reading', cmd: 'running', search: 'searching', web: 'fetching', other: 'using' };
+function codexToolAction(name, input) {
+  const n = String(name || '').toLowerCase();
+  const cat = /write|edit|apply_patch|create|notebook|patch|update_plan/.test(n) ? 'edit'
+    : /read|cat|view|open/.test(n) ? 'read'
+      : /bash|exec|shell|command|run|terminal/.test(n) ? 'cmd'
+        : /grep|glob|search|find|^ls|list/.test(n) ? 'search'
+          : /fetch|web|browser|http/.test(n) ? 'web' : 'other';
+  let label = name || cat;
+  if (input && typeof input === 'object') {
+    label = input.file_path || input.path || input.notebook_path || input.description || input.pattern || input.query || label;
+    if (cat === 'cmd' && (input.command || input.cmd)) label = String(input.command || input.cmd).replace(/\s+/g, ' ').slice(0, 80);
+  } else if (typeof input === 'string') {
+    // Codex custom tools wrap their real arguments in JavaScript. Pull the first
+    // command/path-like value when possible; otherwise keep a short useful tail.
+    const cmd = input.match(/\b(?:cmd|command|path)\s*:\s*["'`]([^"'`]{1,160})/);
+    label = (cmd ? cmd[1] : input.replace(/\s+/g, ' ').trim()).slice(0, 80) || label;
+  }
+  return { cat, verb: CODEX_VERB[cat], label: String(label).slice(0, 100) };
+}
+
 export async function parseCodex(file) {
   const messages = [];
   let cwd = null;
@@ -243,6 +264,9 @@ export async function parseCodex(file) {
   let startedAt = null;
   let endedAt = null;
   let firstUserText = null;
+  // Codex writes task lifecycle + token counts directly into each rollout. Keep a
+  // compact latest-state snapshot so consumers can render it live without hooks.
+  let live = { state: 'idle', action: null, ctx: null, ctxPct: null, model: null, ts: null };
 
   for await (const obj of readLines(file)) {
     const ts = obj.timestamp || null;
@@ -254,13 +278,29 @@ export async function parseCodex(file) {
       continue;
     }
     if (ts) endedAt = ts;
+    // Reasoning and tool-output records are also proof the active turn moved,
+    // even when they don't change the user-facing action label.
+    if (ts && live.state === 'working') live.ts = ts;
+
+    if (obj.type === 'turn_context') live.model = p.model || live.model;
 
     if (obj.type === 'event_msg') {
-      if (p.type === 'user_message') {
+      if (p.type === 'task_started') {
+        live = { ...live, state: 'working', action: null, ts };
+      } else if (p.type === 'task_complete' || p.type === 'turn_aborted') {
+        live = { ...live, state: 'idle', action: null, ts };
+      } else if (p.type === 'token_count') {
+        const info = p.info || {};
+        const usage = info.last_token_usage || {};
+        const window = info.model_context_window || null;
+        const ctx = usage.input_tokens ?? usage.total_tokens ?? null;
+        live = { ...live, ctx, ctxPct: ctx != null && window ? Math.min(100, Math.round((ctx / window) * 100)) : live.ctxPct, ts: ts || live.ts };
+      } else if (p.type === 'user_message') {
         const text = p.message || '';
         if (text.trim() && !text.startsWith('<')) {
           if (!firstUserText) firstUserText = text;
           messages.push({ role: 'user', kind: 'text', text, ts });
+          live = { ...live, state: 'working', action: { cat: 'other', verb: 'reading', label: 'your prompt' }, ts };
         }
       } else if (p.type === 'agent_message') {
         if (p.message && p.message.trim())
@@ -278,6 +318,7 @@ export async function parseCodex(file) {
           /* keep as string */
         }
         messages.push({ role: 'assistant', kind: 'tool_use', name: p.name, input, ts });
+        live = { ...live, state: 'working', action: codexToolAction(p.name, input), ts };
       } else if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output') {
         codexPushOutput(messages, p.output);
         messages[messages.length - 1].ts = ts;
@@ -296,6 +337,7 @@ export async function parseCodex(file) {
     messageCount: messages.length,
     file,
     messages,
+    live,
   };
 }
 

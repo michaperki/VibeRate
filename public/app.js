@@ -701,54 +701,54 @@ async function fetchTicker() {
 
 const fmtTokens = (n) => (n == null ? '' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 
-// The agent ticker under the brain (live only). Two modes:
-//  • hook stream present → a status-line-style readout: working/idle, the current
-//    action, and context load — updates per agent event (no transcript-flush lag).
-//  • fallback → the recent tool actions parsed from the (lagged) session log.
+// The agent ticker under the brain (live only). The server merges Claude hook
+// agents with Codex rollout agents; old servers still degrade to one log-tail row.
 function tickerHtml() {
   const t = state.ticker;
   if (!state.live || !t) return '';
-  const items = (t.items || []).slice(-4);
-
-  if (t.live) {
-    const live = t.live;
-    const working = live.state === 'working';
-    const ended = live.state === 'ended';
-    // We never *assert* liveness — a hard exit fires no hook (see LIVE_ORCHESTRATION §8a),
-    // so the server downgrades a stale "working" to idle. Reflect that honestly: only the
-    // recent-working case claims activity; otherwise show when it last moved, not a guess.
-    const word = working ? 'working' : ended ? 'closed' : 'idle';
-    const lastMove = live.ts ? fmtAgo(live.ts) : null;
-    const now = working
-      ? (live.action
-        ? `${esc(live.action.verb || 'using')} <span class="tick-label">${esc(live.action.label || live.action.cat || '')}</span>`
-        : 'thinking…')
-      : ended
-        ? `session closed${lastMove ? ` · ${lastMove}` : ''}`
-        : live.stale
-          ? `no activity${lastMove ? ` · last move ${lastMove}` : ''}`
-          : 'waiting for you';
-    const ctx = live.ctx != null
-      ? `<span class="tick-ctx" title="context window used — ${live.ctx.toLocaleString()} tokens${live.model ? ' · ' + esc(live.model) : ''}">◔ ${fmtTokens(live.ctx)}${live.ctxPct != null ? ` · ${live.ctxPct}%` : ''}</span>`
-      : '';
-    const trail = items.length
-      ? `<span class="tick-trail">${items.map((it) => `<span class="tick-dot ${esc(it.cat || 'other')}" title="${esc((it.verb || '') + ' ' + (it.label || ''))}"></span>`).join('')}</span>`
-      : '';
-    return `<div class="brain-ticker ${working ? 'working' : 'idle'}" id="brainTicker">
-      <span class="tick-state"><span class="tick-pulse"></span>${word}</span>
-      <span class="tick-now">${now}</span>
-      ${trail}${ctx}
-    </div>`;
-  }
-
-  if (!items.length) return '';
-  const row = items
-    .map((it, i) => {
-      const cur = i === items.length - 1 ? ' cur' : '';
-      return `<span class="tick-item${cur}"><span class="tick-dot ${esc(it.cat || 'other')}"></span><span class="tick-verb">${esc(it.verb || 'using')}</span> <span class="tick-label">${esc(it.label || '')}</span></span>`;
-    })
-    .join('<span class="tick-sep">›</span>');
-  return `<div class="brain-ticker" id="brainTicker"><span class="tick-tag">agent</span>${row}</div>`;
+  const renderAgent = (agent) => {
+    const items = (agent.items || []).slice(-4);
+    if (agent.live) {
+      const live = agent.live;
+      const working = live.state === 'working';
+      const ended = live.state === 'ended';
+      // We never *assert* liveness — stale hook/log events downgrade to idle.
+      const word = working ? 'working' : ended ? 'closed' : 'idle';
+      const lastMove = live.ts ? fmtAgo(live.ts) : null;
+      const now = working
+        ? (live.action
+          ? `${esc(live.action.verb || 'using')} <span class="tick-label">${esc(live.action.label || live.action.cat || '')}</span>`
+          : 'thinking…')
+        : ended
+          ? `session closed${lastMove ? ` · ${lastMove}` : ''}`
+          : live.stale
+            ? `no activity${lastMove ? ` · last move ${lastMove}` : ''}`
+            : 'waiting for you';
+      const ctx = live.ctx != null
+        ? `<span class="tick-ctx" title="context window used — ${live.ctx.toLocaleString()} tokens${live.model ? ' · ' + esc(live.model) : ''}">◔ ${fmtTokens(live.ctx)}${live.ctxPct != null ? ` · ${live.ctxPct}%` : ''}</span>`
+        : '';
+      const trail = items.length
+        ? `<span class="tick-trail">${items.map((it) => `<span class="tick-dot ${esc(it.cat || 'other')}" title="${esc((it.verb || '') + ' ' + (it.label || ''))}"></span>`).join('')}</span>`
+        : '';
+      return `<div class="brain-ticker ${working ? 'working' : 'idle'}">
+        <span class="tick-tag ${esc(agent.source || '')}">${esc(agent.source || 'agent')}</span>
+        <span class="tick-state"><span class="tick-pulse"></span>${word}</span>
+        <span class="tick-now">${now}</span>
+        ${trail}${ctx}
+      </div>`;
+    }
+    if (!items.length) return '';
+    const row = items
+      .map((it, i) => {
+        const cur = i === items.length - 1 ? ' cur' : '';
+        return `<span class="tick-item${cur}"><span class="tick-dot ${esc(it.cat || 'other')}"></span><span class="tick-verb">${esc(it.verb || 'using')}</span> <span class="tick-label">${esc(it.label || '')}</span></span>`;
+      })
+      .join('<span class="tick-sep">›</span>');
+    return `<div class="brain-ticker"><span class="tick-tag ${esc(agent.source || '')}">${esc(agent.source || 'agent')}</span>${row}</div>`;
+  };
+  const agents = t.agents && t.agents.length ? t.agents : [t];
+  const rows = agents.map(renderAgent).filter(Boolean).join('');
+  return rows ? `<div class="brain-tickers" id="brainTicker">${rows}</div>` : '';
 }
 
 // Patch the ticker in place (the brain itself updates in-place on live ticks, so the
@@ -756,7 +756,7 @@ function tickerHtml() {
 function updateTicker() {
   const card = el('#conversation .dash-card.centerpiece');
   if (!card) return;
-  const existing = card.querySelector('.brain-ticker');
+  const existing = card.querySelector('.brain-tickers, .brain-ticker');
   const html = tickerHtml();
   if (!html) { if (existing) existing.remove(); return; }
   const tmp = document.createElement('template');

@@ -757,6 +757,8 @@ pre.code {
 /* doc reader as a floating overlay in front of the network */
 .brain-wrap { position: relative; }
 /* live agent ticker — one-line "what's the agent chewing on" under the brain */
+.brain-tickers { display: grid; gap: 4px; margin-top: 4px; }
+.brain-tickers .brain-ticker { margin-top: 0; }
 .brain-ticker {
   display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; overflow: hidden;
   margin: 4px 2px 0; padding: 6px 9px; border-radius: 8px;
@@ -770,6 +772,8 @@ pre.code {
   font-weight: 700; color: var(--accent); padding: 1px 5px; border-radius: 4px;
   background: rgba(124, 92, 255, 0.14);
 }
+.brain-ticker .tick-tag.claude { color: var(--claude); background: rgba(204, 120, 92, 0.13); }
+.brain-ticker .tick-tag.codex { color: var(--codex); background: rgba(46, 207, 143, 0.12); }
 .brain-ticker .tick-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; opacity: 0.6; }
 .brain-ticker .tick-item.cur { opacity: 1; color: var(--text); }
 .brain-ticker .tick-sep { flex: none; opacity: 0.4; }
