@@ -82,6 +82,13 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
   when it eventually goes hosted.
 - **Approvals are the real surface area.** The chat box is trivial; the permission /
   approval UX (showing exact commands before they run) is the project.
+- **Inherited `ANTHROPIC_API_KEY` shadows the real login.** `agent.js` spawns with
+  `env: process.env` to pick up local auth — but if a stale/invalid
+  `ANTHROPIC_API_KEY` is exported in the shell, it wins over the subscription
+  `~/.claude/.credentials.json` and every turn dies with a 401 (`apiKeySource:
+  ANTHROPIC_API_KEY` in `system/init`). Confirmed in Mike's own WSL shell. The
+  gateway should surface `apiKeySource` (the init event already reports it) and/or
+  strip a broken key, or Fork A silently fails to use the auth it's built around.
 
 ## Phasing (rough, validated against Codex's estimates)
 
@@ -92,8 +99,36 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
       `!HOSTED` and loopback-guarded), and `public/drive.html` (the `/drive` chat
       UI). Turn model is one short-lived process per message resuming by session
       id — matches "resume an idle session by ID" and keeps a real process handle
-      for ground-truth liveness. Streaming partial tokens into the reader is the
-      obvious next polish; turn-level assistant text lands today.
+      for ground-truth liveness.
+- [x] **Token streaming.** `--include-partial-messages` per turn; `agent.js`
+      streams `stream_event` text/thinking deltas as `assistant_text_delta` /
+      `thinking_delta` and skips the consolidated `assistant` blocks it already
+      streamed (flagged per-turn), so the reader fills in live without
+      double-rendering. Falls back to whole-message text if partials are absent.
+- [ ] **Capture & present the agent's questions** (the delightful part — what
+      Mike actually wants next; full per-tool *approvals* are backlogged because
+      everyone runs YOLO). Empirically grounded (Claude 2.1.183, real spawn):
+      - `AskUserQuestion` is available headless and emits a clean structured
+        `tool_use`: `input.questions[]` = `{question, header, multiSelect,
+        options:[{label, description}]}`. So we can render a real choice card.
+      - **The built-in `AskUserQuestion` is TUI-only headless (confirmed).** It
+        auto-denies (`tool_result {content:"Answer questions?", is_error:true}`,
+        `permission_denials`) **even with stdin held open**, and emits **no
+        `can_use_tool` control_request**. So answering it inline over the control
+        protocol on the real `claude -p` binary is impossible. (The control
+        protocol — `control_request`/`control_response`, subtypes `can_use_tool`,
+        `interrupt`, `set_permission_mode`, `apply_flag_settings` — is for
+        approvals/steering, backlogged.)
+      - **DECISION (Mike, 2026-06-19): B2 — true inline picker, via a custom MCP
+        `ask` tool** (the only route that works on the real binary). Run a local
+        MCP server VibeRate owns; steer the driven agent (appendSystemPrompt /
+        output style) to call `mcp__viberate__ask` instead of the built-in. An MCP
+        tool_use blocks until the server returns, so the server fans the question
+        to the Drive UI, awaits the click, and returns the chosen option as the
+        tool_result — agent continues same-turn, no denial, Fork A intact.
+        **CAVEAT to verify first:** MCP tool-call timeout must be generous enough
+        for a human to answer. (Capture-only rendering of the built-in card works
+        today; plain end-of-turn text questions already round-trip via resume.)
 - [ ] **Approvals + interrupt** on the owned session; ownership lease + read-only
       fallback for terminal-driven sessions.
 - [ ] **Dual-provider** unified event model (the likeliest schedule overrun —

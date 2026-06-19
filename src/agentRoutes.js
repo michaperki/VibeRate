@@ -1,12 +1,17 @@
-// HTTP surface for the local agent runtime (src/agent.js). Kept in its own file
-// because this is the RCE-sensitive control plane (PLAN_AGENT_RUNTIME.md): every
-// route here can cause shell + file ops on the dev machine, so it is mounted
-// only in local mode and every request is additionally loopback-guarded.
+// HTTP surface for the agent runtime (src/agent.js). Kept in its own file because
+// this is the RCE-sensitive control plane (PLAN_AGENT_RUNTIME.md): every route
+// here can cause shell + file ops on the host. Two guard modes:
+//   - local (`vbrt serve`): loopback-only, single trusted user.
+//   - hosted (Fly): the routes are reachable over the internet, so they are gated
+//     to a signed-in account whose email is in the admin allowlist. Deny-by-default
+//     — an empty/missing allowlist locks the control plane entirely.
 
 import path from 'node:path';
+import fs from 'node:fs';
 import { startSession, sendMessage, stopSession, subscribe, getSession, listSessions } from './agent.js';
+import { currentUser } from './oauth.js';
 
-// Hard gate: refuse any request whose TCP peer isn't loopback. We deliberately
+// Local guard: refuse any request whose TCP peer isn't loopback. We deliberately
 // read socket.remoteAddress (the real peer) rather than req.ip, so a spoofed
 // X-Forwarded-For can't pass even though the app trusts proxies for link minting.
 function loopbackOnly(req, res, next) {
@@ -16,16 +21,37 @@ function loopbackOnly(req, res, next) {
   next();
 }
 
+// Hosted guard: a signed-in account whose email is in the admin allowlist. The
+// loopback check is meaningless behind Fly's proxy, so identity is the gate.
+function makeAdminGuard(adminEmails) {
+  const allow = new Set((adminEmails || []).map((e) => e.trim().toLowerCase()).filter(Boolean));
+  return function requireAdmin(req, res, next) {
+    const user = currentUser(req);
+    const email = user && user.email ? user.email.toLowerCase() : null;
+    if (!email || !allow.has(email)) {
+      return res.status(403).json({ error: 'drive is restricted to the instance admin; sign in at /auth' });
+    }
+    next();
+  };
+}
+
 function fail(res, err) {
   res.status(400).json({ error: err && err.message ? err.message : String(err) });
 }
 
-export function mountAgent(app, publicDir) {
-  const guard = loopbackOnly;
+// opts: { hosted, adminEmails, defaultCwd }. In hosted mode the control plane is
+// internet-reachable, so the admin guard (not loopback) is the protection.
+export function mountAgent(app, publicDir, opts = {}) {
+  const { hosted = false, adminEmails = [], defaultCwd = process.cwd() } = opts;
+  const guard = hosted ? makeAdminGuard(adminEmails) : loopbackOnly;
+
+  // Make sure the default working directory exists so the very first session can
+  // start (on Fly this is a dir on the persistent volume, not the app source).
+  try { fs.mkdirSync(defaultCwd, { recursive: true }); } catch { /* best effort */ }
 
   // Is the runtime usable here? (UI uses this to show a clear banner.)
   app.get('/api/agent/health', guard, (_req, res) => {
-    res.json({ ok: true, bin: process.env.VBRT_CLAUDE_BIN || 'claude', defaultCwd: process.cwd() });
+    res.json({ ok: true, bin: process.env.VBRT_CLAUDE_BIN || 'claude', defaultCwd });
   });
 
   app.get('/api/agent/sessions', guard, (_req, res) => {
@@ -36,7 +62,7 @@ export function mountAgent(app, publicDir) {
   app.post('/api/agent/sessions', guard, (req, res) => {
     try {
       const { cwd, prompt, permissionMode } = req.body || {};
-      res.json(startSession({ cwd: cwd || process.cwd(), prompt, permissionMode }));
+      res.json(startSession({ cwd: cwd || defaultCwd, prompt, permissionMode }));
     } catch (err) {
       fail(res, err);
     }

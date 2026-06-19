@@ -13,6 +13,17 @@ primary_region = "fra"
   # Multi-tenant mode: public landing at /, token-scoped dashboard at /app,
   # no anonymous enumeration of the project list.
   VBRT_HOSTED = "1"
+  # Drive (the RCE control plane) is gated to these signed-in accounts. Not a
+  # secret (emails aren't sensitive); deny-by-default if empty. See agentRoutes.js.
+  VBRT_ADMIN_EMAILS = "mperkins1995@gmail.com"
+  # Where driven agents work — a dedicated dir on the volume, never /app (the
+  # running server's own source) or /data (the project store).
+  VBRT_AGENT_CWD = "/data/drive"
+  # The container runs as root, and Claude Code refuses --dangerously-skip-
+  # permissions (our bypassPermissions mode) as root unless it knows it's in a
+  # sandbox. A Fly firecracker VM IS that sandbox boundary, so this is legit.
+  # Fly-only: local `vbrt serve` runs as the user and must NOT set this.
+  IS_SANDBOX = "1"
 
 # Persistent volume for the file-based project store. The source name must match
 # the volume you create (`fly volumes create viberate_data ...`). One machine
@@ -24,11 +35,12 @@ primary_region = "fra"
 [http_service]
   internal_port = 8080
   force_https = true
-  # Scale to zero when idle (cheap); the proxy cold-starts the machine on the
-  # next request. Bump min_machines_running to 1 for always-on / snappy links.
-  auto_stop_machines = "stop"
+  # Drive holds interactive agent state in memory (the session map, the resume
+  # ids), so the machine must NOT scale to zero mid-conversation. Keep one always
+  # running. (Drop back to "stop"/0 if you ever run share-only without Drive.)
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
   [[http_service.checks]]
@@ -40,4 +52,6 @@ primary_region = "fra"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "512mb"
+  # 512mb is fine for share-only, but a spawned `claude` turn is a heavy Node
+  # process — bumped so Drive turns don't OOM. Raise to 2048mb if you see OOMs.
+  memory = "1024mb"

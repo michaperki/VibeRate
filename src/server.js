@@ -131,11 +131,16 @@ export function startServer(port = 4317) {
 
   if (HOSTED) mountAuth(app); // /auth/* sign-in, /api/me, /api/auth/providers
 
-  // Local agent runtime — the "drive" half (PLAN_AGENT_RUNTIME.md). Mounts the
-  // chat/control plane and the /drive UI, but ONLY in local mode: in hosted mode
-  // these routes don't exist at all. The control plane is an RCE surface, so it's
-  // also loopback-guarded inside mountAgent. See src/agent.js.
-  if (!HOSTED) mountAgent(app, PUBLIC_DIR);
+  // Agent runtime — the "drive" half (PLAN_AGENT_RUNTIME.md). Mounts the
+  // chat/control plane and the /drive UI. This is an RCE surface, so the guard
+  // inside mountAgent is mode-dependent: loopback-only locally, and a signed-in
+  // admin-email allowlist when hosted (where the routes are internet-reachable).
+  // Deny-by-default: hosted with an empty VBRT_ADMIN_EMAILS locks Drive entirely.
+  mountAgent(app, PUBLIC_DIR, {
+    hosted: HOSTED,
+    adminEmails: (process.env.VBRT_ADMIN_EMAILS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    defaultCwd: process.env.VBRT_AGENT_CWD || process.cwd(),
+  });
 
   // Liveness probe for the host's health checks. Cheap, no I/O.
   app.get('/healthz', (_req, res) => {

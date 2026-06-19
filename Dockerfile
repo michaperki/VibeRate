@@ -1,12 +1,21 @@
-# VibeRate hosted server — pure Node + Express. The push client needs no build
-# step; the server just serves the SPA and the ingest/read API.
-FROM node:20-alpine
+# VibeRate hosted server. Debian (glibc) base rather than alpine (musl) because
+# the Drive runtime spawns the real `claude` CLI, whose native binary needs glibc.
+FROM node:20-slim
+
+# git: driven agents clone/operate on repos under the Drive workdir.
+# ca-certificates: TLS for the Anthropic API and git over https.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Install deps first so this layer is cached unless the lockfile changes.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
+
+# The Claude Code CLI, on PATH as `claude` — what src/agent.js spawns (Fork A).
+RUN npm install -g @anthropic-ai/claude-code
 
 # App source (see .dockerignore for what's excluded).
 COPY . .
