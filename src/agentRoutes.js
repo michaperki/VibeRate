@@ -6,7 +6,6 @@
 //     to a signed-in account whose email is in the admin allowlist. Deny-by-default
 //     — an empty/missing allowlist locks the control plane entirely.
 
-import path from 'node:path';
 import fs from 'node:fs';
 import { startSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk } from './agent.js';
 import { currentUser } from './oauth.js';
@@ -40,8 +39,10 @@ function fail(res, err) {
 }
 
 // opts: { hosted, adminEmails, defaultCwd }. In hosted mode the control plane is
-// internet-reachable, so the admin guard (not loopback) is the protection.
-export function mountAgent(app, publicDir, opts = {}) {
+// internet-reachable, so the admin guard (not loopback) is the protection. The
+// Drive UI itself is now part of the dashboard SPA (public/app.js), so there's no
+// page to serve here — only the JSON/SSE control plane.
+export function mountAgent(app, opts = {}) {
   const { hosted = false, adminEmails = [], defaultCwd = process.cwd() } = opts;
   const guard = hosted ? makeAdminGuard(adminEmails) : loopbackOnly;
 
@@ -143,10 +144,5 @@ export function mountAgent(app, publicDir, opts = {}) {
       clearInterval(ping);
       unsub && unsub();
     });
-  });
-
-  // The drive UI itself (standalone, local-only page).
-  app.get('/drive', guard, (_req, res) => {
-    res.sendFile(path.join(publicDir, 'drive.html'));
   });
 }

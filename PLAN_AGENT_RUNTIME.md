@@ -95,9 +95,12 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
 - [x] **Local PoC:** localhost-only chat, Claude-first, Fork A, start/resume idle
       sessions, stream assistant text. No approvals, no relay. Shipped as
       `src/agent.js` (spawns the real `claude` binary, one turn per message,
-      resume-by-id), `src/agentRoutes.js` (`/api/agent/*` + SSE, mounted only when
-      `!HOSTED` and loopback-guarded), and `public/drive.html` (the `/drive` chat
-      UI). Turn model is one short-lived process per message resuming by session
+      resume-by-id) and `src/agentRoutes.js` (`/api/agent/*` + SSE, guarded —
+      loopback locally, admin-allowlisted hosted). The chat UI began as a
+      standalone `public/drive.html`; it has since been **folded into the
+      dashboard SPA** (`public/app.js`, the `✦ Drive` entry in a project) so a
+      driven session lives in the same surface as the convos reader — the
+      standalone page is gone. Turn model is one short-lived process per message resuming by session
       id — matches "resume an idle session by ID" and keeps a real process handle
       for ground-truth liveness.
 - [x] **Token streaming.** `--include-partial-messages` per turn; `agent.js`

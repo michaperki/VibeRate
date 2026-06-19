@@ -42,6 +42,13 @@ const state = {
   _liveSeenPrompts: null,
   _liveFreshPrompts: null,
   _pendingTurn: null,
+  // Drive — the live agent runtime, ported in from the old standalone /drive page.
+  driveable: null, // null = unprobed, false = unavailable/forbidden, true = usable
+  driveDefaultCwd: null, // health.defaultCwd — prefill for a new session's cwd
+  driveBin: null, // health.bin — the claude binary the host will spawn
+  drive: null, // active driven session: { id, status, claudeSessionId, cwd, es }
+  _driveOpen: false, // the Drive view owns #conversation (suppress timeline re-renders)
+  _driveLive: { text: null, thinking: null }, // streaming partial bubbles being filled
 };
 
 // ---------- helpers ----------
@@ -101,6 +108,34 @@ async function apiPost(path, body) {
   const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body || {}) });
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
+}
+
+// Drive (agent runtime) calls. Unlike api()/apiPost(), these surface the route's
+// `{ error }` body — the control plane returns human messages we show in a banner.
+async function driveApi(path, opts) {
+  const headers = { ...(state.token ? { authorization: `Bearer ${state.token}` } : {}) };
+  if (opts && opts.body) headers['content-type'] = 'application/json';
+  const res = await fetch('/api/agent' + path, opts ? { ...opts, headers } : { headers });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || res.statusText);
+  return j;
+}
+const drivePost = (path, body) => driveApi(path, { method: 'POST', body: JSON.stringify(body || {}) });
+
+// Probe the runtime once. Success → the host can spawn agents for this caller
+// (loopback locally, or an admin-allowlisted account hosted) and we light up the
+// Drive entry point. A 403/failure leaves driveable=false (read-only dashboard).
+async function ensureDriveProbe() {
+  if (state.driveable !== null) return state.driveable;
+  try {
+    const h = await driveApi('/health');
+    state.driveable = !!h.ok;
+    state.driveDefaultCwd = h.defaultCwd || null;
+    state.driveBin = h.bin || 'claude';
+  } catch {
+    state.driveable = false;
+  }
+  return state.driveable;
 }
 
 // Light markdown: fenced code blocks, inline code, bold. Newlines via CSS.
@@ -389,6 +424,9 @@ function showHome() {
   document.body.classList.add('view-home');
   document.querySelectorAll('.proj.active').forEach((n) => n.classList.remove('active'));
   stopLive();
+  if (state.drive && state.drive.es) state.drive.es.close();
+  state.drive = null;
+  state._driveOpen = false;
   state.project = null;
   state.session = null;
 }
@@ -563,6 +601,10 @@ async function selectProject(slug) {
   // project feels open right away instead of after the whole fetch batch. The list
   // degrades gracefully without activity (falls back to manifest message counts).
   renderSessionList();
+
+  // Probe the agent runtime once; if usable, re-paint the rail so the Drive entry
+  // point appears. Fire-and-forget — the dashboard is fully functional without it.
+  ensureDriveProbe().then((ok) => { if (ok && slug === state.project) renderSessionList(); });
 
   // Fetch the rest in parallel — was a 6-request serial waterfall, so the open
   // cost the *sum* of six round-trips; now it's the *max*. Commit whatever returns;
@@ -1057,6 +1099,10 @@ function renderSessionList() {
       <button class="${state.railMode === 'sessions' ? 'on' : ''}" data-rail="sessions">Sessions</button>
     </div>`;
   const hostedProject = document.body.classList.contains('hosted');
+  // The Drive entry point — only when the runtime probed usable for this caller.
+  const driveBtn = state.driveable
+    ? `<button class="pb-drive" data-drive-new title="Start a new agent session here — chat with Claude in the browser">✦ Drive</button>`
+    : '';
   const projectBar = hostedProject ? '' : `
     <div class="project-bar">
       <button class="back-projects" data-back-projects title="Back to workspace">←</button>
@@ -1064,9 +1110,10 @@ function renderSessionList() {
         <div class="pb-name">${esc(p.name || p.slug)}</div>
         <div class="pb-meta">${plural((state.promptUnits || []).length, 'prompt')} · ${plural(p.sessions.length, 'session')}</div>
       </div>
+      ${driveBtn}
     </div>`;
   const paneTitle = hostedProject
-    ? `<div class="pane-title">${esc(p.name || p.slug)} · ${plural((state.promptUnits || []).length, 'prompt')} · ${plural(p.sessions.length, 'session')}</div>`
+    ? `<div class="pane-title">${esc(p.name || p.slug)} · ${plural((state.promptUnits || []).length, 'prompt')} · ${plural(p.sessions.length, 'session')}${driveBtn}</div>`
     : '';
 
   const promptRows = () => {
@@ -1104,6 +1151,9 @@ function renderSessionList() {
 
   const back = el('#sessions').querySelector('[data-back-projects]');
   if (back) back.addEventListener('click', showHome);
+
+  const driveNew = el('#sessions').querySelector('[data-drive-new]');
+  if (driveNew) driveNew.addEventListener('click', openDriveStart);
 
   const bc = el('#sessions').querySelector('[data-list-brush-clear]');
   if (bc) bc.addEventListener('click', () => {
@@ -1178,6 +1228,7 @@ function timelineSessions() {
 }
 
 function renderTimeline() {
+  if (state._driveOpen) return; // Drive owns #conversation — don't repaint over it
   const sessions = timelineSessions();
   if (sessions.length === 0) {
     el('#conversation').innerHTML = '<div class="empty">No timestamped sessions.</div>';
@@ -2577,6 +2628,8 @@ function backToDashboard() {
 }
 
 async function selectSession(slug, id, turnIndex = null) {
+  // Leaving Drive (if open) for a historical convo: tear down its stream first.
+  if (state._driveOpen) { if (state.drive && state.drive.es) state.drive.es.close(); state.drive = null; state._driveOpen = false; }
   // Keep streaming on (if it was) so the reader can *follow* a live conversation.
   state.session = id;
   state._pendingTurn = Number.isFinite(turnIndex) ? turnIndex : null;
@@ -3264,6 +3317,296 @@ async function renderSignIn(msg) {
   if (gb) gb.onclick = go;
   const ti = el('#token-input');
   if (ti) ti.addEventListener('keydown', (e) => e.key === 'Enter' && go());
+}
+
+// ============================================================================
+// Drive — the live agent runtime, folded into the dashboard (was public/drive.html).
+// Same server control plane (/api/agent/*, src/agent.js): we spawn the user's real
+// `claude` binary, stream its turns over SSE, and let them chat back. This view
+// owns #conversation while open; the runtime is the RCE surface, so the entry
+// point only appears when ensureDriveProbe() succeeded for this caller.
+// ============================================================================
+
+const DRIVE_PERMS = [
+  ['default', 'default — read/chat only (edits & shell need approval)'],
+  ['plan', 'plan — research & propose, no writes'],
+  ['acceptEdits', 'acceptEdits — auto-accept file edits'],
+  ['bypassPermissions', 'bypassPermissions — run anything (DANGER, local only)'],
+];
+
+function driveBanner(msg, kind) {
+  const b = el('#dv-banner');
+  if (!b) return;
+  b.textContent = msg || '';
+  b.className = 'dv-banner ' + (kind || '');
+  b.classList.toggle('hidden', !msg);
+}
+
+// Take over #conversation with the new-session form. Stops the bundle live-poll so
+// its timeline re-render can't clobber the Drive view (the SSE gives liveness here).
+function openDriveStart() {
+  stopLive();
+  state.session = null;
+  state._driveOpen = true;
+  if (state.drive && state.drive.es) { state.drive.es.close(); }
+  state.drive = null;
+  const opts = DRIVE_PERMS.map(([v, label]) => `<option value="${v}">${esc(label)}</option>`).join('');
+  el('#conversation').innerHTML = `
+    <div class="dv-wrap">
+      <div class="conv-toolbar dv-toolbar">
+        <div class="conv-head">
+          <button class="back-dash" data-back-dash title="Back to dashboard">← dashboard</button>
+          <h2>✦ New agent session</h2>
+          <div class="meta">browser → <code>${esc(state.driveBin || 'claude')}</code> · runs on the host, streams here</div>
+        </div>
+      </div>
+      <div class="dv-body dv-start">
+        <div id="dv-banner" class="dv-banner hidden"></div>
+        <label for="dv-cwd">Working directory</label>
+        <input id="dv-cwd" value="${esc(state.driveDefaultCwd || '')}" placeholder="/path/to/project" />
+        <label for="dv-perm">Permission mode</label>
+        <select id="dv-perm">${opts}</select>
+        <div class="dv-warn" id="dv-permwarn"></div>
+        <label for="dv-prompt">First message</label>
+        <textarea id="dv-prompt" placeholder="What should the agent do?"></textarea>
+        <div class="dv-actions"><button id="dv-start">Start session</button></div>
+      </div>
+    </div>`;
+  el('#conversation').scrollTop = 0;
+  wireDriveBackDash();
+  el('#dv-perm').addEventListener('change', (e) => {
+    el('#dv-permwarn').textContent = e.target.value === 'bypassPermissions'
+      ? '⚠ The agent can run any shell command and edit any file with no confirmation. Local machine only.' : '';
+  });
+  const start = async () => {
+    const prompt = el('#dv-prompt').value.trim();
+    if (!prompt) return;
+    el('#dv-start').disabled = true;
+    try {
+      const s = await drivePost('/sessions', {
+        cwd: el('#dv-cwd').value.trim(), prompt, permissionMode: el('#dv-perm').value,
+      });
+      enterDrive(s);
+    } catch (e) { driveBanner(e.message, 'bad'); el('#dv-start').disabled = false; }
+  };
+  el('#dv-start').addEventListener('click', start);
+  el('#dv-prompt').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') start(); });
+}
+
+// Enter a live driven session: render the transcript shell + composer, open the stream.
+function enterDrive(s) {
+  state._driveOpen = true;
+  state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, es: null };
+  state._driveLive = { text: null, thinking: null };
+  renderDriveView();
+  driveOpenStream(s.id, 0);
+}
+
+function renderDriveView() {
+  const d = state.drive;
+  el('#conversation').innerHTML = `
+    <div class="dv-wrap">
+      <div class="conv-toolbar dv-toolbar">
+        <div class="conv-head">
+          <button class="back-dash" data-back-dash title="Back to dashboard">← dashboard</button>
+          <h2>✦ Driving</h2>
+          <div class="meta">
+            <span class="dv-pill" id="dv-pill">—</span>
+            <code>${esc(d.cwd || '')}</code>
+            <span class="dim-note">claude: <code id="dv-cid">${esc(d.claudeSessionId || '…')}</code></span>
+          </div>
+        </div>
+      </div>
+      <div id="dv-banner" class="dv-banner hidden"></div>
+      <div class="dv-body"><div id="dv-transcript" class="dv-transcript"></div></div>
+      <div class="dv-composer">
+        <textarea id="dv-followup" placeholder="Reply to the agent…  (⌘/Ctrl+Enter to send)"></textarea>
+        <div class="dv-actions">
+          <button id="dv-send">Send</button>
+          <button id="dv-stop" class="ghost">Stop turn</button>
+          <button id="dv-new" class="ghost">New session</button>
+        </div>
+      </div>
+    </div>`;
+  el('#conversation').scrollTop = 0;
+  wireDriveBackDash();
+  driveSetStatus(d.status || 'starting');
+  el('#dv-send').addEventListener('click', driveSend);
+  el('#dv-stop').addEventListener('click', () => state.drive && drivePost('/sessions/' + state.drive.id + '/stop').catch((e) => driveBanner(e.message, 'bad')));
+  el('#dv-new').addEventListener('click', openDriveStart);
+  el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
+}
+
+async function driveSend() {
+  const ta = el('#dv-followup');
+  const prompt = ta && ta.value.trim();
+  if (!prompt || !state.drive) return;
+  try {
+    await drivePost('/sessions/' + state.drive.id + '/message', { prompt });
+    ta.value = '';
+  } catch (e) { driveBanner(e.message, 'bad'); }
+}
+
+function wireDriveBackDash() {
+  const b = el('#conversation [data-back-dash]');
+  if (b) b.addEventListener('click', exitDrive);
+}
+
+// Leave Drive, tear down the stream, hand #conversation back to the dashboard.
+function exitDrive() {
+  if (state.drive && state.drive.es) state.drive.es.close();
+  state.drive = null;
+  state._driveOpen = false;
+  renderTimeline();
+}
+
+function driveSetStatus(status) {
+  if (state.drive) state.drive.status = status;
+  const pill = el('#dv-pill');
+  if (pill) { pill.textContent = status; pill.className = 'dv-pill ' + status; }
+  const send = el('#dv-send'); const stop = el('#dv-stop');
+  const busy = status === 'working' || status === 'starting';
+  if (send) send.disabled = busy;
+  if (stop) stop.disabled = !busy;
+}
+
+function driveScroll() {
+  const c = el('#conversation');
+  if (c) c.scrollTop = c.scrollHeight;
+}
+
+// Append a transcript bubble. `bodyText` is plain text (set via textContent so
+// streamed deltas can append safely); returns the element for live filling.
+function driveAddEv(cls, who, bodyText) {
+  const t = el('#dv-transcript');
+  if (!t) return null;
+  const div = document.createElement('div');
+  div.className = 'dv-ev ' + cls;
+  if (who) { const h = document.createElement('div'); h.className = 'dv-who'; h.textContent = who; div.appendChild(h); }
+  if (bodyText != null) { const b = document.createElement('div'); b.className = 'dv-body-t'; b.textContent = bodyText; div.appendChild(b); }
+  t.appendChild(div);
+  driveScroll();
+  return div;
+}
+function driveAppend(elm, text) {
+  if (!elm) return;
+  elm.querySelector('.dv-body-t').textContent += text;
+  driveScroll();
+}
+
+function driveSummarizeInput(input) {
+  try { const s = JSON.stringify(input); return s.length > 300 ? s.slice(0, 300) + '…' : s; }
+  catch { return ''; }
+}
+
+// The inline picker (the agent called mcp__viberate__ask). Build a choice card;
+// on submit, POST the selections so the parked tool call returns and the turn continues.
+function driveRenderAsk(ev) {
+  const t = el('#dv-transcript');
+  if (!t) return;
+  const qs = ev.questions || [];
+  const card = document.createElement('div');
+  card.className = 'dv-ev dv-ask';
+  card.dataset.askId = ev.askId;
+  const who = document.createElement('div'); who.className = 'dv-who'; who.textContent = '❓ agent asks'; card.appendChild(who);
+  qs.forEach((q, qi) => {
+    const block = document.createElement('div'); block.className = 'dv-askq';
+    const title = document.createElement('div'); title.className = 'dv-askq-title';
+    title.textContent = (q.header ? '[' + q.header + '] ' : '') + (q.question || '');
+    block.appendChild(title);
+    const type = q.multiSelect ? 'checkbox' : 'radio';
+    (q.options || []).forEach((opt) => {
+      const lab = document.createElement('label'); lab.className = 'dv-askopt';
+      const inp = document.createElement('input');
+      inp.type = type; inp.name = 'ask-' + ev.askId + '-' + qi; inp.value = opt.label;
+      const span = document.createElement('span'); span.textContent = opt.label;
+      if (opt.description) { const dd = document.createElement('span'); dd.className = 'dv-desc'; dd.textContent = ' — ' + opt.description; span.appendChild(dd); }
+      lab.appendChild(inp); lab.appendChild(span); block.appendChild(lab);
+    });
+    const otherWrap = document.createElement('div'); otherWrap.className = 'dv-askother';
+    const other = document.createElement('input');
+    other.type = 'text'; other.placeholder = 'Other…'; other.dataset.qi = String(qi);
+    otherWrap.appendChild(other); block.appendChild(otherWrap);
+    card.appendChild(block);
+  });
+  const btn = document.createElement('button'); btn.textContent = 'Answer';
+  const actions = document.createElement('div'); actions.className = 'dv-actions'; actions.appendChild(btn);
+  card.appendChild(actions);
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const selections = qs.map((q, qi) => {
+      const picked = [...card.querySelectorAll('input[name="ask-' + ev.askId + '-' + qi + '"]:checked')].map((i) => i.value);
+      const other = card.querySelector('.dv-askother input[data-qi="' + qi + '"]');
+      const customText = other && other.value.trim() ? other.value.trim() : undefined;
+      return { header: q.header, question: q.question, selectedLabels: picked, customText };
+    });
+    try {
+      await drivePost('/sessions/' + state.drive.id + '/answer', { askId: ev.askId, selections });
+    } catch (e) { driveBanner(e.message, 'bad'); btn.disabled = false; }
+  });
+  t.appendChild(card);
+  driveScroll();
+}
+
+function driveMarkAskResolved(ev) {
+  const card = el('#dv-transcript .dv-ask[data-ask-id="' + ev.askId + '"]');
+  if (!card || card.classList.contains('answered')) return;
+  card.classList.add('answered');
+  card.querySelectorAll('input, button').forEach((e) => { e.disabled = true; });
+  const status = document.createElement('div'); status.className = 'dv-askstatus';
+  status.textContent = ev.timedOut ? '⏱ no answer in time — agent proceeding' : '✓ answered';
+  card.appendChild(status);
+}
+
+function driveResetLive() { state._driveLive = { text: null, thinking: null }; }
+
+// One normalized agent event → the transcript. Mirrors the old drive.html render().
+function driveRender(ev) {
+  const L = state._driveLive;
+  switch (ev.kind) {
+    case 'user_prompt': driveResetLive(); driveAddEv('user', 'you', ev.text); break;
+    case 'assistant_text': driveAddEv('assistant', 'claude', ev.text); break;
+    case 'thinking': driveAddEv('thinking', 'thinking', ev.text); break;
+    case 'assistant_text_start': L.text = driveAddEv('assistant', 'claude', ''); break;
+    case 'assistant_text_delta':
+      if (!L.text) L.text = driveAddEv('assistant', 'claude', '');
+      driveAppend(L.text, ev.text); break;
+    case 'thinking_start': L.thinking = driveAddEv('thinking', 'thinking', ''); break;
+    case 'thinking_delta':
+      if (!L.thinking) L.thinking = driveAddEv('thinking', 'thinking', '');
+      driveAppend(L.thinking, ev.text); break;
+    case 'block_stop': driveResetLive(); break;
+    case 'tool_use':
+      driveResetLive();
+      if (ev.name === 'mcp__viberate__ask') break; // renders as the picker via the 'ask' event
+      driveAddEv('tool', '⚙ ' + ev.name, driveSummarizeInput(ev.input)); break;
+    case 'tool_result': driveAddEv('toolresult' + (ev.isError ? ' err' : ''), ev.isError ? 'tool error' : 'tool result', ev.text); break;
+    case 'ask': driveResetLive(); driveRenderAsk(ev); break;
+    case 'ask_resolved': driveMarkAskResolved(ev); break;
+    case 'result':
+      driveResetLive();
+      driveAddEv('result', 'turn complete', [
+        ev.isError ? 'error' : 'ok',
+        ev.numTurns != null ? ev.numTurns + ' turns' : null,
+        ev.durationMs != null ? (ev.durationMs / 1000).toFixed(1) + 's' : null,
+        ev.costUsd != null ? '$' + ev.costUsd.toFixed(4) : null,
+      ].filter(Boolean).join(' · ')); break;
+    case 'system':
+      driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
+      if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; } break;
+    case 'error': driveAddEv('error', 'error', ev.message); break;
+    case 'stopped': driveAddEv('sys', 'session', 'stopped by user'); break;
+    case 'status': driveSetStatus(ev.status); break;
+    // 'raw', 'turn_end' intentionally not rendered.
+  }
+}
+
+function driveOpenStream(id, after) {
+  if (state.drive && state.drive.es) state.drive.es.close();
+  const es = new EventSource('/api/agent/sessions/' + id + '/stream?after=' + (after || 0));
+  es.onmessage = (m) => { if (state.drive && state.drive.id === id) { try { driveRender(JSON.parse(m.data)); } catch {} } };
+  es.addEventListener('error', () => {/* EventSource auto-reconnects */});
+  if (state.drive) state.drive.es = es;
 }
 
 async function bootDashboard() {

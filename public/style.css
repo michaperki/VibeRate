@@ -1017,3 +1017,76 @@ body.public #feed { margin: 0 auto; }
 .memo-close { margin-left: auto; font: inherit; font-size: 14px; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 0 6px; border-radius: 6px; }
 .memo-close:hover { color: var(--text); background: var(--border); }
 .memo-panel .docview { flex: 1; max-height: none; border: 0; background: none; padding: 0 4px 0 0; }
+
+/* ============================================================================
+   Drive — the in-dashboard agent runtime (ported from the old /drive page).
+   Chat transcript + composer living inside #conversation.
+   ============================================================================ */
+.dv-wrap { display: flex; flex-direction: column; min-height: 100vh; }
+.dv-toolbar { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+.dv-body { padding: 20px 28px 24px; flex: 1; }
+.dv-start { max-width: 760px; }
+.dv-start label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 4px; }
+.dv-start input, .dv-start select, .dv-start textarea,
+.dv-composer textarea {
+  width: 100%; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font: inherit;
+}
+.dv-start input, .dv-start select { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+.dv-start textarea, .dv-composer textarea { resize: vertical; min-height: 70px; }
+.dv-warn { font-size: 12px; color: #e7b85b; margin-top: 6px; min-height: 16px; }
+.dv-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+.dv-actions button {
+  background: var(--accent); color: #0a1020; border: 0; border-radius: 8px;
+  padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.dv-actions button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.dv-actions button:disabled { opacity: .45; cursor: default; }
+.dv-banner { margin: 0 28px 12px; padding: 9px 12px; border-radius: 8px; font-size: 13px; }
+.dv-banner.bad { background: #2a1416; color: #ef6f6f; border: 1px solid #4a2024; }
+.dv-banner.ok { background: #10221a; color: #5bd6a0; border: 1px solid #1d3a2c; }
+.dv-banner.hidden { display: none; }
+
+.dv-pill { padding: 2px 9px; border-radius: 99px; font: 600 11px ui-monospace, Menlo, monospace; }
+.dv-pill.working { background: #2a2410; color: #e7b85b; }
+.dv-pill.idle { background: #10221a; color: #5bd6a0; }
+.dv-pill.error, .dv-pill.exited { background: #2a1416; color: #ef6f6f; }
+.dv-pill.starting { background: #15202e; color: var(--accent); }
+
+.dv-transcript { display: flex; flex-direction: column; gap: 10px; }
+.dv-ev { border: 1px solid var(--border); border-radius: 10px; padding: 10px 13px; background: var(--panel); }
+.dv-ev .dv-who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+.dv-ev .dv-body-t { white-space: pre-wrap; word-break: break-word; }
+.dv-ev.user { background: var(--user); border-color: #2a3550; }
+.dv-ev.user .dv-who { color: var(--accent); }
+.dv-ev.assistant { background: var(--assistant); }
+.dv-ev.assistant .dv-who { color: var(--claude); }
+.dv-ev.thinking { opacity: .6; font-style: italic; }
+.dv-ev.tool { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+.dv-ev.tool .dv-who { color: #e7b85b; }
+.dv-ev.toolresult { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: #0e1118; }
+.dv-ev.toolresult.err .dv-who { color: #ef6f6f; }
+.dv-ev.result { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); border-style: dashed; }
+.dv-ev.error { background: #2a1416; border-color: #4a2024; color: #ef6f6f; }
+.dv-ev.sys { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--muted); border-style: dashed; }
+
+.dv-ev.dv-ask { background: var(--user); border-color: #2a3550; }
+.dv-ev.dv-ask .dv-who { color: var(--accent); }
+.dv-askq { margin: 8px 0; }
+.dv-askq-title { font-weight: 600; margin-bottom: 6px; }
+.dv-askopt { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; font-size: 13px; color: var(--text); cursor: pointer; }
+.dv-askopt input { width: auto; margin: 3px 0 0; }
+.dv-askopt .dv-desc { color: var(--muted); }
+.dv-askother input { margin-top: 4px; width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px; font: inherit; }
+.dv-ev.dv-ask.answered { opacity: .55; }
+.dv-askstatus { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+.dv-composer { position: sticky; bottom: 0; padding: 12px 28px 18px; background: linear-gradient(180deg, transparent, var(--bg) 22%); border-top: 1px solid var(--border); }
+
+.pb-drive {
+  margin-left: auto; background: transparent; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 7px; padding: 5px 12px;
+  font: inherit; font-weight: 600; font-size: 12px; cursor: pointer;
+}
+.pb-drive:hover { background: var(--accent); color: #0a1020; }
+.pane-title .pb-drive { margin-left: 10px; }
