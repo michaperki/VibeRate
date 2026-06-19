@@ -79,9 +79,11 @@ export function ensureSubscriptionCredentials() {
 // instead of billing API credits — ANTHROPIC_API_KEY otherwise *shadows* the
 // login. With no login on disk we keep the key as the fallback. Either way the
 // server keeps the key in its own process.env for the Haiku classifier.
-function childEnv() {
+// `onSubscription` is computed once per turn so the result event and the env
+// stay consistent if the creds file changes mid-turn.
+function childEnv(onSubscription) {
   const env = { ...process.env };
-  if (hasSubscriptionCreds()) {
+  if (onSubscription) {
     delete env.ANTHROPIC_API_KEY;
     delete env.ANTHROPIC_AUTH_TOKEN;
   }
@@ -235,7 +237,10 @@ function handleRawEvent(session, obj) {
       kind: 'result',
       isError: !!obj.is_error,
       result: obj.result || null,
-      costUsd: obj.total_cost_usd ?? null,
+      // Null on a subscription turn: total_cost_usd is a token estimate the CLI
+      // prints regardless of auth, and you aren't billed it on a plan, so the UI
+      // (which omits null cost) shouldn't imply a charge. See childEnv.
+      costUsd: session.onSubscription ? null : (obj.total_cost_usd ?? null),
       durationMs: obj.duration_ms ?? null,
       numTurns: obj.num_turns ?? null,
     });
@@ -268,6 +273,12 @@ function runTurn(session, prompt, { resume }) {
   emit(session, { kind: 'user_prompt', text: prompt });
   setStatus(session, 'working');
 
+  // Decide once: did this turn run on the subscription (key stripped) or the
+  // API key? Drives both the env and whether we surface a dollar cost — the
+  // CLI's total_cost_usd is just a token estimate and is meaningless (you're
+  // not charged it) on a subscription, so we hide it there.
+  session.onSubscription = hasSubscriptionCreds();
+
   const child = spawn(CLAUDE_BIN, args, {
     cwd: session.cwd,
     // Inherit the server's real environment so the binary picks up the user's
@@ -275,7 +286,7 @@ function runTurn(session, prompt, { resume }) {
     // Anthropic API key when a subscription login is on disk so the CLI uses
     // the Max plan rather than billing API credits (the key would otherwise
     // shadow the login). See childEnv / ensureSubscriptionCredentials above.
-    env: childEnv(),
+    env: childEnv(session.onSubscription),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   session.child = child;
