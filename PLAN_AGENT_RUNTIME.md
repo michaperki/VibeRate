@@ -105,9 +105,20 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
       `thinking_delta` and skips the consolidated `assistant` blocks it already
       streamed (flagged per-turn), so the reader fills in live without
       double-rendering. Falls back to whole-message text if partials are absent.
-- [ ] **Capture & present the agent's questions** (the delightful part — what
-      Mike actually wants next; full per-tool *approvals* are backlogged because
-      everyone runs YOLO). Empirically grounded (Claude 2.1.183, real spawn):
+- [x] **Capture & present the agent's questions** (the delightful part). SHIPPED
+      as B2: a custom MCP `ask` tool. `src/mcpAsk.js` is a hand-rolled stdio MCP
+      server (no SDK dep) exposing one `ask` tool mirroring AskUserQuestion's
+      schema; `agent.js` writes a per-turn `--mcp-config` pointing claude at it,
+      steers via `--append-system-prompt`, and — the load-bearing finding —
+      **allowlists it with `--allowedTools mcp__viberate__ask`** (MCP tools are
+      otherwise permission-denied headless in `default` mode). On a call the
+      sidecar POSTs to `/api/agent/internal/ask` (loopback); the server parks it,
+      emits an `ask` SSE event (Drive UI renders a picker), and the UI replies via
+      `/api/agent/sessions/:id/answer` → same-turn continuation. `MCP_TOOL_TIMEOUT`
+      (10m) > server `ASK_WAIT_MS` (5m) so a graceful "no answer" result wins over
+      a hard MCP timeout. Verified end-to-end in `default` mode: answered path
+      (`SELECTED=Spaces`, 7.4s) and ignored path (timeout → agent proceeds).
+      Full per-tool *approvals* remain backlogged. Original spike notes:
       - `AskUserQuestion` is available headless and emits a clean structured
         `tool_use`: `input.questions[]` = `{question, header, multiSelect,
         options:[{label, description}]}`. So we can render a real choice card.

@@ -22,11 +22,66 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 const CLAUDE_BIN = process.env.VBRT_CLAUDE_BIN || 'claude';
+
+// Absolute path to our stdio MCP `ask` server (sibling file). claude launches it
+// per turn via the --mcp-config we write below.
+const MCP_ASK_PATH = fileURLToPath(new URL('./mcpAsk.js', import.meta.url));
+const MCP_ASK_TOOL = 'mcp__viberate__ask';
+
+// How long the server parks an `ask` waiting for the human, in ms. Must stay
+// BELOW the child's MCP_TOOL_TIMEOUT so our graceful "no answer" result wins the
+// race over a hard MCP-layer timeout (see runTurn / registerAsk).
+const ASK_WAIT_MS = Number(process.env.VBRT_ASK_WAIT_MS || 5 * 60 * 1000);
+const MCP_TOOL_TIMEOUT_MS = Number(process.env.VBRT_MCP_TOOL_TIMEOUT_MS || 10 * 60 * 1000);
+
+// Loopback base URL the MCP sidecar POSTs answers-requests back to. Set by the
+// server once it knows its bound port (setBaseUrl). Until then ask is inert.
+let BASE_URL = null;
+export function setBaseUrl(url) {
+  BASE_URL = url;
+}
+
+// Pending `ask` round-trips, keyed by askId: the sidecar's POST is parked here
+// until the Drive UI answers (resolveAsk) or the wait times out.
+const pendingAsks = new Map();
+
+// Register a question the driven agent just asked: emit it to the session's
+// Drive UI subscribers and return a promise that settles when the user answers.
+// Returns null if the session is unknown (sidecar then surfaces a tool error).
+export function registerAsk(sessionId, questions) {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  const askId = randomUUID();
+  emit(session, { kind: 'ask', askId, questions: Array.isArray(questions) ? questions : [] });
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (pendingAsks.delete(askId)) {
+        emit(session, { kind: 'ask_resolved', askId, timedOut: true });
+        resolve({ timedOut: true, selections: [] });
+      }
+    }, ASK_WAIT_MS);
+    pendingAsks.set(askId, { resolve, timer, sessionId });
+  });
+}
+
+// Settle a pending ask from the Drive UI. `selections` is aligned to questions:
+// each = { header?, question?, selectedLabels?: string[], customText?: string }.
+export function resolveAsk(askId, selections) {
+  const pending = pendingAsks.get(askId);
+  if (!pending) return false;
+  clearTimeout(pending.timer);
+  pendingAsks.delete(askId);
+  const session = sessions.get(pending.sessionId);
+  if (session) emit(session, { kind: 'ask_resolved', askId });
+  pending.resolve({ selections: Array.isArray(selections) ? selections : [] });
+  return true;
+}
 
 // Where the CLI keeps its config + OAuth credentials. Honors CLAUDE_CONFIG_DIR
 // (set to the Fly volume in hosted mode so a refreshed token survives restarts);
@@ -267,6 +322,37 @@ function runTurn(session, prompt, { resume }) {
   if (session.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
   if (resume && session.claudeSessionId) args.push('--resume', session.claudeSessionId);
 
+  // Wire our MCP `ask` tool (B2 inline picker) once the server knows its loopback
+  // URL. We write a per-turn config pointing claude at src/mcpAsk.js (stdio), steer
+  // the agent to use the tool, and allowlist it so it isn't permission-denied in
+  // `default` mode (verified: MCP tools auto-deny headless without this). The
+  // sidecar POSTs questions back to BASE_URL and blocks until the user answers.
+  let mcpConfigPath = null;
+  if (BASE_URL) {
+    mcpConfigPath = path.join(os.tmpdir(), `vbrt-mcp-${session.id}.json`);
+    try {
+      fs.writeFileSync(
+        mcpConfigPath,
+        JSON.stringify({
+          mcpServers: {
+            viberate: { type: 'stdio', command: process.execPath, args: [MCP_ASK_PATH, session.id, BASE_URL] },
+          },
+        }),
+      );
+      args.push('--mcp-config', mcpConfigPath);
+      args.push('--allowedTools', MCP_ASK_TOOL);
+      args.push(
+        '--append-system-prompt',
+        'When you need a decision, preference, or clarification from the user, call the ' +
+          `${MCP_ASK_TOOL} tool — it shows a picker in their UI and returns their answer in the ` +
+          'same turn. Do NOT use the built-in AskUserQuestion tool; it cannot be answered here.',
+      );
+    } catch (e) {
+      emit(session, { kind: 'error', message: `failed to write mcp config: ${e.message}` });
+      mcpConfigPath = null;
+    }
+  }
+
   // Fresh per-turn streaming state (see handleRawEvent / publicView).
   session.streamedText = false;
   session.streamedThinking = false;
@@ -279,6 +365,12 @@ function runTurn(session, prompt, { resume }) {
   // not charged it) on a subscription, so we hide it there.
   session.onSubscription = hasSubscriptionCreds();
 
+  const env = childEnv(session.onSubscription);
+  // Give a human time to answer the MCP `ask` picker: the child's per-tool-call
+  // timeout must exceed our server-side ASK_WAIT_MS so our graceful "no answer"
+  // result wins over a hard MCP-layer timeout.
+  if (mcpConfigPath) env.MCP_TOOL_TIMEOUT = String(MCP_TOOL_TIMEOUT_MS);
+
   const child = spawn(CLAUDE_BIN, args, {
     cwd: session.cwd,
     // Inherit the server's real environment so the binary picks up the user's
@@ -286,7 +378,7 @@ function runTurn(session, prompt, { resume }) {
     // Anthropic API key when a subscription login is on disk so the CLI uses
     // the Max plan rather than billing API credits (the key would otherwise
     // shadow the login). See childEnv / ensureSubscriptionCredentials above.
-    env: childEnv(session.onSubscription),
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   session.child = child;
@@ -325,6 +417,9 @@ function runTurn(session, prompt, { resume }) {
   });
 
   child.on('close', (code) => {
+    if (mcpConfigPath) {
+      try { fs.unlinkSync(mcpConfigPath); } catch { /* best effort */ }
+    }
     if (buf.trim()) {
       try {
         handleRawEvent(session, JSON.parse(buf.trim()));

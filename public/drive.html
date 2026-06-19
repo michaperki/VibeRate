@@ -58,6 +58,17 @@
   .ev.result { font-family: var(--mono); font-size: 12px; color: var(--dim); border-style: dashed; }
   .ev.error { background: #2a1416; border-color: #4a2024; color: var(--red); }
   .ev.sys { font-family: var(--mono); font-size: 11.5px; color: var(--dim); border-style: dashed; }
+  .ev.ask { background: var(--panel2); border-color: #2a3550; }
+  .ev.ask .who { color: var(--accent); }
+  .askq { margin: 8px 0; }
+  .askq-title { font-weight: 600; margin-bottom: 6px; }
+  .askopt { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0;
+    font-size: 13px; color: var(--txt); text-transform: none; letter-spacing: 0; cursor: pointer; }
+  .askopt input { width: auto; margin: 3px 0 0; }
+  .askopt .desc { color: var(--dim); }
+  .askother input { margin-top: 4px; }
+  .ev.ask.answered { opacity: .55; }
+  .askstatus { font-size: 12px; color: var(--dim); margin-top: 8px; }
   .hidden { display: none; }
   code { font-family: var(--mono); }
 </style>
@@ -169,6 +180,71 @@ function summarizeInput(input) {
   } catch { return ''; }
 }
 
+// The inline picker (B2): the agent called mcp__viberate__ask. Build a choice
+// card from ev.questions; on submit, POST the selections so the parked tool call
+// returns and the agent continues the same turn.
+function renderAsk(ev) {
+  const qs = ev.questions || [];
+  const card = document.createElement('div');
+  card.className = 'ev ask';
+  card.dataset.askId = ev.askId;
+  const who = document.createElement('div'); who.className = 'who'; who.textContent = '❓ agent asks'; card.appendChild(who);
+
+  qs.forEach((q, qi) => {
+    const block = document.createElement('div'); block.className = 'askq';
+    const title = document.createElement('div'); title.className = 'askq-title';
+    title.textContent = (q.header ? '[' + q.header + '] ' : '') + (q.question || '');
+    block.appendChild(title);
+    const type = q.multiSelect ? 'checkbox' : 'radio';
+    (q.options || []).forEach((opt, oi) => {
+      const lab = document.createElement('label'); lab.className = 'askopt';
+      const inp = document.createElement('input');
+      inp.type = type; inp.name = 'ask-' + ev.askId + '-' + qi; inp.value = opt.label;
+      const span = document.createElement('span');
+      span.textContent = opt.label;
+      if (opt.description) { const d = document.createElement('span'); d.className = 'desc'; d.textContent = ' — ' + opt.description; span.appendChild(d); }
+      lab.appendChild(inp); lab.appendChild(span); block.appendChild(lab);
+    });
+    const otherWrap = document.createElement('div'); otherWrap.className = 'askother';
+    const other = document.createElement('input');
+    other.type = 'text'; other.placeholder = 'Other…'; other.dataset.qi = String(qi);
+    otherWrap.appendChild(other); block.appendChild(otherWrap);
+    card.appendChild(block);
+  });
+
+  const btn = document.createElement('button'); btn.textContent = 'Answer';
+  const actions = document.createElement('div'); actions.className = 'actions'; actions.appendChild(btn);
+  card.appendChild(actions);
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const selections = qs.map((q, qi) => {
+      const picked = [...card.querySelectorAll('input[name="ask-' + ev.askId + '-' + qi + '"]:checked')].map((i) => i.value);
+      const other = card.querySelector('.askother input[data-qi="' + qi + '"]');
+      const customText = other && other.value.trim() ? other.value.trim() : undefined;
+      return { header: q.header, question: q.question, selectedLabels: picked, customText };
+    });
+    try {
+      await api('/sessions/' + session.id + '/answer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ askId: ev.askId, selections }),
+      });
+    } catch (e) { banner(e.message, 'bad'); btn.disabled = false; }
+  });
+
+  $('transcript').appendChild(card);
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+function markAskResolved(ev) {
+  const card = document.querySelector('.ev.ask[data-ask-id="' + ev.askId + '"]');
+  if (!card || card.classList.contains('answered')) return;
+  card.classList.add('answered');
+  card.querySelectorAll('input, button').forEach((el) => { el.disabled = true; });
+  const status = document.createElement('div'); status.className = 'askstatus';
+  status.textContent = ev.timedOut ? '⏱ no answer in time — agent proceeding' : '✓ answered';
+  card.appendChild(status);
+}
+
 function render(ev) {
   switch (ev.kind) {
     case 'user_prompt': resetLive(); addEv('user', 'you', ev.text); break;
@@ -185,8 +261,14 @@ function render(ev) {
       if (!liveThinking) liveThinking = addEv('thinking', 'thinking', '');
       appendBody(liveThinking, ev.text); break;
     case 'block_stop': resetLive(); break;
-    case 'tool_use': resetLive(); addEv('tool', '⚙ ' + ev.name, summarizeInput(ev.input)); break;
+    case 'tool_use':
+      resetLive();
+      // The ask tool renders as a picker card (via the 'ask' event), not a raw call.
+      if (ev.name === 'mcp__viberate__ask') break;
+      addEv('tool', '⚙ ' + ev.name, summarizeInput(ev.input)); break;
     case 'tool_result': addEv('toolresult' + (ev.isError ? ' err' : ''), ev.isError ? 'tool error' : 'tool result', ev.text); break;
+    case 'ask': resetLive(); renderAsk(ev); break;
+    case 'ask_resolved': markAskResolved(ev); break;
     case 'result':
       resetLive();
       addEv('result', 'turn complete', [

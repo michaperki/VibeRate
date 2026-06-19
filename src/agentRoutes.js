@@ -8,7 +8,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { startSession, sendMessage, stopSession, subscribe, getSession, listSessions } from './agent.js';
+import { startSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk } from './agent.js';
 import { currentUser } from './oauth.js';
 
 // Local guard: refuse any request whose TCP peer isn't loopback. We deliberately
@@ -89,6 +89,30 @@ export function mountAgent(app, publicDir, opts = {}) {
     } catch (err) {
       fail(res, err);
     }
+  });
+
+  // The MCP `ask` sidecar (src/mcpAsk.js) posts here when the driven agent calls
+  // our ask tool. ALWAYS loopback-only — the sidecar runs on this host, and this
+  // must never be reachable from the internet even in hosted mode. The request is
+  // parked until the Drive UI answers (or registerAsk's wait times out), then we
+  // respond with the selections for the sidecar to hand back to the agent.
+  app.post('/api/agent/internal/ask', loopbackOnly, async (req, res) => {
+    const { sessionId, questions } = req.body || {};
+    const promise = registerAsk(sessionId, questions);
+    if (!promise) return res.status(404).json({ error: 'unknown session', selections: [] });
+    try {
+      res.json(await promise);
+    } catch (err) {
+      res.json({ error: err && err.message, selections: [] });
+    }
+  });
+
+  // The Drive UI replies to an `ask` picker here (guarded like the rest of the
+  // control plane). Resolves the parked sidecar request.
+  app.post('/api/agent/sessions/:id/answer', guard, (req, res) => {
+    const { askId, selections } = req.body || {};
+    const ok = resolveAsk(askId, selections);
+    res.json({ ok });
   });
 
   // Live event stream (SSE). `?after=N` backfills everything past seq N first, so

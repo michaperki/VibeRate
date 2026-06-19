@@ -12,7 +12,7 @@ import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCoo
 import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner } from './accounts.js';
 import { mountAgent } from './agentRoutes.js';
-import { ensureSubscriptionCredentials } from './agent.js';
+import { ensureSubscriptionCredentials, setBaseUrl } from './agent.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -466,6 +466,11 @@ export function startServer(port = 4317) {
   // Bind all interfaces so the app is reachable inside a container / behind a
   // platform proxy (not just loopback).
   return new Promise((resolve) => {
-    const server = app.listen(port, '0.0.0.0', () => resolve({ server, port }));
+    const server = app.listen(port, '0.0.0.0', () => {
+      // Tell the agent runtime where the MCP `ask` sidecar should POST answers
+      // (loopback — the sidecar always runs on this host alongside the server).
+      setBaseUrl(`http://127.0.0.1:${port}`);
+      resolve({ server, port });
+    });
   });
 }
