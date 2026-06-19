@@ -145,8 +145,41 @@ side. (Lone shots stand alone.)
         when frames settle**, so length tracks real motion (button toggle → ~1s; long sim
         → cap). `captureClip` in `src/evidence.js`; CLI reports the auto-stopped duration.
 - [~] *Then:* the other artifact families — **diff** + **test-status** shipped via the
-      polymorphic outcome rail (`PROJECT_VIEW_PLAN.md §C`, Stages 1–2, 2026-06-18); **provenance**
-      and **viewport set / multi-shot** still open.
+      polymorphic outcome rail (`PROJECT_VIEW_PLAN.md §C`, Stages 1–2, 2026-06-18). The
+      "broader outcome rail" that's still open, exploded into concrete work:
+
+### Outcome rail — what's still open
+
+Stages 1–2 already shipped a lot: the archetype→family router (`ARCH_FAMILY`/
+`FAMILY_PLACEMENT`), the `shot` + `diff` families, the bespoke `railExperiment`/
+`railOptions`/`railTest` renderers, and per-card `outcomeChips`. Each item below is
+scoped to the **remaining** slice (what ships vs. what's open is called out), validated
+against the code 2026-06-19. Deeper context in `PROJECT_VIEW_PLAN.md §C`.
+
+- [ ] **Provenance layer** *(the big one).* The proof shown is still what the prompt
+      *claimed*, not what the transcript *did*. *Ships:* `railDiff` lists the deliverable
+      files + counts. *Open:* **real per-edit diffs** (deferred in `railDiff`'s own
+      comment) and **executed/deferred** state on options menus (`railOptions` renders no
+      ✓/▢ on purpose — faking it from keywords is brittle, `[[no-brittle-text-heuristics]]`).
+      Needs a transcript↔artifact semantic match.
+- [ ] **Follow-up classification.** *Ships:* per-prompt intent archetypes (`classify.js`,
+      incl. a "positioning correction" archetype). *Open:* classifying the *relationship*
+      between consecutive prompts — correction / continuation / approval — so the rail can
+      show how a thread progressed (§C).
+- [ ] **Prompt-quality-through-consequences** — surface signals like "needed
+      clarification?", caused a retry, etc., as a rail cue (§C; no code yet).
+- [ ] **Live visual check** of the **experiment** + **options** families (and scroll
+      cost) on a real classified session — only the **test** family is verified
+      end-to-end so far (§C Stage 2 is `[~]` for exactly this).
+- [ ] **Multi-viewport capture.** *Ships:* single `vbrt shot --viewport WxH` (and `--pair`
+      before/after). *Open:* capturing a **set** of viewports (responsive before/after) in
+      one command, riding the same evidence sidecar.
+- [ ] **Rail-row intent pill.** *Ships:* the archetype pill on the card (`renderArchetype`
+      in `renderReaderCard`/`renderPromptCard`). *Open:* mirroring it into the prompt-rail
+      *row* — `promptRows` renders only `outcomeChips` today (§C/§D).
+- [ ] **Outcome rollup** — no aggregate outcome view exists (the workspace is stats-only
+      after the memory-section removal); surface per-prompt outcomes in a workspace /
+      prompt summary (the completion-ring experiment's open follow-up).
 
 ## Decisions (Mike's method — defaults, revisit if wrong)
 

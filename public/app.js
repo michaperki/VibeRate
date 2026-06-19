@@ -1346,10 +1346,7 @@ function buildDocGraph(files) {
     content: f.content || '',
     mtime: f.mtime || 0,
     rank: i, // server priority order (entry docs first)
-    // Archived = a graveyard node: either git-deleted in history, or a live doc
-    // that retired itself with a `status: archived` frontmatter marker.
-    archived: !!f.archived || retiredByMarker(f.content),
-    retiredMarker: !f.archived && retiredByMarker(f.content), // retired but still on disk
+    archived: !!f.archived, // git-deleted ghost; self-retirement (auto-100% / markers) added below
     bornT: f.bornT,
     deathT: f.deathT,
   }));
@@ -1373,10 +1370,13 @@ function buildDocGraph(files) {
     n.color = docColor(n.base);
     n.role = docRole(n.base);
     n.completion = completionOf(n.content); // checkbox plan? → ring
-    if (n.retiredMarker) {
+    // Self-retirement: a live on-disk doc that the default (auto-100% plan) or a
+    // marker sends to the graveyard. (git-deleted docs are already archived above.)
+    if (!n.archived && graveyardOf(n.base, n.content, n.completion)) {
+      n.archived = true;
       // No deletion commit to read born/death from, so derive them: born from git
-      // history, retired ≈ last edit (when the marker landed). In time-travel the
-      // node then shows live up to deathT and ghosts after.
+      // history, retired ≈ last edit (when it completed). In time-travel the node
+      // then shows live up to deathT and ghosts after.
       const born = docBirthT(n.name);
       n.bornT = Number.isFinite(born) ? born : n.mtime;
       n.deathT = n.mtime || Date.now();
@@ -2210,15 +2210,35 @@ function completionOf(content) {
   const done = boxes.filter((b) => /\[[xX]\]/.test(b)).length;
   return { pct: Math.round((done / boxes.length) * 100), done, total: boxes.length };
 }
-// A doc can retire itself into the graveyard *without* being git-deleted, via a
-// frontmatter `status: archived` (or `retired`/`graveyard`) marker. This decouples
-// the brain's lifecycle from git tracking: the file stays on disk, but the node
-// drops out of the live web (hidden, like a git-deleted doc) and ghosts back only
-// during time-travel. The convention: a plan's ring fills to 100% (the visible
-// win), then the agent adds this marker to send it to the graveyard.
-function retiredByMarker(content) {
+// Optional `status:` frontmatter marker that overrides the default graveyard
+// lifecycle (see graveyardOf). Returns 'keep' (force-live), 'archive' (force-
+// retired), or null. The default is auto-retire-at-100% for plan docs, so the
+// common case needs NO marker — markers are only for the exceptions.
+function statusMarker(content) {
   const fm = String(content || '').match(/^﻿?---\s*\n([\s\S]*?)\n---/);
-  return !!fm && /^\s*status\s*:\s*["']?(archived|retired|graveyard)["']?\s*$/im.test(fm[1]);
+  if (!fm) return null;
+  const m = fm[1].match(/^\s*status\s*:\s*["']?([a-z][a-z-]*)["']?\s*$/im);
+  if (!m) return null;
+  const v = m[1].toLowerCase();
+  if (['active', 'live', 'keep-alive', 'keepalive', 'pinned', 'wip', 'open'].includes(v)) return 'keep';
+  if (['archived', 'retired', 'graveyard'].includes(v)) return 'archive';
+  return null;
+}
+
+// Is this a plan doc (the kind that "completes")? Plans auto-retire at 100%;
+// living docs (ROADMAP/README/…) never do. Convention: PLAN_<name>.md / PLAN-<name>.md.
+const isPlanDoc = (base) => /^PLAN[_-]/i.test(base || '');
+
+// Decide whether a *live, on-disk* doc (not git-deleted) belongs in the graveyard.
+// Default, zero-overhead: a finished plan (PLAN_*.md at 100%) auto-retires — no
+// marker, no `git rm`. Opt-out: `status: active` keeps a finished plan live. Opt-in
+// for anything else: `status: archived` retires a non-plan doc explicitly. Retiring
+// hides the node from the live web (like a git-deleted doc) and ghosts it in time-travel.
+function graveyardOf(base, content, completion) {
+  const mark = statusMarker(content);
+  if (mark === 'keep') return false; // explicit "keep alive" wins over auto-retire
+  if (mark === 'archive') return true; // explicit retire (esp. for non-plan docs)
+  return isPlanDoc(base) && !!completion && completion.pct === 100; // default
 }
 // Completion color: warm amber (low) → green (done).
 function pctColor(p) {

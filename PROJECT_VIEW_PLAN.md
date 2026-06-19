@@ -314,11 +314,15 @@ captured before/after). New observations, categorized:
   when the URL/file is unchanged (timestamp/hash check). *Low priority* — the worry
   was "token-wasteful," but a `before` shot costs **0 model tokens**, just ~a Playwright
   launch; keep always-capture for correctness unless the wall-time bites.
-- [ ] **Auto-graveyard at 100%?** *Decision.* VibeRate is read-only — it **can't** delete
-  repo files. Options: (a) SKILL convention (agent `git rm` on ship — current), (b) a
-  `vbrt graveyard <plan>` helper (one clean step), or (c) the viewer **visually retires**
-  a 100% plan (fade/ghost) **without** deleting. *Rec: (c)* for the auto-feel + keep
-  deletion human/agent-driven.
+- [x] **Auto-graveyard at 100%** — *resolved 2026-06-19, option (c): visual retire, no
+  deletion.* VibeRate is read-only, so it never deletes repo files. A finished plan
+  (`PLAN_*.md` at 100% checkboxes) is **auto-retired** by the viewer — hidden from the live
+  web, ghosting in time-travel — with **zero agent overhead** (no marker, no `git rm`). The
+  earlier hybrid (agent adds `status: archived` on ship) was rejected: it spends user
+  context/tokens on every completed plan. Inverted to opt-*out*: `status: active` keeps a
+  finished plan live; `status: archived` retires a non-plan doc explicitly. Only `PLAN_*`
+  auto-retires, so living docs and incidentally-100% checklists (e.g. `ARTIFACTS.md`) are
+  unaffected. (`graveyardOf`/`statusMarker`/`isPlanDoc`, `app.js`; taught in `SKILL.md`.)
 
 ---
 
