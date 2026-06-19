@@ -1,0 +1,26 @@
+# Deploy VibeRate to Fly on every push to main. This makes git the source of
+# truth for what's live: edit anywhere (locally, or via the deployed Drive that
+# pushes a branch you merge), push to main, and the app rebuilds itself from the
+# committed tree — not from whatever happens to be on someone's laptop.
+name: Deploy to Fly
+
+on:
+  push:
+    branches: [main]
+
+# Never let two deploys race; a newer push supersedes an in-flight one.
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: fly deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # --remote-only builds on Fly's builder, so the runner needs no Docker.
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
