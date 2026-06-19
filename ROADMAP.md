@@ -246,4 +246,8 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   ingest plus persistent storage is the operational risk. Do prompt navigation
   and outcome chips now, then harden ingest/privacy before pushing discovery.
 - What's the right unit to "fork" — a whole project, a session, or a single prompt?
+- **Drive surface (the "drive" in capture → understand → drive)** — a chat box that
+  types to the agent *through* VibeRate, turning the watcher into a local agent
+  runtime. Validated as feasible; open fork (spawn the real CLI binary vs. an SDK
+  adapter) and the local-first / RCE threat model are speced in `PLAN_AGENT_RUNTIME.md`.
 - How much conversation content is safe to expose publicly even after redaction?
