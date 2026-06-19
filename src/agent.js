@@ -55,6 +55,10 @@ function createSession({ cwd, permissionMode }) {
     createdAt: now(),
     lastEventAt: now(),
     title: null, // first user prompt, for the session list
+    // Per-turn flags: did we stream this block kind via partials? If so we skip
+    // it in the consolidated `assistant` message to avoid double-rendering.
+    streamedText: false,
+    streamedThinking: false,
     events: [],
     seq: 0,
     subscribers: new Set(),
@@ -106,12 +110,43 @@ function handleRawEvent(session, obj) {
     return;
   }
 
+  // Streaming partials (--include-partial-messages): each `stream_event` wraps a
+  // raw Anthropic SSE event under `obj.event`. We stream text/thinking token
+  // deltas so the reader fills in live. The consolidated `assistant` message
+  // still arrives afterward; the flags set here make us skip its already-streamed
+  // text/thinking blocks below (tool_use we still take from the full message,
+  // since assembling tool input from input_json_delta isn't worth it).
+  if (type === 'stream_event' && obj.event) {
+    const e = obj.event;
+    if (e.type === 'content_block_start') {
+      const b = e.content_block || {};
+      if (b.type === 'text') emit(session, { kind: 'assistant_text_start' });
+      else if (b.type === 'thinking') emit(session, { kind: 'thinking_start' });
+    } else if (e.type === 'content_block_delta') {
+      const d = e.delta || {};
+      if (d.type === 'text_delta' && d.text) {
+        session.streamedText = true;
+        emit(session, { kind: 'assistant_text_delta', text: d.text });
+      } else if (d.type === 'thinking_delta' && d.thinking) {
+        session.streamedThinking = true;
+        emit(session, { kind: 'thinking_delta', text: d.thinking });
+      }
+    } else if (e.type === 'content_block_stop') {
+      emit(session, { kind: 'block_stop' });
+    }
+    return;
+  }
+
   if (type === 'assistant' && obj.message) {
     if (obj.session_id && !session.claudeSessionId) session.claudeSessionId = obj.session_id;
     for (const block of obj.message.content || []) {
-      if (block.type === 'text' && block.text) emit(session, { kind: 'assistant_text', text: block.text });
-      else if (block.type === 'thinking' && block.thinking) emit(session, { kind: 'thinking', text: block.thinking });
-      else if (block.type === 'tool_use') emit(session, { kind: 'tool_use', name: block.name, input: block.input || {} });
+      // Skip text/thinking we already streamed via partials; fall back to emitting
+      // them whole if partials weren't seen (older binary, or partials disabled).
+      if (block.type === 'text' && block.text) {
+        if (!session.streamedText) emit(session, { kind: 'assistant_text', text: block.text });
+      } else if (block.type === 'thinking' && block.thinking) {
+        if (!session.streamedThinking) emit(session, { kind: 'thinking', text: block.thinking });
+      } else if (block.type === 'tool_use') emit(session, { kind: 'tool_use', name: block.name, input: block.input || {} });
     }
     if (obj.error) emit(session, { kind: 'error', message: String(obj.error) });
     return;
@@ -145,8 +180,8 @@ function handleRawEvent(session, obj) {
     return;
   }
 
-  // stream_event partials (--include-partial-messages) and anything unmodeled:
-  // forward as a low-priority raw event so nothing is silently dropped.
+  // Anything unmodeled (status pings, rate-limit events, hooks): forward as a
+  // low-priority raw event so nothing is silently dropped.
   emit(session, { kind: 'raw', raw: obj });
 }
 
@@ -158,12 +193,16 @@ function runTurn(session, prompt, { resume }) {
     '-p',
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
+    '--include-partial-messages', // stream token deltas, not just turn-level text
     '--verbose',
     '--permission-mode', session.permissionMode,
   ];
   if (session.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
   if (resume && session.claudeSessionId) args.push('--resume', session.claudeSessionId);
 
+  // Fresh per-turn streaming state (see handleRawEvent / publicView).
+  session.streamedText = false;
+  session.streamedThinking = false;
   emit(session, { kind: 'user_prompt', text: prompt });
   setStatus(session, 'working');
 

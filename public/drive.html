@@ -153,6 +153,15 @@ function addEv(cls, who, body) {
   return div;
 }
 
+// Streaming partials: the bubble currently being filled by token deltas. A
+// `block_stop` (or a new turn) ends it so the next block starts a fresh bubble.
+let liveText = null, liveThinking = null;
+function resetLive() { liveText = null; liveThinking = null; }
+function appendBody(el, text) {
+  el.querySelector('.body').textContent += text;
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
 function summarizeInput(input) {
   try {
     const s = JSON.stringify(input);
@@ -162,12 +171,24 @@ function summarizeInput(input) {
 
 function render(ev) {
   switch (ev.kind) {
-    case 'user_prompt': addEv('user', 'you', ev.text); break;
+    case 'user_prompt': resetLive(); addEv('user', 'you', ev.text); break;
+    // Non-streamed fallback (older binary / partials off).
     case 'assistant_text': addEv('assistant', 'claude', ev.text); break;
     case 'thinking': addEv('thinking', 'thinking', ev.text); break;
-    case 'tool_use': addEv('tool', '⚙ ' + ev.name, summarizeInput(ev.input)); break;
+    // Streamed token deltas: open a live bubble, then append into it.
+    case 'assistant_text_start': liveText = addEv('assistant', 'claude', ''); break;
+    case 'assistant_text_delta':
+      if (!liveText) liveText = addEv('assistant', 'claude', '');
+      appendBody(liveText, ev.text); break;
+    case 'thinking_start': liveThinking = addEv('thinking', 'thinking', ''); break;
+    case 'thinking_delta':
+      if (!liveThinking) liveThinking = addEv('thinking', 'thinking', '');
+      appendBody(liveThinking, ev.text); break;
+    case 'block_stop': resetLive(); break;
+    case 'tool_use': resetLive(); addEv('tool', '⚙ ' + ev.name, summarizeInput(ev.input)); break;
     case 'tool_result': addEv('toolresult' + (ev.isError ? ' err' : ''), ev.isError ? 'tool error' : 'tool result', ev.text); break;
     case 'result':
+      resetLive();
       addEv('result', 'turn complete', [
         ev.isError ? 'error' : 'ok',
         ev.numTurns != null ? ev.numTurns + ' turns' : null,
@@ -184,7 +205,6 @@ function render(ev) {
     case 'status': setStatus(ev.status); break;
     // 'raw', 'turn_end' are intentionally not rendered.
   }
-  if (session) { if (ev.kind === 'status') {} }
 }
 
 function openStream(id, after) {
