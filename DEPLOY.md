@@ -35,7 +35,43 @@ Must match `[mounts].source` in `fly.toml` and the app's `primary_region`.
 fly volumes create viberate_data --region fra --size 1   # 1 GB; resize later
 ```
 
-## 4. Deploy
+## 4. Set secrets
+
+Secrets are encrypted and injected as env vars (separate from the non-sensitive
+`[env]` block in `fly.toml`). Setting any secret triggers a redeploy.
+
+```bash
+# Session signing + OAuth sign-in (hosted mode gates the dashboard + Drive):
+fly secrets set SESSION_SECRET="$(openssl rand -hex 32)"
+fly secrets set GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
+fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...
+
+# Haiku prompt classifier (also the API-billing fallback for Drive):
+fly secrets set ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Drive auth (admin-only).** Drive — the RCE control plane — is gated to the
+emails in `VBRT_ADMIN_EMAILS` (set in `fly.toml`). By default a hosted Drive turn
+bills the `ANTHROPIC_API_KEY` above. To instead run Drive on **your Claude
+subscription**, seed your local login as a secret: `src/agent.js`
+(`ensureSubscriptionCredentials`) writes it into `CLAUDE_CONFIG_DIR`
+(`/data/claude`, on the volume so a refreshed token survives restarts) at boot,
+and strips the API key from Drive turns so the OAuth login wins.
+
+```bash
+fly secrets set CLAUDE_CREDENTIALS_JSON="$(cat ~/.claude/.credentials.json)"
+```
+
+This is a full-account bearer token — **operator-only**; never collect it from
+other users (multi-user Drive should use per-user API keys). When the seeded
+token goes invalid, re-seed from a fresh `claude login`:
+
+```bash
+fly ssh console -C "rm /data/claude/.credentials.json"
+fly secrets set CLAUDE_CREDENTIALS_JSON="$(cat ~/.claude/.credentials.json)"
+```
+
+## 5. Deploy
 
 ```bash
 fly deploy
@@ -48,7 +84,7 @@ fly open                       # opens https://<app>.fly.dev
 curl https://<app>.fly.dev/healthz     # -> {"ok":true,"schema":1}
 ```
 
-## 5. Point the push client at it + do a real push
+## 6. Point the push client at it + do a real push
 
 From any repo with captured sessions:
 
@@ -83,8 +119,11 @@ share secret.
 - **One machine only.** A Fly volume can't be shared, so keep a single machine
   (don't `fly scale count 2`). Scaling horizontally later means moving the store
   off the local filesystem (e.g. a DB or object storage).
-- **Scale-to-zero** is on (`min_machines_running = 0`) to save money; the first
-  request after idle cold-starts the machine. Set it to `1` for always-on.
+- **Always-on, single machine.** `auto_stop_machines = "off"` with
+  `min_machines_running = 1`: Drive holds interactive session state (resume ids,
+  in-flight `ask` round-trips) in memory, so the machine must not scale to zero
+  mid-conversation. Switch back to scale-to-zero only if you run share-only (no
+  Drive).
 - **Backups:** `fly volumes` snapshots the disk daily by default; verify with
   `fly volumes list` / `fly volumes snapshots list <vol-id>`.
 - **Custom domain** (when ready): `fly certs add viberate.app`, then point DNS
