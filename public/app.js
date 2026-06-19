@@ -1337,7 +1337,10 @@ function buildDocGraph(files) {
     content: f.content || '',
     mtime: f.mtime || 0,
     rank: i, // server priority order (entry docs first)
-    archived: !!f.archived, // a doc deleted in history — a ghost during time travel
+    // Archived = a graveyard node: either git-deleted in history, or a live doc
+    // that retired itself with a `status: archived` frontmatter marker.
+    archived: !!f.archived || retiredByMarker(f.content),
+    retiredMarker: !f.archived && retiredByMarker(f.content), // retired but still on disk
     bornT: f.bornT,
     deathT: f.deathT,
   }));
@@ -1361,6 +1364,14 @@ function buildDocGraph(files) {
     n.color = docColor(n.base);
     n.role = docRole(n.base);
     n.completion = completionOf(n.content); // checkbox plan? → ring
+    if (n.retiredMarker) {
+      // No deletion commit to read born/death from, so derive them: born from git
+      // history, retired ≈ last edit (when the marker landed). In time-travel the
+      // node then shows live up to deathT and ghosts after.
+      const born = docBirthT(n.name);
+      n.bornT = Number.isFinite(born) ? born : n.mtime;
+      n.deathT = n.mtime || Date.now();
+    }
   });
   const W = 760;
   const H = Math.round(Math.max(220, Math.min(760, 80 + nodes.length * 15)));
@@ -2189,6 +2200,16 @@ function completionOf(content) {
   if (!boxes.length) return null;
   const done = boxes.filter((b) => /\[[xX]\]/.test(b)).length;
   return { pct: Math.round((done / boxes.length) * 100), done, total: boxes.length };
+}
+// A doc can retire itself into the graveyard *without* being git-deleted, via a
+// frontmatter `status: archived` (or `retired`/`graveyard`) marker. This decouples
+// the brain's lifecycle from git tracking: the file stays on disk, but the node
+// drops out of the live web (hidden, like a git-deleted doc) and ghosts back only
+// during time-travel. The convention: a plan's ring fills to 100% (the visible
+// win), then the agent adds this marker to send it to the graveyard.
+function retiredByMarker(content) {
+  const fm = String(content || '').match(/^﻿?---\s*\n([\s\S]*?)\n---/);
+  return !!fm && /^\s*status\s*:\s*["']?(archived|retired|graveyard)["']?\s*$/im.test(fm[1]);
 }
 // Completion color: warm amber (low) → green (done).
 function pctColor(p) {

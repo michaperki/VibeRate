@@ -31,6 +31,142 @@ function fmtDate(iso) {
   return iso.slice(0, 16).replace('T', ' ');
 }
 
+// ---------- `vbrt watch --tui`: live agent dashboard in the terminal ----------
+// A dependency-free ANSI redraw over data the watcher already has — the hook
+// stream (`.vbrt/stream.jsonl`, zero token cost) + discovered sessions — so the
+// watch terminal stops being the blindest seat. See LIVE_ORCHESTRATION.md §8.
+
+const reAnsi = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (s) => String(s).replace(reAnsi, '');
+const visLen = (s) => stripAnsi(s).length;
+// Pad/truncate to a visible width, ANSI-aware (color codes have zero display width).
+function fit(s, w) {
+  const v = visLen(s);
+  if (v === w) return s;
+  if (v < w) return s + ' '.repeat(w - v);
+  // truncate to w-1 visible chars + ellipsis, preserving no partial escape (we only
+  // truncate plain strings in practice, so a simple slice on the stripped form is safe)
+  return stripAnsi(s).slice(0, Math.max(0, w - 1)) + '…';
+}
+function bar(pct, width = 16) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  const fill = Math.round((p / 100) * width);
+  const color = p >= 85 ? C.yellow : C.green;
+  return color('█'.repeat(fill)) + C.dim('░'.repeat(width - fill));
+}
+const ktok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
+// Coarse "how long since this agent last moved" — the signal the user reads to tell a
+// genuinely-idle live session from one whose terminal was killed mid-action.
+function ago(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h${String(m % 60).padStart(2, '0')}m`;
+  return `${Math.floor(h / 24)}d${String(h % 24).padStart(2, '0')}h`;
+}
+const shortModel = (m) => String(m || '').replace(/^claude-/, '').replace(/-\d{8}$/, '') || '—';
+const shortSid = (s) => (s ? String(s).slice(0, 6) : '—');
+const agentTint = (src) => (src === 'codex' ? C.yellow : C.cyan);
+
+// Collapse the merged event stream into one state object per agent (`sid`). Events
+// with no sid (hooks pre-`sid`, or none installed) fold into a single "agent" panel.
+function agentsFromStream(events, now) {
+  const byId = new Map();
+  for (const e of events) {
+    const id = e.sid || '_';
+    let a = byId.get(id);
+    if (!a) { a = { sid: e.sid || null, last: 0, ev: null, action: null, ctxPct: null, ctx: null, model: null }; byId.set(id, a); }
+    if (e.t >= a.last) { a.last = e.t; a.ev = e.ev; }
+    if (e.ev === 'tool' && (e.verb || e.target)) a.action = `${e.verb || 'using'}${e.target ? ' ' + e.target : ''}`;
+    if (e.ev === 'prompt') a.action = 'reading your prompt';
+    if (typeof e.ctxPct === 'number') { a.ctxPct = e.ctxPct; a.ctx = e.ctx; a.model = e.model || a.model; }
+  }
+  for (const a of byId.values()) {
+    const age = now - a.last;
+    // `ended` = a SessionEnd hook fired (graceful close) → auto-hidden by visibleAgents.
+    // `idle` = finished a turn (Stop) but session still open. working/paused split on recency.
+    a.status = a.ev === 'end' ? 'ended' : a.ev === 'idle' ? 'idle' : age < 12000 ? 'working' : 'paused';
+  }
+  return [...byId.values()].sort((x, y) => y.last - x.last);
+}
+
+// The panels the TUI actually draws: every agent in the stream window minus the ones
+// gracefully ended or hand-dismissed. A dismissal is keyed by sid + timestamp, so a
+// dismissed session that *moves again* (a newer event than the dismissal) reappears —
+// hand-clearing a session that turns out to be alive is self-correcting.
+function visibleAgents(st, now) {
+  return agentsFromStream(st.events, now).filter((a) => {
+    if (a.status === 'ended') return false;
+    const d = st.dismissed && st.dismissed[a.sid || '_'];
+    return !(d != null && a.last <= d);
+  });
+}
+
+// Build the full frame as an array of lines (no I/O), so it's easy to reason about
+// and test by eye. `st` carries live watch state; `sessions` maps sid→source.
+function tuiFrame(st, sessions) {
+  const now = Date.now();
+  const W = Math.max(48, Math.min((process.stdout.columns || 80), 100));
+  const inner = W - 4; // content width inside "│ … │"
+  const srcOf = (sid) => {
+    if (!sid) return 'claude';
+    const m = sessions.find((s) => path.basename(s.file, '.jsonl').startsWith(sid) || sid.startsWith(path.basename(s.file, '.jsonl').slice(0, 6)));
+    return m ? m.source : 'claude';
+  };
+  const top = (label) => C.dim('┌─ ') + label + C.dim(' ' + '─'.repeat(Math.max(0, W - 5 - visLen(label))) + '┐');
+  const mid = (s) => C.dim('│ ') + fit(s, inner) + C.dim(' │');
+  const bot = C.dim('└' + '─'.repeat(W - 2) + '┘');
+
+  const upMs = now - st.startedAt;
+  const upM = Math.floor(upMs / 60000), upS = Math.floor((upMs % 60000) / 1000);
+  const lines = [];
+  lines.push(`${C.green('👁  vbrt watch')}  ${C.dim('·')}  ${C.cyan(st.cwd)}`);
+  lines.push(`${C.dim('→')} ${st.url ? C.cyan(st.url) : C.dim('(publishing — link appears after first push)')}  ${C.dim(`· up ${upM}m${String(upS).padStart(2, '0')}s`)}`);
+  lines.push(`${st.hooks ? C.green('● hooks live') : C.yellow('○ no hooks')} ${C.dim(st.hooks ? '(real-time)' : '— run `vbrt hooks --install` for real-time; showing log-tail lag')}`);
+  lines.push('');
+
+  const agents = visibleAgents(st, now);
+  st.visible = agents.map((a) => a.sid || '_'); // index→sid map for number-key dismissal
+  if (!agents.length) {
+    lines.push(top(C.dim('agents')));
+    lines.push(mid(C.dim('no agent activity yet — start a session in this repo')));
+    lines.push(bot);
+  }
+  agents.forEach((a, i) => {
+    const src = srcOf(a.sid);
+    const dot = a.status === 'working' ? C.green('●') : a.status === 'paused' ? C.yellow('◐') : C.dim('○');
+    const word = a.status === 'working' ? C.green('working') : a.status === 'paused' ? C.yellow('paused') : C.dim('idle');
+    const num = i < 9 ? C.dim(`[${i + 1}]`) : C.dim('[·]'); // only 1–9 are dismiss-able by key
+    const label = `${num} ${agentTint(src)(src)} ${C.dim('· ' + shortSid(a.sid))}  ${dot} ${word} ${C.dim('· ' + ago(now - a.last) + ' ago')}`;
+    lines.push(top(label));
+    lines.push(mid(a.action ? a.status === 'working' ? a.action : C.dim(a.action) : C.dim('—')));
+    const gauge = a.ctxPct != null
+      ? `${C.dim('ctx')} ${bar(a.ctxPct)} ${a.ctxPct}%  ${C.dim('·')}  ${ktok(a.ctx)} tok  ${C.dim('·')}  ${C.dim(shortModel(a.model))}`
+      : C.dim('ctx —  (no context reading yet)');
+    lines.push(mid(gauge));
+    lines.push(bot);
+  });
+  lines.push('');
+  const push = st.lastPush
+    ? `${C.dim('last push')} ${new Date(st.lastPush.t).toLocaleTimeString()} ${C.dim('·')} ${st.lastPush.kind} ${C.dim('·')} ${st.lastPush.count} session(s)`
+    : C.dim('last push — none yet');
+  const q = st.queued ? C.yellow(`· ${st.queued} queued`) : '';
+  lines.push(`${push} ${q}`);
+  lines.push(C.dim(agents.length ? '[1–9] dismiss a dead panel · Ctrl-C to stop' : 'Ctrl-C to stop'));
+  return lines;
+}
+
+function paintFrame(lines) {
+  // Home, repaint each line clearing to EOL, then clear the rest of the screen —
+  // avoids the full-clear flicker of \x1b[2J on every tick.
+  let out = '\x1b[H';
+  for (const ln of lines) out += ln + '\x1b[K\n';
+  out += '\x1b[J';
+  process.stdout.write(out);
+}
+
 const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
 const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|stream|_next_pass/i;
 
@@ -132,10 +268,17 @@ async function cmdWatch(args = []) {
   const apiUrl = resolveApi(); // deployed host by default; VBRT_API_URL overrides for local dev
   const includeMemory = !args.includes('--no-memory');
   const isPublic = args.includes('--public');
+  // Live TUI (LIVE_ORCHESTRATION §8) is the default on an interactive terminal.
+  // `--log` (alias `--no-tui`) forces the plain scrolling push log; we also fall back
+  // to it automatically when stdout is piped/redirected (agents, CI, `| tee`) so logs
+  // still capture cleanly. `--tui` is still accepted as an explicit no-op.
+  const forceLog = args.includes('--log') || args.includes('--no-tui');
+  const tui = !forceLog && !!process.stdout.isTTY;
   let sessions0 = await discoverSessions(cwd);
   let sessionFiles = sessions0.map((s) => s.file);
+  let sessionsList = sessions0; // full objects, kept fresh for sid→agent mapping in the TUI
   const repoPaths = [...new Set([cwd, ...sessions0.map((s) => s.cwd).filter(Boolean)])];
-  console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim(`(${sessionFiles.length} session(s) + brain docs + git · Ctrl-C to stop)`)}`);
+  if (!tui) console.log(`\n${C.green('👁')}  Watching ${C.cyan(cwd)} → ${C.cyan(apiUrl)}  ${C.dim(`(${sessionFiles.length} session(s) + brain docs + git · Ctrl-C to stop)`)}`);
 
   // Heartbeat so `vbrt doctor` / `vbrt status` (and the agent) can tell a watcher is
   // live, find the share URL, and skip a redundant final `vbrt push`. The lock also
@@ -158,9 +301,60 @@ async function cmdWatch(args = []) {
   };
   const clearLock = () => { try { fs.unlinkSync(lockFile); } catch { /* gone */ } };
   writeLock();
-  process.on('exit', clearLock);
-  process.on('SIGINT', () => { clearLock(); process.exit(0); });
-  process.on('SIGTERM', () => { clearLock(); process.exit(0); });
+
+  // TUI lifecycle: alternate screen buffer + hidden cursor while live, always
+  // restored on exit (otherwise Ctrl-C leaves the terminal in a broken state).
+  const streamFile = path.join(cwd, '.vbrt', 'stream.jsonl');
+
+  // Hand-dismissed panels survive across repaints and restarts: { sid: dismissedAtMs }.
+  // Hard-killed sessions (Ctrl-C, terminal close, restart) fire no hook, so they linger
+  // in the stream window — the user clears them with a number key; this remembers that.
+  const dismissedFile = path.join(cwd, '.vbrt', 'watch-dismissed.json');
+  let dismissed = {};
+  try { dismissed = JSON.parse(fs.readFileSync(dismissedFile, 'utf8')) || {}; } catch { /* none yet */ }
+  // Prune entries older than a week so the file can't grow without bound.
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  for (const k of Object.keys(dismissed)) if (dismissed[k] < weekAgo) delete dismissed[k];
+  const writeDismissed = () => { try { fs.writeFileSync(dismissedFile, JSON.stringify(dismissed)); } catch { /* best-effort */ } };
+
+  const st = { cwd, url: null, startedAt: Date.now(), hooks: false, events: [], lastPush: null, queued: 0, dismissed, visible: [] };
+  const enterTui = () => process.stdout.write('\x1b[?1049h\x1b[?25l');
+  const leaveTui = () => process.stdout.write('\x1b[?1049l\x1b[?25h');
+  const repaint = () => {
+    if (!tui) return;
+    st.url = lockState.url;
+    st.queued = outboxCount();
+    st.hooks = fs.existsSync(streamFile); // the sidecar only exists once `vbrt hook` has fired
+    st.events = readStream(cwd, 200);
+    paintFrame(tuiFrame(st, sessionsList));
+  };
+  const teardown = () => {
+    if (tui) {
+      try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch { /* ignore */ }
+      try { leaveTui(); } catch { /* ignore */ }
+    }
+    clearLock();
+  };
+  process.on('exit', teardown);
+  process.on('SIGINT', () => { teardown(); process.exit(0); });
+  process.on('SIGTERM', () => { teardown(); process.exit(0); });
+  if (tui) {
+    enterTui(); repaint(); process.stdout.on('resize', repaint); setInterval(repaint, 1000);
+    // Raw-mode key input: number keys dismiss the matching panel; Ctrl-C still stops
+    // (raw mode swallows the auto-SIGINT, so we handle \x03 by hand).
+    if (process.stdin.isTTY) {
+      try { process.stdin.setRawMode(true); } catch { /* not a real tty */ }
+      process.stdin.resume();
+      process.stdin.on('data', (buf) => {
+        const k = buf.toString();
+        if (k === '\x03' || k === 'q') { teardown(); process.exit(0); }
+        if (k >= '1' && k <= '9') {
+          const sid = st.visible[k.charCodeAt(0) - 49]; // '1' → index 0
+          if (sid) { dismissed[sid] = Date.now(); writeDismissed(); repaint(); }
+        }
+      });
+    }
+  }
 
   let lastSig = watchSignature(repoPaths, sessionFiles); // baseline; don't push on startup
   let pendingSince = 0;  // last time the signature changed (settle clock)
@@ -189,7 +383,7 @@ async function cmdWatch(args = []) {
     if (busy) return;
     if (--rediscoverIn <= 0) {
       rediscoverIn = 20;
-      try { sessionFiles = (await discoverSessions(cwd)).map((s) => s.file); } catch { /* keep old list */ }
+      try { sessionsList = await discoverSessions(cwd); sessionFiles = sessionsList.map((s) => s.file); } catch { /* keep old list */ }
     }
     let sig;
     try { sig = watchSignature(repoPaths, sessionFiles); } catch { return; }
@@ -220,9 +414,11 @@ async function cmdWatch(args = []) {
       lockState.url = url || lockState.url;
       lockState.lastUpload = Date.now();
       writeLock(); // surface the share URL + upload time immediately
-      console.log(C.dim(`  ↑ ${new Date().toLocaleTimeString()} — pushed ${parsed.length} session(s) [${kind}] → ${url}`));
+      st.lastPush = { t: Date.now(), kind, count: parsed.length };
+      if (tui) repaint();
+      else console.log(C.dim(`  ↑ ${new Date().toLocaleTimeString()} — pushed ${parsed.length} session(s) [${kind}] → ${url}`));
     } catch (err) {
-      console.log(C.yellow(`  ✗ push failed: ${err.message}`));
+      if (!tui) console.log(C.yellow(`  ✗ push failed: ${err.message}`));
     }
     busy = false;
   };
@@ -518,6 +714,7 @@ function hookSettings() {
       PostToolUse: one('*'),
       Stop: one(),
       SessionStart: one(),
+      SessionEnd: one(),
     },
   };
 }
@@ -710,7 +907,10 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt push --dry-run')}  Preview the redacted payload and visibility without uploading
   ${C.cyan('vbrt push --retry')}    Resend bundles left in the outbox after a failed upload
   ${C.cyan('vbrt push --no-memory')} Push without this repo's agent memory (memory is included by default)
-  ${C.cyan('vbrt watch')}         Re-push automatically when the brain docs / git change (live streaming)
+  ${C.cyan('vbrt watch')}         Live in-terminal dashboard (default): a panel per agent — status,
+                       current action, context gauge — re-pushing as brain docs / git change.
+  ${C.cyan('vbrt watch --log')}   Plain scrolling push log instead of the dashboard (also the
+                       automatic fallback when output is piped/redirected).
   ${C.cyan('vbrt hooks --install')} Wire Claude Code hooks so the dashboard ticker follows the agent live
   ${C.cyan('vbrt hook')}          (internal) record a hook event to the live stream — called by the hooks
   ${C.cyan('vbrt shot <url|img>')} Capture a screenshot artifact bound to the current prompt (before/after)

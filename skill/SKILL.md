@@ -153,6 +153,13 @@ VibeRate renders this repo's **brain** — the agent/architecture docs — as a 
 
 - **The graph is built by reachability.** A markdown doc becomes a brain node only if it has a known name (`SOUL`/`AGENTS`/`CLAUDE`/`SEED`/`CONTEXT`/`MEMORY`/`ROADMAP`/`DECISIONS`/`README`/…) **or** is **linked by name** from a doc already in the brain. So when you create a new brain doc, **reference it by its filename** from a seed (e.g. add `PLAN_x.md` to `ROADMAP.md`). An unlinked "orphan" doc won't appear in the live graph — it only surfaces once committed, via git history.
 - **Plan docs get a completion ring.** Name them `PLAN_<name>.md`, give them a `- [ ]` checklist, and **link them from `ROADMAP.md` at creation**. VibeRate draws a ring from the checked ratio. **Check the boxes as you go** and the ring fills live; write-then-complete-then-commit and it just snaps to done at the commit.
+- **Retire a finished plan to the graveyard — don't delete it.** When a `PLAN_*.md` is done (ring full), add a frontmatter marker so it drops out of the live brain web while the file stays on disk (and ghosts back in time-travel). Do **not** `git rm` it — that loses the doc. Just prepend:
+  ```
+  ---
+  status: archived
+  ---
+  ```
+  (`retired` or `graveyard` work too.) Let the ring reach 100% first — the completion is the visible win; the marker is the deliberate retirement.
 - **Commits are the brain's checkpoints.** The live graph updates on save for reachable docs and on commit for git-derived history — so commit at meaningful boundaries (per plan / per phase). That's the timeline the viewer shows.
 - **Keep a dev journal.** A dated `DEVLOG.md` plus a `DECISIONS.md` (one line + the *why* per decision) give the brain a narrative spine and make choices traceable — the heart of "a living history of how you and your agents changed this project."
 

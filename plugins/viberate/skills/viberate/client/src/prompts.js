@@ -174,9 +174,36 @@ function deriveOutcomes(items, prompt, ctx) {
 // brittle keyword match — the menu is lifted verbatim, execution state is left to
 // the provenance layer.
 
-// One tool_result's test verdict, or null if it isn't recognizable test output.
-// Requires an explicit runner summary (counts, a `PASS`/`FAIL` line, or ✓/✗) —
-// not a bare nonzero exit.
+// Recognized test-runner invocations — the *gate* for the whole test family. A
+// pass/fail verdict is only read out of a tool_result when the command that
+// produced it was an actual test run. Without this gate, `testStatusOf` scraped
+// every tool_result (diffs, file reads, `vbrt status`) and stitched fake verdicts
+// out of stray "passed"/"failed" tokens or any ✓ character — which is exactly the
+// "guess command pass/fail from output" noise the product deliberately dropped
+// (PRODUCT_STRATEGY.md). Test runs are the one place a real runner summary exists.
+const TEST_CMD =
+  /(?:^|[\s;&|(])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test|jest|vitest|mocha|ava|tap\b|pytest|tox|nose|go\s+test|cargo\s+test|cargo\s+nextest|rspec|phpunit|gradlew?\s+test|mvn\s+test|make\s+test)\b/i;
+
+// The shell command behind a tool_use, across agents (Claude `Bash`, Codex
+// `shell`/`local_shell`/`exec`), or null if it isn't a shell call. Non-shell
+// tools (Read/Grep/Edit/…) never run tests, so they gate out immediately.
+function shellCommand(toolUse) {
+  if (!toolUse || toolUse.kind !== 'tool_use') return null;
+  if (!/^(bash|shell|local_shell|exec)$/i.test(String(toolUse.name || ''))) return null;
+  const c = toolUse.input && (toolUse.input.command ?? toolUse.input.cmd);
+  if (Array.isArray(c)) return c.join(' ');
+  return c == null ? null : String(c);
+}
+
+const isTestCommand = (toolUse) => {
+  const cmd = shellCommand(toolUse);
+  return cmd != null && TEST_CMD.test(cmd);
+};
+
+// One test runner's verdict from its output, or null if there's no recognizable
+// runner summary. Only called on output we already know came from a test command
+// (see the gate above), so it can trust counts / a PASS|FAIL line without the
+// over-broad bare-✓ heuristic that used to fire on any tool output.
 function testStatusOf(text) {
   const s = String(text || '');
   if (!s || s.length > 20000) return null; // huge dumps aren't a test summary
@@ -189,17 +216,24 @@ function testStatusOf(text) {
       .filter(Boolean).join(', ');
     return { status: f > 0 ? 'r' : k > 0 ? 'a' : 'g', label };
   }
-  if (/^\s*FAIL\b/m.test(s) || /[✗✘]/.test(s)) return { status: 'r', label: 'failures' };
-  if (/^\s*PASS\b/m.test(s) || /[✓✔]/.test(s) || /all tests passed/i.test(s)) return { status: 'g', label: 'passing' };
+  if (/^\s*FAIL\b/m.test(s)) return { status: 'r', label: 'failures' };
+  if (/^\s*PASS\b/m.test(s) || /all tests passed/i.test(s)) return { status: 'g', label: 'passing' };
   return null;
 }
 
-// Test-status timeline (#10/#4): the pass→fail→green arc across the turn's tool
-// runs. Collapses consecutive identical states so "green green green" reads as one.
+// Test-status timeline (#10/#4): the pass→fail→green arc across the turn's *test
+// runs*. Each tool_result is read only if its immediately preceding tool_use was a
+// recognized test command. Collapses consecutive identical states so "green green
+// green" reads as one. (Pairing is positional, not by tool_use_id — the parser
+// doesn't keep ids — so a test run batched *in parallel* with other tool calls can
+// be missed. That's the safe direction: a dropped verdict, never a fabricated one.)
 function extractTestTimeline(items) {
   const segs = [];
+  let lastWasTest = false;
   for (const m of items || []) {
+    if (m.kind === 'tool_use') { lastWasTest = isTestCommand(m); continue; }
     if (m.kind !== 'tool_result') continue;
+    if (!lastWasTest) continue; // output of a non-test command — never a verdict
     const v = testStatusOf(m.text);
     if (v) segs.push(v);
   }

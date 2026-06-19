@@ -10,8 +10,10 @@ import path from 'node:path';
 // within the watch push cadence instead of the transcript flush cadence.
 //
 // Wire-compatible event shape (one JSON object per line):
-//   { t, ev: 'prompt'|'tool'|'idle'|'start', phase?, name?, cat?, target?,
+//   { t, sid?, ev: 'prompt'|'tool'|'idle'|'start', phase?, name?, cat?, target?,
 //     ctx?, ctxPct?, model? }
+// `sid` is the agent's session id (CC's session_id), so consumers can group a
+// repo's merged stream back into one panel per concurrently-running agent.
 
 const STREAM_REL = path.join('.vbrt', 'stream.jsonl');
 const MAX_LINES = 400; // trim the sidecar so it never grows unbounded
@@ -95,8 +97,9 @@ function contextFromTranscript(transcriptPath) {
 function eventFromPayload(p) {
   const name = p.hook_event_name || p.hookEventName || '';
   const t = Date.now();
+  const sid = p.session_id || p.sessionId || null;
   const ctx = contextFromTranscript(p.transcript_path || p.transcriptPath);
-  const base = ctx ? { ctx: ctx.ctx, ctxPct: ctx.ctxPct, model: ctx.model } : {};
+  const base = { ...(sid ? { sid } : {}), ...(ctx ? { ctx: ctx.ctx, ctxPct: ctx.ctxPct, model: ctx.model } : {}) };
   switch (name) {
     case 'UserPromptSubmit':
       return { t, ev: 'prompt', ...base };
@@ -113,6 +116,12 @@ function eventFromPayload(p) {
       return { t, ev: 'idle', ...base };
     case 'SessionStart':
       return { t, ev: 'start', ...base };
+    case 'SessionEnd':
+      // Graceful close (/exit, clear, logout). Unlike Stop (end-of-turn → idle),
+      // this means the session is *gone* — the live dashboard auto-hides it. Hard
+      // kills (Ctrl-C, terminal close, restart) never fire this, so those linger
+      // until the user dismisses the panel by hand.
+      return { t, ev: 'end', ...base };
     case 'Notification':
       return { t, ev: 'note', text: String(p.message || '').slice(0, 120), ...base };
     default:
