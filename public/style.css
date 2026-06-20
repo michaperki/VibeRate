@@ -1092,6 +1092,52 @@ body.public #feed { margin: 0 auto; }
 .dv-ev.error { background: #2a1416; border-color: #4a2024; color: #ef6f6f; }
 .dv-ev.sys { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--muted); border-style: dashed; }
 
+/* ---- compact tool chips ---- A tool call is one tappable line; the full
+   input/output is tucked behind it so the transcript reads as "Claude is doing X"
+   instead of a waterfall of raw output. */
+.dv-tool { border: 1px solid var(--border); border-radius: 9px; background: #0e1118; overflow: hidden; }
+.dv-tool-line {
+  display: flex; align-items: center; gap: 8px; padding: 7px 11px; cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.3;
+}
+.dv-tool-line:hover { background: rgba(255, 255, 255, 0.025); }
+.dv-tool-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); }
+.dv-tool.pending .dv-tool-dot { background: #e7b85b; animation: dv-pulse 1.1s ease-in-out infinite; }
+.dv-tool.ok .dv-tool-dot { background: #5bd6a0; }
+.dv-tool.err .dv-tool-dot { background: #ef6f6f; }
+.dv-tool-verb { color: #e7b85b; font-weight: 600; flex: none; }
+.dv-tool-target { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-tool-sum { color: var(--muted); margin-left: auto; white-space: nowrap; flex: none; font-size: 11.5px; }
+.dv-tool-exp { color: var(--muted); flex: none; font-size: 10px; transition: transform .12s ease; margin-left: 6px; }
+.dv-tool.open .dv-tool-exp { transform: rotate(90deg); }
+.dv-tool-detail { border-top: 1px solid var(--border); }
+.dv-tool-detail.hidden { display: none; }
+.dv-tool-in, .dv-tool-out {
+  margin: 0; padding: 9px 11px; white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: #c7ccd8;
+  max-height: 360px; overflow: auto;
+}
+.dv-tool-in { background: #0b0d13; color: #9fb0cd; }
+.dv-tool-out { border-top: 1px dashed var(--border); }
+.dv-tool-out.err { color: #ef8f8f; }
+
+/* ---- collapsible thinking ---- live while it streams, then tucks to a preview. */
+.dv-think { border: 1px dashed var(--border); border-radius: 9px; background: transparent; opacity: .75; }
+.dv-think-line { display: flex; align-items: center; gap: 7px; padding: 6px 11px; cursor: pointer; font-size: 11.5px; color: var(--muted); }
+.dv-think-ico { color: var(--claude); }
+.dv-think-tag { text-transform: uppercase; letter-spacing: .04em; }
+.dv-think-line .dv-tool-exp { margin-left: auto; }
+.dv-think-body {
+  padding: 0 11px 9px; white-space: pre-wrap; word-break: break-word;
+  font-style: italic; font-size: 12.5px; color: #9aa4b5;
+  max-height: 3.6em; overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent);
+          mask-image: linear-gradient(180deg, #000 55%, transparent);
+}
+.dv-think.open .dv-think-body { max-height: none; -webkit-mask-image: none; mask-image: none; }
+@keyframes dv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .dv-tool.pending .dv-tool-dot { animation: none; } }
+
 .dv-ev.dv-ask { background: var(--user); border-color: #2a3550; }
 .dv-ev.dv-ask .dv-who { color: var(--accent); }
 .dv-askq { margin: 8px 0; }
@@ -1104,6 +1150,23 @@ body.public #feed { margin: 0 auto; }
 .dv-askstatus { font-size: 12px; color: var(--muted); margin-top: 8px; }
 
 .dv-composer { position: sticky; bottom: 0; padding: 12px 28px 18px; background: linear-gradient(180deg, transparent, var(--bg) 22%); border-top: 1px solid var(--border); }
+
+/* Working indicator — spinner + live activity label + elapsed/token estimate. Lives
+   atop the composer so "what is Claude doing" is always in view without scrolling. */
+.dv-status { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; font-size: 12.5px; color: var(--muted); }
+.dv-status.hidden { display: none; }
+.dv-status-label { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-status-meta { margin-left: auto; flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--muted); }
+
+/* Jump-to-latest pill — only shown when the reader has scrolled up off the bottom
+   while new activity arrives, so they're never silently yanked nor left behind. */
+.dv-jump {
+  position: sticky; bottom: 92px; z-index: 6; align-self: center; display: block;
+  margin: -28px auto 0; padding: 6px 14px; border-radius: 99px; cursor: pointer;
+  background: var(--accent); color: #0a1020; border: none;
+  font: inherit; font-weight: 600; font-size: 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.dv-jump.hidden { display: none; }
 
 .pb-drive {
   margin-left: auto; background: transparent; color: var(--accent);

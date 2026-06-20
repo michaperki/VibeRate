@@ -138,6 +138,13 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 
 ## Phase 3 — Viewer UX polish
 
+- **Drive transcript: Claude-code clean view** ✅ Shipped (2026-06-20). Killed the
+  raw waterfall — tool calls collapse to one tappable line (`verb · target · status`,
+  full input/output one tap away), thinking tucks to a preview, and a working footer
+  carries the live activity label + elapsed + token estimate (exact tokens on the
+  turn-complete line, from the result event's `usage`). Reader stays glued to the
+  bottom only while parked there; scrolling up surfaces a "new activity" pill instead
+  of yanking. Cures the mobile thumb-scroll fatigue.
 - **Prompt-unit rail** — `Sessions | Prompts` toggle, default Prompts; prompt rows
   show source, session color, timestamp, and outcome chips; live mode
   slides new prompt-units into the rail. ✅ Shipped first pass. (Intent auto-tagging

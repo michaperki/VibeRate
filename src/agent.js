@@ -357,7 +357,7 @@ function handleRawEvent(session, obj) {
         if (!session.streamedText) emit(session, { kind: 'assistant_text', text: block.text });
       } else if (block.type === 'thinking' && block.thinking) {
         if (!session.streamedThinking) emit(session, { kind: 'thinking', text: block.thinking });
-      } else if (block.type === 'tool_use') emit(session, { kind: 'tool_use', name: block.name, input: block.input || {} });
+      } else if (block.type === 'tool_use') emit(session, { kind: 'tool_use', id: block.id || null, name: block.name, input: block.input || {} });
     }
     if (obj.error) emit(session, { kind: 'error', message: String(obj.error) });
     return;
@@ -373,7 +373,7 @@ function handleRawEvent(session, obj) {
           : Array.isArray(content)
             ? content.map((c) => (c && c.type === 'text' ? c.text : '')).join('')
             : '';
-        emit(session, { kind: 'tool_result', isError: !!block.is_error, text: text.slice(0, 4000) });
+        emit(session, { kind: 'tool_result', toolUseId: block.tool_use_id || null, isError: !!block.is_error, text: text.slice(0, 4000) });
       }
     }
     return;
@@ -390,6 +390,10 @@ function handleRawEvent(session, obj) {
       costUsd: session.onSubscription ? null : (obj.total_cost_usd ?? null),
       durationMs: obj.duration_ms ?? null,
       numTurns: obj.num_turns ?? null,
+      // Token usage for the turn footer/summary. The CLI reports it under `usage`
+      // (input/output + cache buckets); forward it whole so the UI can show output
+      // tokens regardless of billing mode (it's metering, not a charge).
+      usage: obj.usage || null,
     });
     return;
   }

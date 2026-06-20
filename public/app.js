@@ -3565,6 +3565,8 @@ function enterDrive(s) {
 
 function renderDriveView() {
   const d = state.drive;
+  driveEndTurn();            // clear any leaked working-timer from a prior session
+  state._drivePending = [];  // fresh transcript → no tool calls awaiting a result
   el('#conversation').innerHTML = `
     <div class="dv-wrap">
       <div class="conv-toolbar dv-toolbar">
@@ -3580,7 +3582,13 @@ function renderDriveView() {
       </div>
       <div id="dv-banner" class="dv-banner hidden"></div>
       <div class="dv-body"><div id="dv-transcript" class="dv-transcript"></div></div>
+      <button id="dv-jump" class="dv-jump hidden" title="Jump to the latest activity">↓ new activity</button>
       <div class="dv-composer">
+        <div id="dv-status" class="dv-status hidden">
+          <span class="dv-spin"></span>
+          <span class="dv-status-label" id="dv-status-label">Working…</span>
+          <span class="dv-status-meta" id="dv-status-meta"></span>
+        </div>
         <textarea id="dv-followup" placeholder="Reply to the agent…  (⌘/Ctrl+Enter to send)"></textarea>
         <div class="dv-actions">
           <button id="dv-send">Send</button>
@@ -3596,6 +3604,20 @@ function renderDriveView() {
   el('#dv-stop').addEventListener('click', () => state.drive && drivePost('/sessions/' + state.drive.id + '/stop').catch((e) => driveBanner(e.message, 'bad')));
   el('#dv-new').addEventListener('click', () => openDriveForProject(state.driveProject || state.project));
   el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
+  el('#dv-jump').addEventListener('click', () => driveScroll(true));
+  // Sticky-bottom intent: stay glued to the latest only while the reader is parked at
+  // the bottom. Once they scroll up to read history, new activity no longer yanks them
+  // down — it surfaces the "new activity" pill instead. The pane (#conversation) is the
+  // scroll container; its children get replaced, so the listener (wired once) survives.
+  const pane = el('#conversation');
+  state._drivePinned = true;
+  if (!pane._driveScrollWired) {
+    pane._driveScrollWired = true;
+    pane.addEventListener('scroll', () => {
+      state._drivePinned = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 120;
+      if (state._drivePinned) { const j = el('#dv-jump'); if (j) j.classList.add('hidden'); }
+    }, { passive: true });
+  }
 }
 
 async function driveSend() {
@@ -3621,6 +3643,7 @@ function suspendDrive() {
   if (state.drive && state.drive.es) state.drive.es.close();
   if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
   if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
+  driveEndTurn(); // stop the working-indicator interval so it can't tick after we leave
   state.drive = null;
   state._driveOpen = false;
 }
@@ -3696,15 +3719,73 @@ function driveSetStatus(status) {
   const busy = status === 'working' || status === 'starting';
   if (send) send.disabled = busy;
   if (stop) stop.disabled = !busy;
+  // The composer footer carries the "Claude is working…" indicator (spinner +
+  // live activity label + elapsed + token estimate). Show it while a turn is in
+  // flight; hide it the moment the turn settles.
+  if (busy) { driveStartTurn(); driveStatusLabel(status === 'starting' ? 'Starting…' : 'Working…'); }
+  else driveEndTurn();
 }
 
-function driveScroll() {
-  const c = el('#conversation');
-  if (c) c.scrollTop = c.scrollHeight;
+// ---- working indicator (elapsed + live token estimate) ----
+function driveStartTurn() {
+  const f = el('#dv-status'); if (f) f.classList.remove('hidden');
+  if (state._driveTurn) return; // already counting this turn
+  state._driveTurn = { start: Date.now(), outChars: 0, timer: setInterval(driveTickStatus, 1000) };
+  driveTickStatus();
+}
+function driveEndTurn() {
+  const tn = state._driveTurn;
+  if (tn && tn.timer) clearInterval(tn.timer);
+  state._driveTurn = null;
+  const f = el('#dv-status'); if (f) f.classList.add('hidden');
+}
+function driveTickStatus() {
+  const tn = state._driveTurn; const meta = el('#dv-status-meta');
+  if (!tn || !meta) return;
+  const secs = Math.round((Date.now() - tn.start) / 1000);
+  const tok = tn.outChars ? ' · ≈' + driveFmtTok(Math.round(tn.outChars / 4)) + ' tok' : '';
+  meta.textContent = driveFmtElapsed(secs) + tok;
+}
+function driveStatusLabel(text) { const l = el('#dv-status-label'); if (l) l.textContent = text; }
+function driveBumpOut(n) { if (state._driveTurn) state._driveTurn.outChars += n; }
+
+function driveFmtTok(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n); }
+function driveFmtElapsed(s) { return s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's'; }
+
+// Turn-complete summary line: duration + token usage (exact, from the result event)
+// + step count + cost (when billed). Cache reads fold into the input total.
+function driveResultMeta(ev) {
+  const u = ev.usage || {};
+  const out = u.output_tokens;
+  const inp = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+  return [
+    ev.isError ? 'error' : 'ok',
+    ev.durationMs != null ? (ev.durationMs / 1000).toFixed(1) + 's' : null,
+    out != null ? driveFmtTok(out) + ' tok out' : null,
+    inp ? driveFmtTok(inp) + ' tok in' : null,
+    ev.numTurns != null ? ev.numTurns + ' steps' : null,
+    ev.costUsd != null ? '$' + ev.costUsd.toFixed(4) : null,
+  ].filter(Boolean).join(' · ');
 }
 
-// Append a transcript bubble. `bodyText` is plain text (set via textContent so
-// streamed deltas can append safely); returns the element for live filling.
+// Keep the reader glued to the newest activity ONLY while they're parked at the
+// bottom. `force` (the jump pill / explicit sends) always snaps down. Otherwise,
+// if they've scrolled up to read, surface the "new activity" pill instead of
+// yanking them around.
+function driveScroll(force) {
+  const c = el('#conversation'); if (!c) return;
+  if (force || state._drivePinned) {
+    c.scrollTop = c.scrollHeight;
+    state._drivePinned = true;
+    const j = el('#dv-jump'); if (j) j.classList.add('hidden');
+  } else {
+    const j = el('#dv-jump'); if (j) j.classList.remove('hidden');
+  }
+}
+
+// Append a transcript bubble (user / assistant / thinking-fallback / sys / result).
+// `bodyText` is plain text (set via textContent so streamed deltas can append
+// safely); returns the element for live filling.
 function driveAddEv(cls, who, bodyText) {
   const t = el('#dv-transcript');
   if (!t) return null;
@@ -3722,9 +3803,100 @@ function driveAppend(elm, text) {
   driveScroll();
 }
 
-function driveSummarizeInput(input) {
-  try { const s = JSON.stringify(input); return s.length > 300 ? s.slice(0, 300) + '…' : s; }
-  catch { return ''; }
+// ---- compact tool chips (Claude-code style) ----
+// A tool call collapses to a single line: a verb + target + status dot, with the
+// full input/result tucked behind a tap. This is the main cure for the "waterfall
+// of tool output" — the high-level "Claude is doing X" stays visible; the detail
+// is one tap away.
+const DRIVE_VERB = { read: 'Read', edit: 'Edit', cmd: 'Run', search: 'Search', web: 'Fetch', other: '' };
+function driveToolDisplay(name, input, cat) {
+  const inp = (input && typeof input === 'object') ? input : {};
+  const tail = (p) => String(p).split('/').slice(-2).join('/');
+  const clip = (s, n = 90) => { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
+  let verb = DRIVE_VERB[cat] || name.replace(/^mcp__/, '').replace(/__/g, '·');
+  let target = '';
+  if (cat === 'read' || cat === 'edit') { verb = /write|create/.test((name || '').toLowerCase()) ? 'Write' : verb; target = inp.file_path || inp.path || inp.notebook_path ? tail(inp.file_path || inp.path || inp.notebook_path) : ''; }
+  else if (cat === 'cmd') target = clip(inp.command || inp.cmd || '');
+  else if (cat === 'search') target = clip(inp.pattern || inp.query || inp.glob || inp.path || '');
+  else if (cat === 'web') target = clip(inp.url || inp.query || '');
+  else target = clip(inp.description || inp.path || inp.file_path || '');
+  return { verb, target };
+}
+function drivePrettyInput(input) {
+  try { return typeof input === 'string' ? input : JSON.stringify(input, null, 2); }
+  catch { return String(input); }
+}
+function driveResultSummary(text, isError) {
+  const s = String(text == null ? '' : text);
+  if (isError) { const f = s.split('\n').find((l) => l.trim()) || 'error'; return f.length > 60 ? f.slice(0, 60) + '…' : f; }
+  if (!s.trim()) return 'done';
+  const lines = s.split('\n');
+  const nonEmpty = lines.filter((l) => l.trim()).length;
+  if (nonEmpty > 1) return nonEmpty + ' lines';
+  const first = (lines.find((l) => l.trim()) || '').trim();
+  return first.length > 60 ? first.slice(0, 60) + '…' : first;
+}
+function driveAddTool(ev) {
+  const t = el('#dv-transcript'); if (!t) return null;
+  const cat = classifyTool(ev.name);
+  const { verb, target } = driveToolDisplay(ev.name, ev.input, cat);
+  driveStatusLabel((verb + ' ' + target).trim() || ev.name);
+  const row = document.createElement('div');
+  row.className = 'dv-tool ' + cat + ' pending';
+  const line = document.createElement('div'); line.className = 'dv-tool-line';
+  line.innerHTML = `<span class="dv-tool-dot"></span><span class="dv-tool-verb"></span><span class="dv-tool-target"></span><span class="dv-tool-sum"></span><span class="dv-tool-exp">▸</span>`;
+  line.querySelector('.dv-tool-verb').textContent = verb;
+  line.querySelector('.dv-tool-target').textContent = target;
+  row.appendChild(line);
+  const detail = document.createElement('div'); detail.className = 'dv-tool-detail hidden';
+  const pre = document.createElement('pre'); pre.className = 'dv-tool-in'; pre.textContent = drivePrettyInput(ev.input);
+  detail.appendChild(pre);
+  row.appendChild(detail);
+  line.addEventListener('click', () => { detail.classList.toggle('hidden'); row.classList.toggle('open'); });
+  t.appendChild(row);
+  (state._drivePending || (state._drivePending = [])).push({ id: ev.id || null, row });
+  driveScroll();
+  return row;
+}
+function driveAttachToolResult(ev) {
+  const q = state._drivePending || [];
+  let idx = ev.toolUseId ? q.findIndex((p) => p.id === ev.toolUseId) : -1;
+  if (idx < 0) idx = 0; // no id (older buffer) or unmatched → oldest pending
+  const pending = q.splice(idx, 1)[0];
+  if (!pending) { // orphan result — show it as a standalone compact chip
+    driveAddEv('toolresult' + (ev.isError ? ' err' : ''), ev.isError ? 'tool error' : 'tool result', driveResultSummary(ev.text, ev.isError));
+    return;
+  }
+  const row = pending.row;
+  row.classList.remove('pending');
+  row.classList.add(ev.isError ? 'err' : 'ok');
+  const sum = row.querySelector('.dv-tool-sum');
+  if (sum) sum.textContent = driveResultSummary(ev.text, ev.isError);
+  const out = document.createElement('pre'); out.className = 'dv-tool-out' + (ev.isError ? ' err' : '');
+  out.textContent = ev.text || '(no output)';
+  row.querySelector('.dv-tool-detail').appendChild(out);
+  driveScroll();
+}
+
+// ---- collapsible thinking (live while streaming, tucked to a preview after) ----
+function driveAddThink(text) {
+  const t = el('#dv-transcript'); if (!t) return null;
+  const row = document.createElement('div');
+  row.className = 'dv-think open';
+  const line = document.createElement('div'); line.className = 'dv-think-line';
+  line.innerHTML = `<span class="dv-think-ico">✦</span><span class="dv-think-tag">thinking</span><span class="dv-tool-exp">▾</span>`;
+  const body = document.createElement('div'); body.className = 'dv-think-body';
+  if (text != null) body.textContent = text;
+  row.appendChild(line); row.appendChild(body);
+  line.addEventListener('click', () => row.classList.toggle('open'));
+  t.appendChild(row);
+  driveScroll();
+  return row;
+}
+function driveAppendThink(row, text) {
+  if (!row) return;
+  row.querySelector('.dv-think-body').textContent += text;
+  driveScroll();
 }
 
 // The inline picker (the agent called mcp__viberate__ask). Build a choice card;
@@ -3786,23 +3958,30 @@ function driveMarkAskResolved(ev) {
   card.appendChild(status);
 }
 
-function driveResetLive() { state._driveLive = { text: null, thinking: null }; }
+// Reset the streaming block handles. `block_stop` collapses a live thinking block
+// to its preview (it stays one tap from full) rather than dropping the handle blind.
+function driveResetLive() {
+  const L = state._driveLive;
+  if (L && L.thinking) L.thinking.classList.remove('open');
+  state._driveLive = { text: null, thinking: null };
+}
 
-// One normalized agent event → the transcript. Mirrors the old drive.html render().
+// One normalized agent event → the transcript. Tool calls collapse to compact
+// chips; thinking tucks to a preview; the working footer tracks live activity.
 function driveRender(ev) {
   const L = state._driveLive;
   switch (ev.kind) {
-    case 'user_prompt': driveResetLive(); driveAddEv('user', 'you', ev.text); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
-    case 'assistant_text': driveAddEv('assistant', 'claude', ev.text); break;
-    case 'thinking': driveAddEv('thinking', 'thinking', ev.text); break;
-    case 'assistant_text_start': L.text = driveAddEv('assistant', 'claude', ''); break;
+    case 'user_prompt': driveResetLive(); driveAddEv('user', 'you', ev.text); driveBumpOut(0); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
+    case 'assistant_text': driveBumpOut((ev.text || '').length); driveAddEv('assistant', 'claude', ev.text); break;
+    case 'thinking': { const r = driveAddThink(ev.text); if (r) r.classList.remove('open'); break; }
+    case 'assistant_text_start': driveStatusLabel('Writing…'); L.text = driveAddEv('assistant', 'claude', ''); break;
     case 'assistant_text_delta':
       if (!L.text) L.text = driveAddEv('assistant', 'claude', '');
-      driveAppend(L.text, ev.text); break;
-    case 'thinking_start': L.thinking = driveAddEv('thinking', 'thinking', ''); break;
+      driveBumpOut((ev.text || '').length); driveAppend(L.text, ev.text); break;
+    case 'thinking_start': driveStatusLabel('Thinking…'); L.thinking = driveAddThink(''); break;
     case 'thinking_delta':
-      if (!L.thinking) L.thinking = driveAddEv('thinking', 'thinking', '');
-      driveAppend(L.thinking, ev.text); break;
+      if (!L.thinking) L.thinking = driveAddThink('');
+      driveBumpOut((ev.text || '').length); driveAppendThink(L.thinking, ev.text); break;
     case 'block_stop': driveResetLive(); break;
     case 'tool_use':
       driveResetLive();
@@ -3811,18 +3990,14 @@ function driveRender(ev) {
       // emits — no extra capture. No-op when no matching brain node is on screen.
       if (window.mobileBrainTouch) { const f = toolFile(ev); if (f) window.mobileBrainTouch(f, classifyTool(ev.name)); }
       if (ev.name === 'mcp__viberate__ask') break; // renders as the picker via the 'ask' event
-      driveAddEv('tool', '⚙ ' + ev.name, driveSummarizeInput(ev.input)); break;
-    case 'tool_result': driveAddEv('toolresult' + (ev.isError ? ' err' : ''), ev.isError ? 'tool error' : 'tool result', ev.text); break;
+      driveAddTool(ev); break;
+    case 'tool_result': driveAttachToolResult(ev); break;
     case 'ask': driveResetLive(); driveRenderAsk(ev); break;
     case 'ask_resolved': driveMarkAskResolved(ev); break;
     case 'result':
       driveResetLive();
-      driveAddEv('result', 'turn complete', [
-        ev.isError ? 'error' : 'ok',
-        ev.numTurns != null ? ev.numTurns + ' turns' : null,
-        ev.durationMs != null ? (ev.durationMs / 1000).toFixed(1) + 's' : null,
-        ev.costUsd != null ? '$' + ev.costUsd.toFixed(4) : null,
-      ].filter(Boolean).join(' · '));
+      driveEndTurn();
+      driveAddEv('result', ev.isError ? 'turn failed' : 'turn complete', driveResultMeta(ev));
       driveCoolProvisional(); break;
     case 'system':
       driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
