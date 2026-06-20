@@ -227,11 +227,22 @@ export function ensureGitAuth() {
 // server keeps the key in its own process.env for the Haiku classifier.
 // `onSubscription` is computed once per turn so the result event and the env
 // stay consistent if the creds file changes mid-turn.
-function childEnv(onSubscription) {
+function childEnv(session) {
   const env = { ...process.env };
-  if (onSubscription) {
+  if (session && session.onSubscription) {
     delete env.ANTHROPIC_API_KEY;
     delete env.ANTHROPIC_AUTH_TOKEN;
+  }
+  // Hand a driven agent a ready-made live-preview base for its own workspace, so it
+  // can show the human files it just built (and `vbrt shot` them) without the
+  // commit→push→CI→redeploy round-trip — the /preview/<slug>/<path> route serves
+  // straight from this checkout on the shared volume. Absolute only when the public
+  // origin is known (VBRT_PUBLIC_URL, set in fly.toml); the slug is always exposed so
+  // a local `vbrt serve` agent can still build the relative path.
+  if (session && session.projectSlug) {
+    env.VBRT_PROJECT_SLUG = session.projectSlug;
+    const origin = process.env.VBRT_PUBLIC_URL;
+    if (origin) env.VBRT_PREVIEW_BASE = `${origin.replace(/\/+$/, '')}/preview/${session.projectSlug}`;
   }
   return env;
 }
@@ -461,7 +472,7 @@ function runTurn(session, prompt, { resume }) {
   // not charged it) on a subscription, so we hide it there.
   session.onSubscription = hasSubscriptionCreds();
 
-  const env = childEnv(session.onSubscription);
+  const env = childEnv(session);
   // Give a human time to answer the MCP `ask` picker: the child's per-tool-call
   // timeout must exceed our server-side ASK_WAIT_MS so our graceful "no answer"
   // result wins over a hard MCP-layer timeout.

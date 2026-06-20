@@ -13,6 +13,11 @@ primary_region = "fra"
   # Multi-tenant mode: public landing at /, token-scoped dashboard at /app,
   # no anonymous enumeration of the project list.
   VBRT_HOSTED = "1"
+  # Public origin of this instance. Used to hand driven agents an absolute live-
+  # preview base (VBRT_PREVIEW_BASE = <origin>/preview/<slug>) so they can show the
+  # human freshly-built workspace files without a commit→push→redeploy. See
+  # agent.js childEnv + the /preview route in agentRoutes.js.
+  VBRT_PUBLIC_URL = "https://vbrt.fly.dev"
   # Drive (the RCE control plane) is gated to these signed-in accounts. Not a
   # secret (emails aren't sensitive); deny-by-default if empty. See agentRoutes.js.
   VBRT_ADMIN_EMAILS = "mperkins1995@gmail.com"

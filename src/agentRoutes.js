@@ -135,6 +135,22 @@ export function mountAgent(app, opts = {}) {
     }
   });
 
+  // Live preview: serve a file straight from a project's Drive workspace checkout on
+  // the shared volume — no commit→push→CI→redeploy. Closes the "I built it but can't
+  // show you" gap (DOGFOODING.md / drive-preview-gap): the hosted server already
+  // shares the Fly volume with /data/workspaces/<slug>, so a freshly-written file is
+  // viewable instantly. Guarded like the rest of the control plane (it exposes the
+  // checkout's files, scoped to the instance admin). `res.sendFile` with `root`
+  // rejects path traversal (../ escapes) and `dotfiles:'deny'` keeps `.git` out.
+  app.get('/preview/:slug/*', guard, (req, res) => {
+    const base = resolveProjectCwd(req.params.slug);
+    if (!base) return res.status(404).json({ error: 'project workspace is not set up yet; clone it first' });
+    const rel = req.params[0] || 'index.html';
+    res.sendFile(rel, { root: base, dotfiles: 'deny' }, (err) => {
+      if (err && !res.headersSent) res.status(err.status === 403 ? 403 : 404).end();
+    });
+  });
+
   app.get('/api/agent/sessions/:id', guard, (req, res) => {
     const s = getSession(req.params.id);
     if (!s) return res.status(404).json({ error: 'unknown session' });
