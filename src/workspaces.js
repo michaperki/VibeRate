@@ -56,18 +56,6 @@ function pickWorkspaceDir(slug, repo, existingDir) {
   return path.join(workspacesRoot(), `${leaf}-${slug}`);
 }
 
-// Build the URL git actually clones from. For a private github https repo we inject
-// the instance's GITHUB_TOKEN (a Fly secret) as x-access-token; the token is used
-// only here and never persisted or returned. No token ever travels via the browser.
-function authedRepoUrl(repo) {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (token) {
-    const m = /^https:\/\/(github\.com\/.+)$/.exec(repo);
-    if (m) return `https://x-access-token:${token}@${m[1]}`;
-  }
-  return repo;
-}
-
 // Keep a leaked token out of error text / logs.
 function redact(s) {
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -109,7 +97,11 @@ export async function startClone(slug, { repo, branch } = {}) {
       fs.mkdirSync(workspacesRoot(), { recursive: true });
       const args = ['clone'];
       if (branch) args.push('--branch', branch, '--single-branch');
-      args.push(authedRepoUrl(repo), dir);
+      // Clone with the plain repo URL. Auth for private github https repos is supplied
+      // on demand by the global credential helper (ensureGitAuth, src/agent.js), so the
+      // GITHUB_TOKEN is never written into this checkout's .git/config — unlike embedding
+      // it in the clone URL, which git persists there. No token touches disk.
+      args.push(repo, dir);
       await exec('git', args, { timeout: 5 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
       setWorkspace(slug, { status: 'ready', head: await headSha(dir), error: null });
     } catch (err) {
