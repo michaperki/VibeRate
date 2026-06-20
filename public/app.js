@@ -1697,7 +1697,7 @@ function layoutRecent(nodes, W, H) {
   }
 }
 
-function renderCenterpiece() {
+function renderCenterpiece(opts = {}) {
   if (!state.docs.ok || !state.docGraph) {
     return `
       <section class="dash-card centerpiece">
@@ -1815,7 +1815,7 @@ function renderCenterpiece() {
     <section class="dash-card centerpiece">
       <div class="dash-head"><span class="jargon" title="Your agent/brain docs (SOUL, AGENTS, CLAUDE, README, plans…) as a graph — edges mean one doc references another. Hover a node to peek inside.">🧠 AI architecture</span>
         <span class="lay-toggle">${toggle}</span>
-        ${state.docHistory ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
+        ${state.docHistory && !opts.noTimeTravel ? `<button class="lay-btn tt-toggle${tt ? ' on' : ''}" data-tt="toggle" title="Scrub through the brain's history — watch docs get born, change, and get archived.">🕰 Time travel</button>` : ''}
         ${g.nodes.some((n) => n.completion) ? '<span class="ring-key jargon" title="Ring around a node = its checklist completion (amber → green). Any doc with checkboxes.">◔ ring = % done</span>' : ''}
         <span class="dim-note">${files.length} docs · ${g.edges.filter((e) => !g.nodes[e.i].archived && !g.nodes[e.j].archived).length} links</span></div>
       <div class="brain-wrap">
@@ -4437,7 +4437,8 @@ async function boot() {
     const host = byId('m-bo-inner');
     if (!host) return;
     if (!state.docGraph) { host.innerHTML = '<div class="empty">No brain captured yet.</div>'; return; }
-    host.innerHTML = renderCenterpiece();
+    // Time travel doesn't work in the drive overlay (no history scrubber here), so suppress it.
+    host.innerHTML = renderCenterpiece({ noTimeTravel: true });
     // Node tap → doc lightbox; layout / time-travel toggles re-mount in place.
     // Hover-peek is intentionally skipped (touch has no hover; CSS hides it).
     host.querySelectorAll('[data-doc]').forEach((b) => (b.onclick = () => {

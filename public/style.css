@@ -300,7 +300,7 @@ pre.code {
 /* ---------- project dashboard ---------- */
 .dashboard { padding: 18px 28px 50px; display: flex; flex-direction: column; gap: 20px; }
 .dash-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; position: relative; }
-.dash-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.dash-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
 .dash-card .hint { margin-top: 2px; }
 .sess .title .sw { margin-right: 7px; vertical-align: baseline; }
 
