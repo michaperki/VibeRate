@@ -20,7 +20,7 @@
 // resume sessions *we* started, so the two-writer race (a terminal racing our
 // resume) can't happen yet — ownership leases for foreign sessions are Phase 2.
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -103,23 +103,58 @@ function hasSubscriptionCreds() {
   }
 }
 
+// Pull the OAuth token's expiry (epoch ms) out of a parsed credentials blob, so we
+// can compare freshness between the secret and the on-disk copy. The CLI nests the
+// token under `claudeAiOauth`; tolerate a flat object too. Returns 0 when absent or
+// unparseable — i.e. "infinitely stale", which makes the comparison degrade safely
+// to plain seed-if-missing rather than misfiring.
+function credsExpiry(parsed) {
+  if (!parsed || typeof parsed !== 'object') return 0;
+  const oauth = parsed.claudeAiOauth || parsed;
+  const exp = oauth && oauth.expiresAt;
+  return typeof exp === 'number' && Number.isFinite(exp) ? exp : 0;
+}
+
+// The credentials currently on disk, or null if missing/unreadable/corrupt.
+function readDiskCreds() {
+  try {
+    return JSON.parse(fs.readFileSync(credentialsPath(), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 // Seed subscription OAuth credentials from the CLAUDE_CREDENTIALS_JSON secret
 // into the config dir, so a hosted (Fly) Drive can run on the operator's Max
 // plan instead of API billing. This is a full-account bearer token, so it's a
 // SINGLE-OPERATOR, admin-gated affordance only — never collect other users'
-// credentials this way (use a per-user API key for that). Seed-if-missing:
-// once the CLI refreshes the token in place (durable on the volume) we leave
-// its copy alone; delete the file (or rotate the secret) to force a re-seed.
+// credentials this way (use a per-user API key for that).
+//
+// Self-healing seed: write the secret when no creds file exists OR when the
+// secret's token is *fresher* than the one on disk (higher expiresAt). The CLI's
+// OAuth refresh token is single-use/rotating, so once the volume's copy is
+// invalidated — e.g. the same Max account refreshes elsewhere — the on-disk token
+// 401s and can't recover on its own. Comparing expiry lets a freshly-rotated
+// secret take over on the next boot: just `fly secrets set CLAUDE_CREDENTIALS_JSON`
+// from a current local login (no manual file deletion). We never clobber a *newer*
+// on-disk token (the CLI's own in-place refresh) with an older secret.
 export function ensureSubscriptionCredentials() {
   const raw = process.env.CLAUDE_CREDENTIALS_JSON;
   if (!raw) return;
+  let parsed;
   try {
-    JSON.parse(raw); // guard against a malformed paste clobbering the file
+    parsed = JSON.parse(raw); // guard against a malformed paste clobbering the file
   } catch {
     console.error('[agent] CLAUDE_CREDENTIALS_JSON is not valid JSON; ignoring');
     return;
   }
-  if (hasSubscriptionCreds()) return;
+  const disk = readDiskCreds();
+  if (disk) {
+    // Keep the on-disk token when it's at least as fresh as the secret — that's the
+    // CLI's own refreshed copy, which we must not stomp with a staler secret.
+    if (credsExpiry(parsed) <= credsExpiry(disk)) return;
+    console.log(`[agent] CLAUDE_CREDENTIALS_JSON is fresher than ${credentialsPath()}; re-seeding stale token`);
+  }
   try {
     fs.mkdirSync(claudeConfigDir(), { recursive: true });
     fs.writeFileSync(credentialsPath(), raw, { mode: 0o600 });
@@ -127,6 +162,41 @@ export function ensureSubscriptionCredentials() {
   } catch (e) {
     console.error('[agent] failed to seed subscription credentials:', e && e.message);
   }
+}
+
+// Configure git inside the Drive host so the agent can authenticate to GitHub over
+// https using the instance's GITHUB_TOKEN (a Fly secret) — both for cloning private
+// repos and, crucially, for *pushing* the branches it produces. We register a global
+// credential helper that echoes the token from the environment on demand, so git
+// uses it for any github.com https operation WITHOUT the token ever being written to
+// a repo's .git/config or any other file (only the token-free helper script lives in
+// ~/.gitconfig). We also set a default commit identity so the agent's commits don't
+// fail with "Author identity unknown" (override via VBRT_GIT_AUTHOR_NAME/EMAIL).
+//
+// Sibling to ensureSubscriptionCredentials — same seed-at-boot shape — but kept
+// SEPARATE on purpose: GitHub push auth and the Claude subscription login are
+// unrelated secrets with different lifecycles, so folding one into the other would
+// just couple two things that fail independently. No-op without a token (local /
+// loopback Drive relies on the operator's own git config).
+export function ensureGitAuth() {
+  // Normalize GH_TOKEN → GITHUB_TOKEN so the helper (which reads $GITHUB_TOKEN) and
+  // any inherited child env see a single canonical name.
+  if (!process.env.GITHUB_TOKEN && process.env.GH_TOKEN) process.env.GITHUB_TOKEN = process.env.GH_TOKEN;
+  if (!process.env.GITHUB_TOKEN) return;
+  const set = (key, val) => {
+    try {
+      execFileSync('git', ['config', '--global', key, val]);
+    } catch (e) {
+      console.error(`[agent] git config ${key} failed:`, e && e.message);
+    }
+  };
+  // The helper resolves $GITHUB_TOKEN at call time from the (inherited) env, so the
+  // token is never persisted — only this script reference is stored in the gitconfig.
+  set('credential.https://github.com.helper',
+    '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f');
+  set('user.name', process.env.VBRT_GIT_AUTHOR_NAME || 'VibeRate Drive');
+  set('user.email', process.env.VBRT_GIT_AUTHOR_EMAIL || 'drive@viberate.local');
+  console.log('[agent] configured GitHub credential helper + commit identity for Drive');
 }
 
 // Env handed to the spawned `claude`. When a subscription login exists we drop

@@ -63,25 +63,50 @@ fly secrets set CLAUDE_CREDENTIALS_JSON="$(cat ~/.claude/.credentials.json)"
 ```
 
 This is a full-account bearer token — **operator-only**; never collect it from
-other users (multi-user Drive should use per-user API keys). When the seeded
-token goes invalid, re-seed from a fresh `claude login`:
+other users (multi-user Drive should use per-user API keys).
+
+When the seeded token goes invalid (Drive turns fail with `401 Invalid
+authentication credentials`), re-seed from a fresh `claude login` — just rotate
+the secret:
 
 ```bash
-fly ssh console -C "rm /data/claude/.credentials.json"
 fly secrets set CLAUDE_CREDENTIALS_JSON="$(cat ~/.claude/.credentials.json)"
 ```
+
+The seed is **self-healing** (`ensureSubscriptionCredentials`): on boot it
+overwrites the on-disk copy whenever the secret's token is fresher (higher
+`expiresAt`), so a rotated secret takes over on the next restart — no manual
+`rm /data/claude/.credentials.json` needed. (It never overwrites a *newer*
+on-disk token, i.e. one the CLI refreshed in place.) `fly secrets set` triggers a
+machine restart, which is what runs the re-seed.
+
+**Why this keeps happening:** the OAuth refresh token is single-use/rotating, so
+using the *same* Max account locally (or anywhere else) invalidates the hosted
+instance's copy. To stop fighting it long-term, give the hosted instance its own
+dedicated login (a separate account or a BYO `ANTHROPIC_API_KEY`) so local use
+can't knock it offline.
 
 **Drive workspaces (per-project checkouts).** Driving "in project X" runs the agent
 in X's **git checkout on the volume** (`PLAN_DRIVE_WORKSPACES.md`). The first time
 you Drive a project, the UI's *Set up workspace* step clones its repo into
 `VBRT_WORKSPACES_DIR` (default `/data/workspaces/<slug>`, on the volume so it
-survives restarts) — once, not per conversation. For **private** repos, set a
-GitHub token secret; the server injects it into the clone URL and never persists or
-logs it:
+survives restarts) — once, not per conversation. For **private** repos — and to let
+the Drive agent **push** the branches it produces — set a GitHub token secret:
 
 ```bash
 fly secrets set GITHUB_TOKEN=ghp_...   # repo-scoped PAT (or a fine-grained token)
 ```
+
+At boot, `ensureGitAuth` (`src/agent.js`) registers a global git **credential
+helper** that serves this token for any `github.com` https operation, so both
+`git clone` (private repos) and `git push` (the agent landing its own work)
+authenticate — without the token ever being written to a repo's `.git/config` or
+any file; only the helper-script reference lives in `~/.gitconfig`. It also sets a
+default commit identity (`VibeRate Drive <drive@viberate.local>`, override with
+`VBRT_GIT_AUTHOR_NAME` / `VBRT_GIT_AUTHOR_EMAIL`) so the agent's commits don't fail
+with *"Author identity unknown"*. Without the secret it's a no-op — local/loopback
+Drive uses your own git config. This is a distinct secret from
+`CLAUDE_CREDENTIALS_JSON`; the two are seeded separately on purpose.
 
 ## 5. Deploy
 
