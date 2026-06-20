@@ -4328,7 +4328,9 @@ async function boot() {
   };
   // Picking a project (drawer) or a conversation (rail sheet) dismisses the surface.
   const sb = byId('sidebar'); if (sb) sb.addEventListener('click', (e) => { if (e.target.closest('.proj')) closeDrawer(); });
-  const ss = byId('sessions'); if (ss) ss.addEventListener('click', (e) => { if (e.target.closest('.sess, .prompt-row')) closeSheet(); });
+  // A row, a Drive start/resume, or the back-to-workspace arrow all navigate away
+  // from the sheet — dismiss it so the destination isn't hidden behind it.
+  const ss = byId('sessions'); if (ss) ss.addEventListener('click', (e) => { if (e.target.closest('.sess, .prompt-row, .pb-drive, [data-back-projects]')) closeSheet(); });
 
   // Wrap the desktop render fns so each surface transition re-syncs the chrome.
   ['renderTimeline', 'renderSessionReader', 'renderSessionList', 'renderDriveView', 'showHome', 'showProject'].forEach((name) => {

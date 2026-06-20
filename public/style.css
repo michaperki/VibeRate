@@ -951,7 +951,10 @@ pre.code {
 body.view-home #home { display: block; }
 body.view-home #sessions, body.view-home #conversation { display: none; }
 body.view-project #home { display: none; }
-body.view-project:not(.hosted) #sidebar { display: none; }
+/* On mobile this same #sidebar is reused as the off-canvas projects drawer, so
+   it must NOT inherit the desktop hide — :not(.is-mobile) keeps this rule from
+   out-specifying the `body.is-mobile #sidebar { display:flex }` drawer rule. */
+body.view-project:not(.hosted):not(.is-mobile) #sidebar { display: none; }
 body.hosted #sidebar { display: none; }
 #brand { cursor: pointer; }
 #brand:hover .brand-sub { color: var(--accent); }
