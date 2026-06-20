@@ -12,7 +12,8 @@ import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCoo
 import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner } from './accounts.js';
 import { mountAgent } from './agentRoutes.js';
-import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl } from './agent.js';
+import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl, setIngestHook } from './agent.js';
+import { ingestDriveTurn } from './driveIngest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -275,6 +276,20 @@ export function startServer(port = 4317) {
       console.error('[classify] project failed:', e && (e.message || e));
     }
   }
+
+  // Drive ingest: when a driven turn finishes, fold its transcript into the bound
+  // project so it shows in the Convos rail, then (re)classify so the cooled card
+  // gets its archetype + outcome rail like any captured convo. This is the
+  // watcher-free replacement for "run vbrt watch on the host" — the runtime owns
+  // the process, so it ingests by session id directly (DRIVE_CONVO_INGEST_GAP.md).
+  setIngestHook(async ({ projectSlug, claudeSessionId }) => {
+    try {
+      const result = await ingestDriveTurn({ projectSlug, claudeSessionId });
+      if (result) classifyProject(projectSlug);
+    } catch (e) {
+      console.error('[drive-ingest] failed:', e && (e.message || e));
+    }
+  });
 
   // Read guard: resolves the project and enforces visibility. Returns null (and
   // sends 404 — we don't reveal that a private project exists) when not allowed.

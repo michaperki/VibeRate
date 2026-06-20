@@ -47,6 +47,17 @@ export function setBaseUrl(url) {
   BASE_URL = url;
 }
 
+// Optional sink invoked when a driven turn ends with a known claude session id and
+// a bound project. It folds the turn's JSONL into that project's store so the
+// convo shows up in the Convos rail — the watcher-free ingest path (see
+// driveIngest.js / DRIVE_CONVO_INGEST_GAP.md). Injected by the server, which owns
+// persistence + classification, so this runtime stays storage-agnostic (mirrors
+// setBaseUrl). No-op until set, and only fires for project-bound sessions.
+let onTurnIngest = null;
+export function setIngestHook(fn) {
+  onTurnIngest = fn;
+}
+
 // Pending `ask` round-trips, keyed by askId: the sidecar's POST is parked here
 // until the Drive UI answers (resolveAsk) or the wait times out.
 const pendingAsks = new Map();
@@ -86,7 +97,7 @@ export function resolveAsk(askId, selections) {
 // Where the CLI keeps its config + OAuth credentials. Honors CLAUDE_CONFIG_DIR
 // (set to the Fly volume in hosted mode so a refreshed token survives restarts);
 // otherwise the usual ~/.claude.
-function claudeConfigDir() {
+export function claudeConfigDir() {
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
@@ -233,12 +244,13 @@ function now() {
 
 // One driven session: a stable local id, the claude session id once we learn it,
 // a capped event log for SSE backfill, and a set of live subscribers.
-function createSession({ cwd, permissionMode }) {
+function createSession({ cwd, permissionMode, projectSlug = null }) {
   const id = randomUUID();
   const session = {
     id,
     cwd,
     permissionMode,
+    projectSlug, // bound project (if any); drives the turn-end ingest into the rail
     claudeSessionId: null, // filled from the first `system/init` event
     status: 'starting', // starting | working | idle | exited | error
     createdAt: now(),
@@ -505,6 +517,16 @@ function runTurn(session, prompt, { resume }) {
       setStatus(session, 'idle');
     }
     emit(session, { kind: 'turn_end', code });
+
+    // Fold this turn's transcript into its bound project so the convo lands in the
+    // rail. The CLI wrote a durable JSONL as a side effect; in hosted Drive nothing
+    // else ever ingests it (no watcher on the volume — DRIVE_CONVO_INGEST_GAP.md).
+    // Best-effort and detached: a failure here must never affect the turn.
+    if (onTurnIngest && session.projectSlug && session.claudeSessionId) {
+      Promise.resolve(
+        onTurnIngest({ projectSlug: session.projectSlug, claudeSessionId: session.claudeSessionId }),
+      ).catch(() => { /* ingest is opportunistic; the JSONL stays on disk regardless */ });
+    }
   });
 
   // One user message, stream-json framed, then close stdin to run the turn.
@@ -527,11 +549,11 @@ function assertIdleCwd(cwd) {
 // --- Public API (the server's thin route layer calls these) ---
 
 // Start a brand-new driven session and kick off its first turn.
-export function startSession({ cwd, prompt, permissionMode = 'default' }) {
+export function startSession({ cwd, prompt, permissionMode = 'default', projectSlug = null }) {
   assertIdleCwd(cwd);
   if (!prompt || !String(prompt).trim()) throw new Error('prompt is required');
   if (!PERMISSION_MODES.has(permissionMode)) throw new Error(`unknown permission mode: ${permissionMode}`);
-  const session = createSession({ cwd, permissionMode });
+  const session = createSession({ cwd, permissionMode, projectSlug });
   session.title = String(prompt).trim().slice(0, 120);
   runTurn(session, String(prompt), { resume: false });
   return publicView(session);
@@ -585,6 +607,7 @@ function publicView(session) {
   return {
     id: session.id,
     cwd: session.cwd,
+    projectSlug: session.projectSlug,
     permissionMode: session.permissionMode,
     claudeSessionId: session.claudeSessionId,
     status: session.status,

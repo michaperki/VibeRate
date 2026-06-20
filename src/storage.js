@@ -76,6 +76,49 @@ export function ingestBundle(bundle, { owner = null, visibility = null } = {}) {
   return { id, updated: !!existing, visibility: manifest && manifest.visibility };
 }
 
+// Fold a single Drive-produced session into an EXISTING project (keyed by slug),
+// without touching the project's repo identity (cwd/owner/visibility/repoUrl). A
+// driven session runs in a checkout on the host whose path differs from the
+// project's captured cwd, so we must NOT let saveSessions' unconditional
+// `manifest.cwd = cwd` repoint the project (that would fork it from the user's
+// real repo on the next local push). This is the direct, watcher-free ingest path
+// for the Drive runtime: parse the JSONL the CLI just wrote, drop it in here.
+// Returns { slug, added, total } or null if the project doesn't exist.
+export function ingestDriveSession(slug, session) {
+  const dir = projectDir(slug);
+  const manifestPath = path.join(dir, 'project.json');
+  const manifest = readJson(manifestPath, null);
+  if (!manifest) return null;
+
+  const sessionsDir = path.join(dir, 'sessions');
+  ensureDir(sessionsDir);
+  const fileId = `${session.source}-${session.id}`;
+  fs.writeFileSync(path.join(sessionsDir, `${fileId}.json`), JSON.stringify(session, null, 2));
+
+  const summary = {
+    id: fileId,
+    source: session.source,
+    title: session.title,
+    lastUserText: session.lastUserText || null,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    messageCount: session.messageCount,
+  };
+  manifest.sessions = manifest.sessions || [];
+  const i = manifest.sessions.findIndex((s) => s.id === fileId);
+  const added = i < 0;
+  if (added) manifest.sessions.push(summary);
+  else manifest.sessions[i] = summary; // re-ingest of a follow-up turn: refresh in place
+  manifest.sessions.sort((a, b) =>
+    String(b.startedAt || '').localeCompare(String(a.startedAt || '')),
+  );
+  manifest.updatedAt = new Date().toISOString();
+  manifest.lastPushAt = Date.now(); // a driven turn is fresh activity → flips the viewer to Live
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+  return { slug, added, total: manifest.sessions.length };
+}
+
 // Flip a project public/private (the "publish" action). Returns the manifest.
 export function setVisibility(slug, visibility) {
   const manifestPath = path.join(projectDir(slug), 'project.json');

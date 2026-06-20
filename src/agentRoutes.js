@@ -73,7 +73,10 @@ export function mountAgent(app, opts = {}) {
         if (!resolved) return res.status(409).json({ error: 'project workspace is not set up yet; clone it first' });
         workdir = resolved;
       }
-      res.json(startSession({ cwd: workdir, prompt, permissionMode }));
+      // Pass the bound slug through so the runtime can ingest each finished turn
+      // back into this project's rail (driveIngest.js). Only set when driving a
+      // real project — ad-hoc sessions on the default cwd have nowhere to land.
+      res.json(startSession({ cwd: workdir, prompt, permissionMode, projectSlug: projectSlug || null }));
     } catch (err) {
       fail(res, err);
     }
