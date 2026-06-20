@@ -4892,6 +4892,9 @@ async function boot() {
   if (byId('m-rail')) byId('m-rail').onclick = toggleSheet;
   if (byId('m-backdrop')) byId('m-backdrop').onclick = closeAll;
   if (byId('m-brainbar')) byId('m-brainbar').onclick = (e) => {
+    // The leading "← dashboard" pill leaves Drive for the project dashboard (the
+    // strip is fixed chrome, so this back affordance never scrolls out of reach).
+    if (e.target.closest('#m-bb-dash')) { exitDrive(); return; }
     // A chip taps straight into the doc lightbox for that file; the grip / bare
     // strip toggles the network. One handler, so a chip tap doesn't also fire a
     // strip tap (no double-toggle).

@@ -1299,6 +1299,14 @@ body.is-mobile.m-driving #m-brainbar {
   height: var(--m-brainbar-h); padding: 0 10px;
   background: var(--panel); border-bottom: 1px solid var(--border);
 }
+/* Leading back-to-dashboard pill — first in the strip, never scrolls (the chips do). */
+#m-brainbar .m-bb-dash {
+  flex: none; display: inline-flex; align-items: center; padding: 4px 9px;
+  font: inherit; font-size: 11.5px; font-weight: 600; line-height: 1; white-space: nowrap;
+  color: var(--muted); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+#m-brainbar .m-bb-dash:active { background: var(--border); color: var(--text); }
 #m-brainbar .m-chips { display: flex; align-items: center; gap: 8px; overflow-x: auto; flex: 1 1 auto; scrollbar-width: none; }
 #m-brainbar .m-chips::-webkit-scrollbar { display: none; }
 #m-brainbar .m-grip { flex: none; color: var(--muted); font-size: 12px; cursor: pointer; padding-left: 4px; }
@@ -1312,11 +1320,11 @@ body.is-mobile .pane { height: auto; min-height: 40dvh; }
 body.is-mobile #conversation { width: 100%; padding: 0; }
 body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
 
-/* The app bar (and, while driving, the brain strip) are position:fixed at the top.
-   A sticky toolbar with top:0 would pin behind them and slide up out of view — so
-   offset its sticky top to land just below the fixed header(s) and keep it visible. */
-body.is-mobile .conv-toolbar { top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px)); }
-body.is-mobile.m-driving .dv-toolbar { top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
+/* On mobile the persistent chrome (app bar + brain strip) owns navigation, so the
+   in-flow Drive toolbar shouldn't pin behind the fixed header — let it scroll away,
+   and drop its back button: the fixed brain strip carries "← dashboard" instead. */
+body.is-mobile .dv-toolbar { position: static; }
+body.is-mobile .dv-toolbar .back-dash { display: none; }
 
 /* tighten desktop-fixed paddings that overflow a phone */
 body.is-mobile .conv-toolbar { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
