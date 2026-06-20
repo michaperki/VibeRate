@@ -1046,6 +1046,45 @@ body.public #feed { margin: 0 auto; }
    ============================================================================ */
 .dv-wrap { display: flex; flex-direction: column; min-height: 100vh; }
 .dv-toolbar { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+
+/* --- live brain (Drive centerpiece) --- */
+.dv-brain { margin: 0 28px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.dvb-bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.dvb-hero { position: relative; flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; }
+.dvb-hero.pulse { animation: dvb-heropulse .6s ease; }
+@keyframes dvb-heropulse { 0%,100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 4px rgba(124,92,255,.25); } }
+.dvb-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; letter-spacing: -.3px; }
+.dvb-meta { flex: 1 1 auto; min-width: 0; }
+.dvb-title { font-size: 13px; font-weight: 650; }
+.dvb-subline { font-size: 11px; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dvb-livedot { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--live); font-weight: 600; }
+.dvb-livedot i { width: 7px; height: 7px; border-radius: 50%; background: var(--live); animation: dvb-beat 1.3s ease-in-out infinite; }
+@keyframes dvb-beat { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+.dvb-toggle { flex: 0 0 auto; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; width: 26px; height: 26px; cursor: pointer; line-height: 1; }
+.dvb-stage { height: 240px; position: relative; border-top: 1px solid var(--border); background: radial-gradient(120% 120% at 50% 40%, rgba(124,92,255,.05), transparent 70%); }
+.dvb-brain { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dvb-foot { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border-top: 1px solid var(--border); min-height: 20px; flex-wrap: wrap; }
+.dv-brain.collapsed .dvb-stage, .dv-brain.collapsed .dvb-foot { display: none; }
+.dv-brain.collapsed .dvb-toggle { transform: rotate(-90deg); }
+.dvb-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: dvb-spin .8s linear infinite; flex: 0 0 auto; visibility: hidden; }
+@keyframes dvb-spin { to { transform: rotate(360deg); } }
+.dvb-verb { font-weight: 700; font-size: 11px; padding: 1px 7px; border-radius: 5px; flex: 0 0 auto; }
+.dvb-verb.read { background: rgba(63,198,224,.16); color: #3fc6e0; }
+.dvb-verb.edit { background: rgba(255,157,92,.18); color: #ff9d5c; }
+.dvb-verb.run { background: rgba(46,207,143,.16); color: var(--codex); }
+.dvb-verb.write { background: rgba(169,120,255,.18); color: var(--claude); }
+.dvb-file { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 120px; min-width: 0; }
+.dvb-legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 10.5px; }
+.dvb-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.dvb-legend i { width: 9px; height: 9px; border-radius: 50%; }
+.dvb-edge { stroke: #2b3340; stroke-width: 1; }
+.dvb-edge.transient { stroke: #ff9d5c; }
+.dvb-ripple { fill: none; pointer-events: none; }
+.dvb-label { font: 600 10px ui-sans-serif, system-ui; fill: var(--muted); text-anchor: middle; paint-order: stroke; stroke: #0b0d12; stroke-width: 3px; }
+.dvb-node.core .dvb-label { fill: #cdd2de; }
+@media (prefers-reduced-motion: reduce) { .dvb-livedot i, .dvb-spin { animation: none; } }
+body.is-mobile .dv-brain { margin: 0 clamp(12px, 4vw, 28px); }
+body.is-mobile .dvb-stage { height: 280px; }
 .dv-body { padding: 20px 28px 24px; flex: 1; }
 .dv-start { max-width: 760px; }
 .dv-start label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 4px; }

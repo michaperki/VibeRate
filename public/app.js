@@ -3581,6 +3581,37 @@ function renderDriveView() {
         </div>
       </div>
       <div id="dv-banner" class="dv-banner hidden"></div>
+      <div id="dv-brain" class="dv-brain${state._driveBrainOpen === false ? ' collapsed' : ''}">
+        <div class="dvb-bar">
+          <div class="dvb-hero">
+            <svg viewBox="0 0 54 54" width="44" height="44" aria-hidden="true">
+              <circle cx="27" cy="27" r="22" fill="none" stroke="#2b3340" stroke-width="5"/>
+              <circle id="dvb-prog" cx="27" cy="27" r="22" fill="none" stroke="#3fb950" stroke-width="5"
+                      stroke-linecap="round" transform="rotate(-90 27 27)" stroke-dasharray="0 999"
+                      style="transition:stroke-dasharray .5s ease, stroke .5s ease"/>
+            </svg>
+            <span class="dvb-pct" id="dvb-pct">0%</span>
+          </div>
+          <div class="dvb-meta">
+            <div class="dvb-title">live brain</div>
+            <div class="dvb-subline" id="dvb-sub">no plan checklists</div>
+          </div>
+          <span class="dvb-livedot"><i></i>live</span>
+          <button class="dvb-toggle" id="dvb-toggle" title="Show / hide the live brain">▾</button>
+        </div>
+        <div class="dvb-stage"><svg id="dvb-svg" class="dvb-brain" preserveAspectRatio="xMidYMid meet"></svg></div>
+        <div class="dvb-foot">
+          <span class="dvb-spin" id="dvb-spin"></span>
+          <span class="dvb-verb read" id="dvb-verb">idle</span>
+          <span class="dvb-file" id="dvb-file">waiting for the agent…</span>
+          <span class="dvb-legend">
+            <span><i style="background:#a978ff"></i>doc</span>
+            <span><i style="background:#2ecf8f"></i>plan/mem</span>
+            <span><i style="background:#5aa9e6"></i>code</span>
+            <span><i style="background:#ff9d5c"></i>edited</span>
+          </span>
+        </div>
+      </div>
       <div class="dv-body"><div id="dv-transcript" class="dv-transcript"></div></div>
       <button id="dv-jump" class="dv-jump hidden" title="Jump to the latest activity">↓ new activity</button>
       <div class="dv-composer">
@@ -3605,6 +3636,14 @@ function renderDriveView() {
   el('#dv-new').addEventListener('click', () => openDriveForProject(state.driveProject || state.project));
   el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
   el('#dv-jump').addEventListener('click', () => driveScroll(true));
+  // Live brain: bind + seed the force-sim against this session's panel. The toggle
+  // collapses the stage (the rAF loop self-stops when the svg is hidden/detached).
+  el('#dvb-toggle').addEventListener('click', () => {
+    const open = el('#dv-brain').classList.toggle('collapsed');
+    state._driveBrainOpen = !open;
+    if (!open) liveBrain.attach();   // re-expanded → rebind + restart the loop
+  });
+  if (state._driveBrainOpen !== false) liveBrain.attach();
   // Sticky-bottom intent: stay glued to the latest only while the reader is parked at
   // the bottom. Once they scroll up to read history, new activity no longer yanks them
   // down — it surfaces the "new activity" pill instead. The pane (#conversation) is the
@@ -3988,7 +4027,7 @@ function driveRender(ev) {
       // Brain↔chat live link (PLAN_MOBILE.md Slice 3): a Write/Edit/Read of a brain
       // doc glows its node + header chip. Reads the tool_use the runtime already
       // emits — no extra capture. No-op when no matching brain node is on screen.
-      if (window.mobileBrainTouch) { const f = toolFile(ev); if (f) window.mobileBrainTouch(f, classifyTool(ev.name)); }
+      { const f = toolFile(ev); if (f && window.mobileBrainTouch) window.mobileBrainTouch(f, classifyTool(ev.name)); liveBrain.feed(ev.name, f); }
       if (ev.name === 'mcp__viberate__ask') break; // renders as the picker via the 'ask' event
       driveAddTool(ev); break;
     case 'tool_result': driveAttachToolResult(ev); break;
@@ -3997,6 +4036,7 @@ function driveRender(ev) {
     case 'result':
       driveResetLive();
       driveEndTurn();
+      liveBrain.idle();
       driveAddEv('result', ev.isError ? 'turn failed' : 'turn complete', driveResultMeta(ev));
       driveCoolProvisional(); break;
     case 'system':
@@ -4017,6 +4057,282 @@ function driveOpenStream(id, after) {
   es.addEventListener('error', () => {/* EventSource auto-reconnects */});
   if (state.drive) state.drive.es = es;
 }
+
+// ---------- live brain (Drive view centerpiece) ----------
+// A force-simulated graph driven straight off the Drive SSE stream. Brain docs
+// (SOUL/CLAUDE/plans/memory) are seeded as persistent core/orbit nodes; every
+// code file the agent touches flares into an *ephemeral* node that swells when
+// edited (pulled to the core) and cools + drifts to the rim + fades out once the
+// agent moves on — recency-as-physics, mobile-first, no 3D. Fed by driveRender's
+// tool_use branch via liveBrain.feed(toolName, filePath); plan ticks pulse the
+// plan nodes; the hero ring reflects aggregate plan completion from the docGraph.
+const liveBrain = (() => {
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const W = 380, H = 300, CX = W / 2, CY = H / 2;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const COLOR = { doc: '#a978ff', mem: '#2ecf8f', plan: '#2ecf8f', code: '#5aa9e6', hot: '#ff9d5c', read: '#3fc6e0', run: '#2ecf8f' };
+
+  let svg = null, layers = null, raf = null;
+  let refs = {};                  // hero/ticker DOM refs grabbed on attach
+  const nodes = new Map();        // key (basename, lowercased) -> node
+  const els = new Map();          // key -> { g, dot, glow, ring, prog, label }
+  let edges = [];
+  let plans = {};                 // node id -> { done, total }
+
+  const baseKey = (p) => String(p).split(/[\\/]/).pop().toLowerCase();
+  const baseLabel = (p) => String(p).split(/[\\/]/).pop();
+  const baseColor = (n) => COLOR[n.kind] || COLOR.code;
+
+  // tool name -> visual verb. Reads (read/grep/glob/search/web/other) are a light
+  // pulse; writes/edits run hot; bash ripples; plan tools tick the plan rings.
+  function verbFor(name) {
+    const n = (name || '').toLowerCase();
+    if (/update_plan|todowrite|exit_plan|plan_mode/.test(n)) return 'plan';
+    if (/write|create/.test(n)) return 'write';
+    if (/edit|apply_patch|patch|notebook|multiedit/.test(n)) return 'edit';
+    if (/bash|exec|shell|\brun\b|command|terminal/.test(n)) return 'run';
+    return 'read';
+  }
+
+  function addNode(spec) {
+    if (nodes.has(spec.id)) return nodes.get(spec.id);
+    const ang = Math.random() * Math.PI * 2;
+    const spawnR = spec.core ? 28 : (spec.kind === 'code' ? 130 : 88);
+    const n = { x: CX + Math.cos(ang) * spawnR, y: CY + Math.sin(ang) * spawnR, vx: 0, vy: 0, heat: 0, flash: 0, flashKind: 'read', fade: 0, ...spec };
+    nodes.set(n.id, n);
+    return n;
+  }
+
+  // Seed persistent brain-doc nodes from the live doc graph (skip archived ghosts).
+  function seed() {
+    nodes.clear(); els.clear(); edges = []; plans = {};
+    const g = ((state.docGraph && state.docGraph.nodes) || []).filter((n) => !n.archived);
+    for (const d of g) {
+      const isMem = d.role === 'memory' || /(^|\/)memory\//i.test(d.name || '');
+      const hasPlan = !!(d.completion && d.completion.total);
+      const kind = hasPlan ? 'plan' : isMem ? 'mem' : 'doc';
+      const core = d.role === 'constitution';
+      const spec = { id: baseKey(d.name), label: d.base || baseLabel(d.name), kind, core, r: core ? 12 : hasPlan ? 11 : 9, path: d.name };
+      if (hasPlan) { spec.plan = spec.id; plans[spec.id] = { done: d.completion.done, total: d.completion.total }; }
+      addNode(spec);
+    }
+    // A light backbone so the force layout has structure: hang every orbit node off
+    // the first constitution core, and chain the cores together.
+    const cores = [...nodes.values()].filter((n) => n.core);
+    if (cores.length) {
+      for (let i = 1; i < cores.length; i++) edges.push({ a: cores[i - 1].id, b: cores[i].id });
+      for (const n of nodes.values()) if (!n.core) edges.push({ a: n.id, b: cores[0].id });
+    }
+    renderHero();
+  }
+
+  let activePlan = null;
+  function touch(verb, file) {
+    if (!file) return;
+    const k = baseKey(file);
+    let n = nodes.get(k);
+    if (!n) n = addNode({ id: k, label: baseLabel(file), kind: 'code', core: false, r: 9, path: file, ephemeral: true });
+    n.fade = 0;
+    if (verb === 'read') { n.heat = Math.min(1, n.heat + 0.45); n.flash = 1; n.flashKind = 'read'; }
+    else if (verb === 'run') { n.heat = Math.min(1, n.heat + 0.55); n.flash = 1; n.flashKind = 'run'; ripple(n, COLOR.run); }
+    else { n.heat = 1; n.flash = 1; n.flashKind = 'edit'; }            // edit / write run hot
+    if (verb === 'write' && n.kind === 'code') n.kind = 'doc';          // a freshly written file graduates
+    if (n.kind === 'code' && activePlan && !edges.some((e) => e.a === n.id && e.b === activePlan && e.transient))
+      edges.push({ a: n.id, b: activePlan, transient: true });
+    setTicker(verb, n.label);
+  }
+
+  // A plan tool ticked — pulse the plan nodes (we don't fabricate completion; the
+  // ring values stay honest, sourced from the docGraph re-seed on refresh()).
+  function planPulse() {
+    let any = false;
+    for (const n of nodes.values()) if (n.kind === 'plan') { n.heat = 1; n.flash = 1; n.flashKind = 'edit'; any = true; activePlan = n.id; }
+    setTicker('plan', any ? 'plan updated' : 'plan');
+    if (refs.hero) { refs.hero.classList.remove('pulse'); void refs.hero.offsetWidth; refs.hero.classList.add('pulse'); }
+  }
+
+  function ripple(n, stroke) {
+    if (reduce || !layers) return;
+    const c = document.createElementNS(SVGNS, 'circle');
+    c.setAttribute('class', 'dvb-ripple'); c.setAttribute('stroke', stroke);
+    c.setAttribute('cx', n.x); c.setAttribute('cy', n.y); c.setAttribute('r', n.r);
+    layers.fx.append(c);
+    const t0 = performance.now();
+    (function grow() {
+      const k = (performance.now() - t0) / 700;
+      if (k >= 1 || !c.isConnected) { c.remove(); return; }
+      c.setAttribute('r', n.r + k * 46); c.setAttribute('opacity', (1 - k) * 0.7);
+      requestAnimationFrame(grow);
+    })();
+  }
+
+  function setTicker(verb, label) {
+    if (!refs.verb) return;
+    const txt = { read: 'Read', edit: 'Edit', write: 'Write', run: 'Bash', plan: 'Plan' }[verb] || verb;
+    refs.verb.className = 'dvb-verb ' + (verb === 'write' ? 'write' : verb === 'run' ? 'run' : verb === 'edit' || verb === 'plan' ? 'edit' : 'read');
+    refs.verb.textContent = txt;
+    refs.file.textContent = label;
+    if (refs.spin) refs.spin.style.visibility = 'visible';
+  }
+  function idle() {
+    if (!refs.verb) return;
+    if (refs.spin) refs.spin.style.visibility = 'hidden';
+    refs.verb.className = 'dvb-verb read'; refs.verb.textContent = 'done';
+    refs.file.textContent = 'turn complete';
+  }
+
+  function pctColor(p) {
+    const t = Math.max(0, Math.min(1, p / 100)), a = [240, 120, 60], b = [63, 185, 80];
+    return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',')})`;
+  }
+  function renderHero() {
+    if (!refs.prog) return;
+    let done = 0, total = 0;
+    for (const k in plans) { done += plans[k].done; total += plans[k].total; }
+    const pct = total ? Math.round(done / total * 100) : 0;
+    const C = 2 * Math.PI * 22;
+    refs.prog.setAttribute('stroke-dasharray', `${(pct / 100 * C).toFixed(1)} 999`);
+    refs.prog.setAttribute('stroke', pctColor(pct));
+    refs.pct.textContent = pct + '%';
+    const nPlans = Object.keys(plans).length;
+    refs.sub.textContent = total ? `${done} of ${total} tasks · ${total - done} left across ${nPlans} plan${nPlans === 1 ? '' : 's'}` : 'no plan checklists';
+  }
+
+  function ensureEl(n) {
+    if (els.has(n.id)) return els.get(n.id);
+    const g = document.createElementNS(SVGNS, 'g');
+    g.setAttribute('class', 'dvb-node' + (n.core ? ' core' : ''));
+    const glow = document.createElementNS(SVGNS, 'circle'); glow.setAttribute('class', 'dvb-glow');
+    const dot = document.createElementNS(SVGNS, 'circle');
+    const ring = document.createElementNS(SVGNS, 'circle');
+    ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', '#2b3340'); ring.setAttribute('stroke-width', '2.5');
+    const prog = document.createElementNS(SVGNS, 'circle');
+    prog.setAttribute('fill', 'none'); prog.setAttribute('stroke-width', '2.5'); prog.setAttribute('stroke-linecap', 'round');
+    const label = document.createElementNS(SVGNS, 'text'); label.setAttribute('class', 'dvb-label'); label.textContent = n.label;
+    g.append(glow, dot, ring, prog, label);
+    layers.nodes.append(g);
+    const rec = { g, dot, glow, ring, prog, label };
+    els.set(n.id, rec);
+    return rec;
+  }
+  function removeNode(id) { nodes.delete(id); const r = els.get(id); if (r) { r.g.remove(); els.delete(id); } }
+
+  function hex(c) { c = c.replace('#', ''); return [0, 2, 4].map((i) => parseInt(c.substr(i, 2), 16)); }
+  function mix(a, b, t) { const A = hex(a), B = hex(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(',')})`; }
+
+  let last = 0;
+  function step(now) {
+    if (!svg || !svg.isConnected || svg.closest('.dv-brain.collapsed')) { raf = null; return; }   // torn down / collapsed → stop the loop
+    const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016); last = now;
+    // decay heat; ephemeral code nodes that have gone cold fade out and die
+    for (const n of nodes.values()) {
+      const hl = n.kind === 'code' ? 7 : 16;
+      n.heat *= Math.pow(0.5, dt / hl);
+      n.flash *= Math.pow(0.5, dt / 0.45);
+      if (n.ephemeral && n.heat < 0.04) { n.fade += dt / 2.2; if (n.fade >= 1) { removeNode(n.id); continue; } }
+    }
+    // hard cap: if ephemeral nodes pile up, retire the coldest
+    const code = [...nodes.values()].filter((n) => n.ephemeral);
+    if (code.length > 40) code.sort((a, b) => a.heat - b.heat).slice(0, code.length - 40).forEach((n) => removeNode(n.id));
+    const arr = [...nodes.values()];
+    for (let i = 0; i < arr.length; i++) {
+      const a = arr[i];
+      for (let j = i + 1; j < arr.length; j++) {
+        const b = arr[j];
+        let dx = a.x - b.x, dy = a.y - b.y; const d2 = dx * dx + dy * dy + 0.01, d = Math.sqrt(d2);
+        const f = 1400 / d2; a.vx += f * dx / d; a.vy += f * dy / d; b.vx -= f * dx / d; b.vy -= f * dy / d;
+      }
+      const ang = Math.atan2(a.y - CY, a.x - CX);
+      let targetR;
+      if (a.core) targetR = 32;
+      else if (a.kind === 'code') targetR = 56 + (1 - a.heat) * 120;     // hot = near core, cold = rim
+      else targetR = 64 + (1 - a.heat) * 48;
+      const tx = CX + Math.cos(ang) * targetR, ty = CY + Math.sin(ang) * targetR;
+      const pull = a.core ? 0.06 : 0.035;
+      a.vx += (tx - a.x) * pull; a.vy += (ty - a.y) * pull;
+      if (!reduce) { a.vx += -Math.sin(ang) * (0.08 + a.heat * 0.22); a.vy += Math.cos(ang) * (0.08 + a.heat * 0.22); }
+    }
+    for (const e of edges) {
+      const a = nodes.get(e.a), b = nodes.get(e.b); if (!a || !b) continue;
+      let dx = b.x - a.x, dy = b.y - a.y; const d = Math.hypot(dx, dy) + 0.01;
+      const rest = e.transient ? 64 : 90, f = (d - rest) * 0.012;
+      a.vx += f * dx / d; a.vy += f * dy / d; b.vx -= f * dx / d; b.vy -= f * dy / d;
+    }
+    for (const n of nodes.values()) {
+      n.x += n.vx * 0.6; n.y += n.vy * 0.6; n.vx *= 0.86; n.vy *= 0.86;
+      const m = 18; n.x = Math.max(m, Math.min(W - m, n.x)); n.y = Math.max(m, Math.min(H - 24, n.y));
+    }
+    for (let i = edges.length - 1; i >= 0; i--) { const e = edges[i]; if (!e.transient) continue; const a = nodes.get(e.a); if (!a || a.heat < 0.05) edges.splice(i, 1); }
+    draw();
+    raf = requestAnimationFrame(step);
+  }
+
+  function draw() {
+    let eh = '';
+    for (const e of edges) {
+      const a = nodes.get(e.a), b = nodes.get(e.b); if (!a || !b) continue;
+      const op = e.transient ? (0.15 + a.heat * 0.5) : 0.42;
+      eh += `<line class="dvb-edge${e.transient ? ' transient' : ''}" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" opacity="${op.toFixed(2)}"/>`;
+    }
+    layers.edges.innerHTML = eh;
+    for (const n of nodes.values()) {
+      const rec = ensureEl(n);
+      const r = n.r + n.heat * 5;
+      const baseOp = 0.32 + 0.68 * Math.min(1, n.heat * 1.4 + (n.core ? 0.5 : 0.15));
+      rec.g.setAttribute('opacity', (baseOp * (1 - n.fade)).toFixed(2));
+      let fill = baseColor(n);
+      if (n.flash > 0.05) {
+        const fc = n.flashKind === 'read' ? COLOR.read : n.flashKind === 'run' ? COLOR.run : COLOR.hot;
+        fill = mix(baseColor(n), fc, Math.min(1, n.flash));
+      }
+      rec.dot.setAttribute('cx', n.x.toFixed(1)); rec.dot.setAttribute('cy', n.y.toFixed(1));
+      rec.dot.setAttribute('r', r.toFixed(1)); rec.dot.setAttribute('fill', fill);
+      const gr = r + 6 + n.heat * 8;
+      rec.glow.setAttribute('cx', n.x.toFixed(1)); rec.glow.setAttribute('cy', n.y.toFixed(1));
+      rec.glow.setAttribute('r', gr.toFixed(1)); rec.glow.setAttribute('fill', fill);
+      rec.glow.setAttribute('opacity', (n.heat * 0.22).toFixed(2));
+      const plan = n.plan && plans[n.plan];
+      if (plan) {
+        const cr = r + 5, C = 2 * Math.PI * cr, pct = plan.total ? plan.done / plan.total * 100 : 0;
+        rec.ring.style.display = ''; rec.prog.style.display = '';
+        for (const c of [rec.ring, rec.prog]) { c.setAttribute('cx', n.x.toFixed(1)); c.setAttribute('cy', n.y.toFixed(1)); c.setAttribute('r', cr.toFixed(1)); }
+        rec.prog.setAttribute('stroke', pctColor(pct));
+        rec.prog.setAttribute('stroke-dasharray', `${(pct / 100 * C).toFixed(1)} ${C.toFixed(1)}`);
+        rec.prog.setAttribute('transform', `rotate(-90 ${n.x.toFixed(1)} ${n.y.toFixed(1)})`);
+      } else { rec.ring.style.display = 'none'; rec.prog.style.display = 'none'; }
+      rec.label.setAttribute('x', n.x.toFixed(1));
+      rec.label.setAttribute('y', (n.y + r + 11).toFixed(1));
+      rec.label.setAttribute('opacity', (0.35 + 0.65 * Math.min(1, n.heat * 1.5 + (n.core ? 0.6 : 0.1))).toFixed(2));
+    }
+  }
+
+  // (Re)bind to the freshly-rendered Drive brain panel and (re)seed from the docGraph.
+  function attach() {
+    svg = document.getElementById('dvb-svg');
+    if (!svg) { if (raf) cancelAnimationFrame(raf); raf = null; return; }
+    refs = {
+      prog: document.getElementById('dvb-prog'), pct: document.getElementById('dvb-pct'), sub: document.getElementById('dvb-sub'),
+      verb: document.getElementById('dvb-verb'), file: document.getElementById('dvb-file'), spin: document.getElementById('dvb-spin'),
+      hero: document.querySelector('#dv-brain .dvb-hero'),
+    };
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = '';
+    layers = { edges: document.createElementNS(SVGNS, 'g'), fx: document.createElementNS(SVGNS, 'g'), nodes: document.createElementNS(SVGNS, 'g') };
+    svg.append(layers.edges, layers.fx, layers.nodes);
+    seed();
+    last = 0;
+    if (raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(step);
+  }
+
+  return {
+    attach,
+    feed(name, file) { const v = verbFor(name); if (v === 'plan') planPulse(); else touch(v, file); },
+    idle,
+    refresh() { if (svg && svg.isConnected) seed(); },   // re-pull plan completion when the docGraph changes
+  };
+})();
+window.liveBrain = liveBrain;
 
 // ---------- Drive → rail live-merge (Option B) ----------
 // The Drive transcript owns #conversation, but the Convos rail (#sessions) stays

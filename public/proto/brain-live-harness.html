@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>live brain — integration harness</title>
+<link rel="stylesheet" href="../style.css" />
+<style>
+  body { padding: 24px; }
+  .dv-wrap { max-width: 760px; margin: 0 auto; min-height: auto; }
+  .note { color: var(--muted); font-size: 12px; margin: 0 28px 12px; }
+</style>
+</head>
+<body class="view-project">
+  <div class="dv-wrap">
+    <p class="note">Harness — runs the <b>real</b> <code>liveBrain</code> module sliced out of <code>/app.js</code>, fed synthetic tool_use events. Not the shipped page.</p>
+    <!-- markup mirrors renderDriveView()'s #dv-brain panel -->
+    <div id="dv-brain" class="dv-brain">
+      <div class="dvb-bar">
+        <div class="dvb-hero">
+          <svg viewBox="0 0 54 54" width="44" height="44" aria-hidden="true">
+            <circle cx="27" cy="27" r="22" fill="none" stroke="#2b3340" stroke-width="5"/>
+            <circle id="dvb-prog" cx="27" cy="27" r="22" fill="none" stroke="#3fb950" stroke-width="5"
+                    stroke-linecap="round" transform="rotate(-90 27 27)" stroke-dasharray="0 999"
+                    style="transition:stroke-dasharray .5s ease, stroke .5s ease"/>
+          </svg>
+          <span class="dvb-pct" id="dvb-pct">0%</span>
+        </div>
+        <div class="dvb-meta">
+          <div class="dvb-title">live brain</div>
+          <div class="dvb-subline" id="dvb-sub">no plan checklists</div>
+        </div>
+        <span class="dvb-livedot"><i></i>live</span>
+        <button class="dvb-toggle" id="dvb-toggle" title="Show / hide the live brain">▾</button>
+      </div>
+      <div class="dvb-stage"><svg id="dvb-svg" class="dvb-brain" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="dvb-foot">
+        <span class="dvb-spin" id="dvb-spin"></span>
+        <span class="dvb-verb read" id="dvb-verb">idle</span>
+        <span class="dvb-file" id="dvb-file">waiting for the agent…</span>
+        <span class="dvb-legend">
+          <span><i style="background:#a978ff"></i>doc</span>
+          <span><i style="background:#2ecf8f"></i>plan/mem</span>
+          <span><i style="background:#5aa9e6"></i>code</span>
+          <span><i style="background:#ff9d5c"></i>edited</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Representative brain doc graph (same shape buildDocGraph produces).
+window.state = {
+  docGraph: { nodes: [
+    { name: 'SOUL.md',    base: 'SOUL.md',    role: 'constitution', completion: null, archived: false },
+    { name: 'CLAUDE.md',  base: 'CLAUDE.md',  role: 'constitution', completion: null, archived: false },
+    { name: 'SEED.md',    base: 'SEED.md',    role: 'constitution', completion: null, archived: false },
+    { name: 'MEMORY.md',  base: 'MEMORY.md',  role: 'memory',       completion: null, archived: false },
+    { name: 'ROADMAP.md', base: 'ROADMAP.md', role: 'reference',    completion: null, archived: false },
+    { name: 'PLAN_MOBILE.md',           base: 'PLAN_MOBILE.md',           role: 'reference', completion: { done: 3, total: 8 }, archived: false },
+    { name: 'PLAN_DRIVE_WORKSPACES.md', base: 'PLAN_DRIVE_WORKSPACES.md', role: 'reference', completion: { done: 2, total: 5 }, archived: false },
+  ] },
+  _driveBrainOpen: true,
+};
+
+(async () => {
+  // Slice the real liveBrain IIFE out of app.js (stable comment + assignment markers)
+  // so this harness exercises shipped code, not a copy.
+  const src = await fetch('../app.js').then((r) => r.text());
+  const start = src.indexOf('const liveBrain = (() => {');
+  const end = src.indexOf('window.liveBrain = liveBrain;');
+  if (start < 0 || end < 0) { document.querySelector('.note').textContent = 'Could not locate liveBrain in /app.js'; return; }
+  const mod = src.slice(start, end) + '\nreturn liveBrain;';
+  const liveBrain = new Function('state', mod)(window.state);
+
+  document.getElementById('dvb-toggle').addEventListener('click', () => {
+    const open = document.getElementById('dv-brain').classList.toggle('collapsed');
+    if (!open) liveBrain.attach();
+  });
+  liveBrain.attach();
+
+  // Drive a realistic turn: reads, edits, a bash run, a plan tick, ephemeral churn.
+  const SCRIPT = [
+    [400, 'Read', 'CLAUDE.md'],
+    [700, 'Read', 'PLAN_MOBILE.md'],
+    [600, 'Read', 'public/app.js'],
+    [500, 'Read', 'public/style.css'],
+    [700, 'Edit', 'public/app.js'],
+    [600, 'Bash', 'npm test'],
+    [700, 'Edit', 'public/style.css'],
+    [600, 'TodoWrite', 'PLAN_MOBILE.md'],
+    [700, 'Read', 'src/server.js'],
+    [700, 'Edit', 'src/agent.js'],
+    [600, 'Write', 'NOTES_LIVE_BRAIN.md'],
+    [700, 'Edit', 'public/app.js'],
+    [600, 'Bash', 'node smoke.js'],
+    [700, 'Read', 'src/driveIngest.js'],
+    [700, 'Edit', 'src/driveIngest.js'],
+  ];
+  let t = 0;
+  for (const [d, name, file] of SCRIPT) { t += d; setTimeout(() => liveBrain.feed(name, file), t); }
+  setTimeout(() => liveBrain.idle(), t + 1200);
+})();
+</script>
+</body>
+</html>
