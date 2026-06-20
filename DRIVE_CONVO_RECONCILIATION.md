@@ -190,3 +190,31 @@ growing Drive rebuilds the whole product. We port into the SPA.
    until the in-reader composer is proven on a real session, then remove it in the
    same change that flips the default — avoiding a window where the only way to
    drive is half-built.
+
+## Shipped — Drive sessions are resumable; "live" → "follow"
+
+The first reconciliation step landed: navigating away from Drive no longer strands
+the session, and the `vbrt watch`-era "live" toggle is reframed for the watcher-free
+world.
+
+- **A driven session is now a first-class, resumable handle.** `state.driveActive`
+  (`{ id, project, claudeSessionId, cwd, status }`) is the durable record, mirrored
+  to `localStorage` so it survives a reload. It's distinct from `state.drive`, the
+  *live view binding* (the SSE) that only exists while the Drive view is open.
+- **Navigation suspends, it doesn't kill.** `selectSession`, `showHome`,
+  `selectProject`, and the `← dashboard` button all route through `suspendDrive()`:
+  close the SSE/poll bindings, hand `#conversation` back, but keep the handle. The
+  session keeps running server-side (the child is spawned *per turn* — between turns
+  it's just an entry in the agent `Map`), so this costs nothing.
+- **Return affordances.** The project bar shows **"✦ Return to Drive"** (in
+  live-red) when a session for the project is suspended; the rail's live driven
+  convo (provisional card *and* the cooled real card) is clickable to re-enter.
+  `resumeDrive()` reconnects via `GET /sessions/:id/stream?after=0`, replaying the
+  server's buffered events to rebuild the transcript, then continues live. A 404
+  (server redeploy wiped the in-memory `Map`) drops the stale handle and falls back
+  to the ingested transcript in the read-only reader — one timeline, both doors.
+- **"Live" → "Follow".** The toggle's old meaning was capture-mode ("a `vbrt watch`
+  is pushing, so poll"). With Drive ingesting watcher-free on turn-end, it's now a
+  pure *view* signal: "follow this project/conversation; animate updates as they
+  land," regardless of source. Labels are now **Follow / Following**; inside Drive
+  there's no toggle at all — the SSE stream is inherently live.

@@ -12,7 +12,7 @@ const state = {
   docTab: null,
   docOpen: false, // doc reader overlay shown for the selected node
   docGraph: null,
-  live: false, // streaming: poll for new snapshots and animate the diff in
+  live: false, // "follow" mode: poll for new snapshots and animate the diff in
   _livePoll: null,
   _liveStamp: null, // last-seen project updatedAt
   _liveLastUpdate: null, // when the last live change landed (for the readout)
@@ -55,6 +55,12 @@ const state = {
   // as a provisional card that "cools" into the real parsed unit once ingest lands.
   driveProvisional: null, // { project, sessionId, prompt, status } | null
   _driveCoolPoll: null, // setTimeout handle awaiting ingest after a turn's `result`
+  // The durable handle to a driven session — survives navigating away (and a page
+  // reload, via localStorage). Distinct from state.drive, which is the *live view
+  // binding* (SSE) that only exists while the Drive view is open. Keeping this lets
+  // the rail + project bar offer "return to Drive" instead of stranding a session
+  // that's still running server-side. { id, project, claudeSessionId, cwd, status }.
+  driveActive: null,
 };
 
 // ---------- helpers ----------
@@ -430,13 +436,11 @@ function showHome() {
   document.body.classList.add('view-home');
   document.querySelectorAll('.proj.active').forEach((n) => n.classList.remove('active'));
   stopLive();
-  if (state.drive && state.drive.es) state.drive.es.close();
-  if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
-  if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
-  state.drive = null;
+  // Suspend (don't kill) any open Drive: leaving the project keeps the session
+  // resumable — the durable handle persists, so returning to the project re-offers it.
+  suspendDrive();
   state.driveProject = null;
   state.driveProvisional = null;
-  state._driveOpen = false;
   state.project = null;
   state.session = null;
 }
@@ -571,6 +575,7 @@ async function selectProject(slug) {
   showProject();
   const switchingProject = state.project && state.project !== slug;
   if (switchingProject) stopLive(); // don't keep polling a project you've navigated away from
+  if (switchingProject && state._driveOpen) suspendDrive(); // keep the session resumable
   state.project = slug;
   state.session = null;
   document.querySelectorAll('.proj').forEach((n) =>
@@ -645,9 +650,10 @@ async function selectProject(slug) {
   if (state.docs.ok) state.docGraph = buildDocGraph([...state.docs.files, ...archivedPseudoFiles()]);
 
   state._brainEntrance = true; // play the "just changed" entrance once, on open
-  // Auto-follow a project that's actively streaming (a `vbrt watch` is pushing
-  // deltas) so you don't have to hand-click "Go live". The server's freshness
-  // window decides; live quietly goes idle on its own once pushes stop.
+  // Auto-follow a project that's actively streaming — whether that's a local
+  // `vbrt watch` pushing deltas or a hosted Drive turn ingesting on turn-end — so
+  // you don't have to hand-click "Follow". The server's freshness window decides;
+  // follow quietly goes idle on its own once updates stop.
   if (state.projectData.streaming && !state.live) startLive();
   renderSessionList();
   renderTimeline();
@@ -1078,7 +1084,7 @@ function renderSessionList() {
     const dl = act ? diffLabel(act) : '';
     // Preview the most-recent prompt ("where the convo is now"), not its opener.
     const preview = esc(s.lastUserText || s.title || '');
-    const driving = isDrivingSession(s.id);
+    const driving = railIsLive(s.id);
     return `
         <div class="sess${isFresh(s) ? ' fresh' : ''} ${state.session === s.id ? 'active' : ''}${state.selectedConvo === s.id ? ' hl' : ''}${driving ? ' driving' : ''}" data-id="${esc(s.id)}">
           <div class="row">
@@ -1111,9 +1117,13 @@ function renderSessionList() {
     </div>`;
   const hostedProject = document.body.classList.contains('hosted');
   // The Drive entry point — only when the runtime probed usable for this caller.
-  const driveBtn = state.driveable
-    ? `<button class="pb-drive" data-drive-new title="Start a new agent session here — chat with Claude in the browser">✦ Drive</button>`
-    : '';
+  // If a session for this project is still alive (we navigated away without ending
+  // it), the entry point becomes "Return to Drive" and reconnects to that session.
+  const hasActiveDrive = state.driveActive && state.driveActive.project === state.project && !state._driveOpen;
+  const driveBtn = !state.driveable ? ''
+    : hasActiveDrive
+      ? `<button class="pb-drive resume" data-drive-resume title="Return to your running agent session — it kept going while you were away">✦ Return to Drive</button>`
+      : `<button class="pb-drive" data-drive-new title="Start a new agent session here — chat with Claude in the browser">✦ Drive</button>`;
   const projectBar = hostedProject ? '' : `
     <div class="project-bar">
       <button class="back-projects" data-back-projects title="Back to workspace">←</button>
@@ -1134,7 +1144,7 @@ function renderSessionList() {
       const color = (state.colorById || {})[u.sessionId] || 'var(--muted)';
       const id = u.cardId || u.id;
       const active = state.session === u.sessionId && state.currentTurn === u.index ? ' active' : '';
-      const driving = isDrivingSession(u.sessionId);
+      const driving = railIsLive(u.sessionId);
       return `<div class="prompt-row${fresh.has(id) ? ' fresh' : ''}${active}${driving ? ' driving' : ''}" data-session="${esc(u.sessionId)}" data-turn="${u.index}">
         <div class="row">
           <span class="sw" style="background:${color}"></span>
@@ -1167,6 +1177,11 @@ function renderSessionList() {
 
   const driveNew = el('#sessions').querySelector('[data-drive-new]');
   if (driveNew) driveNew.addEventListener('click', () => openDriveForProject(state.project));
+  const driveResume = el('#sessions').querySelector('[data-drive-resume]');
+  if (driveResume) driveResume.addEventListener('click', () => resumeDrive(state.project));
+  // The live driven turn's provisional card is a handle back into the session.
+  const prov = el('#sessions').querySelector('.prompt-row.provisional');
+  if (prov) prov.addEventListener('click', () => resumeDrive(state.project));
 
   const bc = el('#sessions').querySelector('[data-list-brush-clear]');
   if (bc) bc.addEventListener('click', () => {
@@ -1188,10 +1203,17 @@ function renderSessionList() {
     }));
   el('#sessions')
     .querySelectorAll('.sess')
-    .forEach((node) => node.addEventListener('click', () => selectSession(state.project, node.dataset.id)));
+    .forEach((node) => node.addEventListener('click', () => {
+      // The actively-driven convo returns to Drive; everything else opens the reader.
+      if (isActiveDrive(node.dataset.id)) return resumeDrive(state.project);
+      selectSession(state.project, node.dataset.id);
+    }));
   el('#sessions')
     .querySelectorAll('.prompt-row:not(.provisional)')
-    .forEach((node) => node.addEventListener('click', () => selectSession(state.project, node.dataset.session, Number(node.dataset.turn))));
+    .forEach((node) => node.addEventListener('click', () => {
+      if (isActiveDrive(node.dataset.session)) return resumeDrive(state.project);
+      selectSession(state.project, node.dataset.session, Number(node.dataset.turn));
+    }));
   state._liveFreshPrompts = null;
 }
 
@@ -1259,7 +1281,7 @@ function renderTimeline() {
           enriched ? '' : ' · <span class="warn-inline">restart <code>vbrt serve</code> for message data</span>'
         }</div>
       </div>
-      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — poll for new pushes and animate the brain + timeline as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}<span class="live-ago"></span></button>
+      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Follow this project — new commits, prompts &amp; brain edits animate in as they land (a local watch or a Drive turn)."><span class="live-dot"></span>${state.live ? 'Following' : 'Follow'}<span class="live-ago"></span></button>
     </div>
     <div class="dashboard">
       <section class="dash-card activity">
@@ -2641,8 +2663,9 @@ function backToDashboard() {
 }
 
 async function selectSession(slug, id, turnIndex = null) {
-  // Leaving Drive (if open) for a historical convo: tear down its stream first.
-  if (state._driveOpen) { if (state.drive && state.drive.es) state.drive.es.close(); if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; } if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; } state.drive = null; state.driveProject = null; state.driveProvisional = null; state._driveOpen = false; }
+  // Leaving Drive (if open) for a historical convo: suspend it (keep it resumable)
+  // rather than killing it — the session keeps running and stays a "return" handle.
+  if (state._driveOpen) suspendDrive();
   // Keep streaming on (if it was) so the reader can *follow* a live conversation.
   state.session = id;
   state._pendingTurn = Number.isFinite(turnIndex) ? turnIndex : null;
@@ -2701,7 +2724,7 @@ function renderSessionReader() {
         <div class="files-list" id="files-list" hidden>${filesList.map((f) => `<div>${esc(f)}</div>`).join('')}</div>
       </div>
       <div class="nav">
-        <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — follow this conversation's turns as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}<span class="live-ago"></span></button>
+        <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Follow this conversation — its turns animate in as they land."><span class="live-dot"></span>${state.live ? 'Following' : 'Follow'}<span class="live-ago"></span></button>
         <span class="spacer"></span>
         <button id="nav-prev" title="Previous prompt (k)">◀ prev</button>
         <span id="nav-counter" class="counter"></span>
@@ -2774,7 +2797,7 @@ function refreshSessionToolbar() {
       <div class="files-list" id="files-list" hidden>${filesList.map((f) => `<div>${esc(f)}</div>`).join('')}</div>
     </div>
     <div class="nav">
-      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Stream live — follow this conversation's turns as they land."><span class="live-dot"></span>${state.live ? 'Live' : 'Go live'}<span class="live-ago"></span></button>
+      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Follow this conversation — its turns animate in as they land."><span class="live-dot"></span>${state.live ? 'Following' : 'Follow'}<span class="live-ago"></span></button>
       <span class="spacer"></span>
       <button id="nav-prev" title="Previous prompt (k)">◀ prev</button>
       <span id="nav-counter" class="counter"></span>
@@ -3340,6 +3363,35 @@ async function renderSignIn(msg) {
 // point only appears when ensureDriveProbe() succeeded for this caller.
 // ============================================================================
 
+// The durable handle to a driven session. A session keeps running server-side
+// while you're away (the child process is spawned per-turn — between turns it's
+// just a cheap entry in the agent Map), so we persist enough to reconnect: the
+// local session id, its project, the learned claude session id, and the cwd.
+// Mirrored to localStorage so it outlives a page reload within the server's life.
+const DRIVE_ACTIVE_KEY = 'vbrt_drive_active';
+function setDriveActive(d) {
+  state.driveActive = d || null;
+  try {
+    if (state.driveActive) localStorage.setItem(DRIVE_ACTIVE_KEY, JSON.stringify(state.driveActive));
+    else localStorage.removeItem(DRIVE_ACTIVE_KEY);
+  } catch { /* private mode / quota — the in-memory handle still works this session */ }
+}
+function driveActivePatch(patch) {
+  if (state.driveActive) setDriveActive({ ...state.driveActive, ...patch });
+}
+// True for the rail row whose convo is the session we're driving — or have
+// suspended but can still resume — in the current project. Such a row badges
+// "live" and routes a click back into Drive instead of the read-only reader.
+function isActiveDrive(id) {
+  const da = state.driveActive;
+  return !!(da && id && da.claudeSessionId === id && da.project === state.project);
+}
+// A rail row is "live" if it's the session open in Drive right now, or the durable
+// active handle for this project (suspended, resumable).
+function railIsLive(id) {
+  return isDrivingSession(id) || isActiveDrive(id);
+}
+
 const DRIVE_PERMS = [
   ['default', 'default — read/chat only (edits & shell need approval)'],
   ['plan', 'plan — research & propose, no writes'],
@@ -3503,6 +3555,9 @@ function renderDrivePrompt(slug, st) {
 function enterDrive(s) {
   state._driveOpen = true;
   state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, es: null };
+  // Record the durable handle so this session is resumable after navigating away.
+  // Starting a new session here supersedes any prior active handle for this project.
+  setDriveActive({ id: s.id, project: state.driveProject || null, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, status: s.status });
   state._driveLive = { text: null, thinking: null };
   renderDriveView();
   driveOpenStream(s.id, 0);
@@ -3558,21 +3613,63 @@ function wireDriveBackDash() {
   if (b) b.addEventListener('click', exitDrive);
 }
 
-// Leave Drive, tear down the stream, hand #conversation back to the dashboard.
-function exitDrive() {
+// Suspend Drive: close the live view binding (SSE/poll) and hand #conversation
+// back, but KEEP the durable handle (state.driveActive) and the provisional rail
+// card. The session keeps running server-side, so the rail + project bar can offer
+// "return to Drive". This is what every navigation away from Drive runs.
+function suspendDrive() {
   if (state.drive && state.drive.es) state.drive.es.close();
   if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
   if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
   state.drive = null;
-  state.driveProject = null;
-  state.driveProvisional = null;
   state._driveOpen = false;
-  renderSessionList(); // drop the "live"/provisional rail markers now that we've left
+}
+
+// Leave Drive for this project's dashboard. The session stays alive + resumable.
+function exitDrive() {
+  suspendDrive();
+  renderSessionList(); // repaint the rail: the live convo is now a "return to Drive" handle
   renderTimeline();
+}
+
+// Re-enter a session we drove earlier (or are still driving): rebuild the transcript
+// by replaying the server's buffered events from the start, then continue live. The
+// session kept running while we were away, so this reconnects rather than restarts.
+// If the server no longer knows the id (a redeploy wiped the in-memory Map), drop the
+// stale handle and fall back to the ingested transcript in the read-only reader.
+async function resumeDrive(slug) {
+  const da = state.driveActive;
+  if (!da) return;
+  stopLive(); // the SSE gives liveness once we're connected; don't let the poll repaint over us
+  if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
+  if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
+  state.session = null;
+  state._driveOpen = true;
+  state.driveProject = da.project || slug || null;
+  el('#conversation').innerHTML = driveShell('✦ Drive', 'reconnecting…', '<div class="dv-body"><div class="empty">Reconnecting to your session…</div></div>');
+  wireDriveBackDash();
+  let s;
+  try { s = await driveApi('/sessions/' + encodeURIComponent(da.id)); }
+  catch {
+    // The session is gone (server restart / GC). Drop the handle; the work was
+    // ingested into the rail, so show that saved convo instead of an empty Drive.
+    setDriveActive(null);
+    state._driveOpen = false;
+    state.driveProvisional = null;
+    if (da.claudeSessionId) return selectSession(slug, da.claudeSessionId);
+    return exitDrive();
+  }
+  if (!state._driveOpen) return; // navigated away mid-fetch
+  setDriveActive({ id: s.id, project: state.driveProject, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, status: s.status });
+  state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, es: null };
+  state._driveLive = { text: null, thinking: null };
+  renderDriveView();
+  driveOpenStream(s.id, 0); // after=0 → replay the buffered transcript, then live
 }
 
 function driveSetStatus(status) {
   if (state.drive) state.drive.status = status;
+  driveActivePatch({ status });
   const pill = el('#dv-pill');
   if (pill) { pill.textContent = status; pill.className = 'dv-pill ' + status; }
   const send = el('#dv-send'); const stop = el('#dv-stop');
@@ -3705,7 +3802,7 @@ function driveRender(ev) {
       driveCoolProvisional(); break;
     case 'system':
       driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
-      if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; setDriveProvisional({ sessionId: ev.sessionId }); } break;
+      if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; driveActivePatch({ claudeSessionId: ev.sessionId }); const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; setDriveProvisional({ sessionId: ev.sessionId }); } break;
     case 'error': driveAddEv('error', 'error', ev.message); break;
     case 'stopped': driveAddEv('sys', 'session', 'stopped by user'); break;
     case 'status': driveSetStatus(ev.status); break;
@@ -3763,7 +3860,7 @@ function driveProvisionalRow() {
     || (state.projectData.sessions || []).some((s) => s.id === pv.sessionId));
   if (known) return ''; // the real (cooled) card is in the list now
   const word = pv.status === 'cooling' ? 'cooling…' : 'working…';
-  return `<div class="prompt-row provisional" title="Live driven turn — cools into a saved card when it finishes">
+  return `<div class="prompt-row provisional" title="Live driven turn — click to return to Drive; cools into a saved card when it finishes">
       <div class="row">
         <span class="sw live-sw"></span>
         <span class="badge claude">claude</span>
@@ -3835,6 +3932,9 @@ async function bootDashboard() {
     history.replaceState(null, '', '/app');
   }
   state.token = localStorage.getItem('vbrt_token') || null;
+  // Rehydrate a still-running driven session handle so "return to Drive" survives a
+  // reload. Validity is checked lazily on resume (a 404 drops a stale handle).
+  try { const raw = localStorage.getItem(DRIVE_ACTIVE_KEY); if (raw) state.driveActive = JSON.parse(raw); } catch { /* ignore */ }
 
   const me = await getMe();
   // If signed in and a claim is pending from /link, bind that machine token now.
