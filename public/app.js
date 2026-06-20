@@ -4173,9 +4173,13 @@ const liveBrain = (() => {
   function ensureEl(n) {
     if (els.has(n.id)) return els.get(n.id);
     const g = document.createElementNS(SVGNS, 'g');
-    g.setAttribute('class', 'dvb-node' + (n.core ? ' core' : ''));
+    // Non-ephemeral nodes are the brain docs seeded from the docGraph, so they resolve
+    // to a doc we can open in the lightbox (like the old static brain) — mark them
+    // openable; data-id maps the tapped group back to its node for the lookup.
+    g.setAttribute('class', 'dvb-node' + (n.core ? ' core' : '') + (n.ephemeral ? '' : ' openable'));
+    g.dataset.id = n.id;
     const glow = document.createElementNS(SVGNS, 'circle'); glow.setAttribute('class', 'dvb-glow');
-    const dot = document.createElementNS(SVGNS, 'circle');
+    const dot = document.createElementNS(SVGNS, 'circle'); dot.setAttribute('class', 'dvb-dot');
     const ring = document.createElementNS(SVGNS, 'circle');
     ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', '#2b3340'); ring.setAttribute('stroke-width', '2.5');
     const prog = document.createElementNS(SVGNS, 'circle');
@@ -4315,6 +4319,18 @@ const liveBrain = (() => {
     </section>`;
   }
 
+  // Tap a node → open its doc in the lightbox viewer (the old static brain's behavior).
+  // Only brain-doc nodes resolve (ephemeral code nodes aren't captured docs); the moving
+  // dot, glow, ring and label all live inside the <g>, so a tap anywhere on it counts.
+  function onPick(ev) {
+    const g = ev.target.closest('.dvb-node');
+    if (!g) return;
+    const n = nodes.get(g.dataset.id);
+    if (!n || !n.path) return;
+    const doc = currentDocNode(n.path);
+    if (doc) openDocLightbox(doc);
+  }
+
   // (Re)bind to one rendered brain panel (scoped to `host`) and (re)seed from the
   // docGraph. The rAF loop drives whichever copy was attached last; others freeze on
   // their final frame (only one brain is ever on-screen at a time on a given device).
@@ -4328,6 +4344,8 @@ const liveBrain = (() => {
     svg.innerHTML = '';
     layers = { edges: document.createElementNS(SVGNS, 'g'), fx: document.createElementNS(SVGNS, 'g'), nodes: document.createElementNS(SVGNS, 'g') };
     svg.append(layers.edges, layers.fx, layers.nodes);
+    svg.removeEventListener('click', onPick);
+    svg.addEventListener('click', onPick);
     seed();
     last = 0;
     if (raf) cancelAnimationFrame(raf);

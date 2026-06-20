@@ -1079,6 +1079,10 @@ body.public #feed { margin: 0 auto; }
 .dvb-ripple { fill: none; pointer-events: none; }
 .dvb-label { font: 600 10px ui-sans-serif, system-ui; fill: var(--muted); text-anchor: middle; paint-order: stroke; stroke: #0b0d12; stroke-width: 3px; }
 .dvb-node.core .dvb-label { fill: #cdd2de; }
+/* Brain-doc nodes open in the lightbox on tap — signal it with a pointer + hover lift. */
+.dvb-node.openable { cursor: pointer; }
+.dvb-node.openable:hover .dvb-dot { stroke: var(--text); stroke-width: 2; }
+.dvb-node.openable:hover .dvb-label { fill: var(--text); }
 @media (prefers-reduced-motion: reduce) { .dvb-livedot i, .dvb-spin { animation: none; } }
 body.is-mobile .dvb-stage { height: 320px; }
 .dv-body { padding: 20px 28px 24px; flex: 1; }
