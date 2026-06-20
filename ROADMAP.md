@@ -145,6 +145,13 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   turn-complete line, from the result event's `usage`). Reader stays glued to the
   bottom only while parked there; scrolling up surfaces a "new activity" pill instead
   of yanking. Cures the mobile thumb-scroll fatigue.
+- **Drive transcript: reconnect-replay duplication** ✅ Fixed (2026-06-20). The live
+  SSE stream replayed from `after=0` on every reconnect and the client appended with
+  no dedup, so backgrounding the mobile tab or hitting Resume reprinted the whole
+  transcript (2×/3×). Fixed by emitting `id: <seq>` + honoring `Last-Event-ID`
+  server-side, a client-side high-water-`seq` dedup, and a `visibilitychange` resync
+  for the frozen-socket case iOS Safari never reports. Full diagnosis +
+  fix: `DRIVE_LIVE_STREAM_DUP.md`.
 - **Prompt-unit rail** — `Sessions | Prompts` toggle, default Prompts; prompt rows
   show source, session color, timestamp, and outcome chips; live mode
   slides new prompt-units into the rail. ✅ Shipped first pass. (Intent auto-tagging

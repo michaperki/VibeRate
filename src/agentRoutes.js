@@ -199,9 +199,14 @@ export function mountAgent(app, opts = {}) {
   });
 
   // Live event stream (SSE). `?after=N` backfills everything past seq N first, so
-  // a reconnecting client resumes without gaps or dupes.
+  // a reconnecting client resumes without gaps or dupes. We tag every frame with
+  // `id: <seq>` so the browser's native auto-reconnect sends `Last-Event-ID`, which
+  // we honor over the (connect-time, frozen) `?after` query param — otherwise a
+  // dropped EventSource reconnects to the *original* `after=0` URL and replays the
+  // whole log, doubling the client transcript. See DRIVE_LIVE_STREAM_DUP.md.
   app.get('/api/agent/sessions/:id/stream', guard, (req, res) => {
-    const after = Number(req.query.after || 0) || 0;
+    const lastEventId = Number(req.headers['last-event-id']);
+    const after = Number.isFinite(lastEventId) ? lastEventId : (Number(req.query.after || 0) || 0);
     res.set({
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
@@ -213,7 +218,7 @@ export function mountAgent(app, opts = {}) {
     let unsub;
     try {
       unsub = subscribe(req.params.id, (event) => {
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
+        res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
       }, after);
     } catch (err) {
       res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);

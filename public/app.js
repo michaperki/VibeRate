@@ -4022,12 +4022,48 @@ function driveRender(ev) {
   }
 }
 
+// Open the live SSE transcript stream. `after` is the seq high-water mark to
+// backfill past (0 = from the start, into a freshly-cleared transcript).
+//
+// The transcript MUST be idempotent: a dropped EventSource auto-reconnects, and
+// mobile Safari freezes/kills the socket whenever the tab is backgrounded. The
+// server now tags frames with `id: <seq>` so the native reconnect resumes via
+// `Last-Event-ID`, but we also track `state.drive.lastSeq` and drop any event at
+// or below it — so even a proxy that strips the header (or a manual resync) can't
+// double-append the log. See DRIVE_LIVE_STREAM_DUP.md.
 function driveOpenStream(id, after) {
   if (state.drive && state.drive.es) state.drive.es.close();
+  if (state.drive) state.drive.lastSeq = after || 0;
   const es = new EventSource('/api/agent/sessions/' + id + '/stream?after=' + (after || 0));
-  es.onmessage = (m) => { if (state.drive && state.drive.id === id) { try { driveRender(JSON.parse(m.data)); } catch {} } };
-  es.addEventListener('error', () => {/* EventSource auto-reconnects */});
+  es.onmessage = (m) => {
+    if (!state.drive || state.drive.id !== id) return;
+    let ev; try { ev = JSON.parse(m.data); } catch { return; }
+    // Drop anything we've already rendered. Guards against reconnect-replay
+    // (the bug) without depending on Last-Event-ID surviving the proxy hop.
+    if (ev.seq != null) {
+      if (ev.seq <= (state.drive.lastSeq || 0)) return;
+      state.drive.lastSeq = ev.seq;
+    }
+    driveRender(ev);
+  };
+  es.addEventListener('error', () => {/* EventSource auto-reconnects with Last-Event-ID */});
   if (state.drive) state.drive.es = es;
+  wireDriveVisibilityResync();
+}
+
+// iOS Safari does not reliably fire `error` on a socket it froze while the tab was
+// backgrounded, so the native auto-reconnect may never fire on return. On
+// foreground, proactively tear down and reopen the stream from our high-water seq:
+// the backfill fills only the gap, and the seq dedup makes a redundant resync a
+// no-op. Wired once for the page lifetime.
+function wireDriveVisibilityResync() {
+  if (window._driveVisWired) return;
+  window._driveVisWired = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!state._driveOpen || !state.drive || !state.drive.id) return;
+    driveOpenStream(state.drive.id, state.drive.lastSeq || 0);
+  });
 }
 
 // ---------- live brain (Drive view centerpiece) ----------
