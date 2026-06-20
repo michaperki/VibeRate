@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>VibeRate · unified mobile (brain + drive) — prototype</title>
+<style>
+  /* ── VibeRate tokens (from public/style.css) ───────────────────────── */
+  :root{
+    --bg:#0f1115; --panel:#161922; --panel-2:#1d212c; --border:#272c38;
+    --text:#e6e8ee; --muted:#8b92a5; --accent:#7c5cff;
+    --claude:#a978ff; --codex:#2ecf8f; --live:#f85149;
+    --user:#2a3142; --assistant:#1b2230;
+    --doc:#a978ff; --mem:#2ecf8f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:#07090d; color:var(--text);
+    font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; align-items:center; min-height:100%;
+  }
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important; transition:none !important} }
+
+  /* ── prototype chrome (lives outside the phone) ────────────────────── */
+  .proto-bar{
+    width:100%; max-width:760px; padding:10px 14px; display:flex; gap:10px;
+    align-items:center; flex-wrap:wrap; color:var(--muted); font-size:12px;
+  }
+  .proto-bar b{color:var(--text); font-weight:600}
+  .seg{display:inline-flex; border:1px solid var(--border); border-radius:9px; overflow:hidden}
+  .seg button{
+    background:transparent; color:var(--muted); border:0; padding:7px 12px;
+    font:inherit; cursor:pointer; border-right:1px solid var(--border);
+  }
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--accent); color:#fff}
+  .proto-bar .play{
+    margin-left:auto; background:var(--accent); color:#fff; border:0; border-radius:9px;
+    padding:8px 14px; font:inherit; font-weight:600; cursor:pointer;
+  }
+  .proto-bar .play.replay{background:var(--panel-2); color:var(--text); border:1px solid var(--border)}
+  .proto-bar .play:disabled{opacity:.5; cursor:default}
+  .hint{width:100%; max-width:760px; padding:0 14px 10px; color:var(--muted); font-size:11.5px}
+
+  /* ── the phone ─────────────────────────────────────────────────────── */
+  .phone{
+    width:390px; height:780px; max-width:100vw; background:var(--bg);
+    border:1px solid var(--border); border-radius:34px; overflow:hidden;
+    position:relative; display:flex; flex-direction:column;
+    box-shadow:0 30px 80px rgba(0,0,0,.6);
+  }
+  .notch{height:26px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; position:relative; color:var(--muted); font-size:11px}
+  .notch::before{content:""; position:absolute; top:8px; width:96px; height:6px; border-radius:6px; background:#000}
+
+  /* shared app header (the "brain + chat share a header" idea) */
+  .appbar{
+    flex:0 0 auto; height:52px; display:flex; align-items:center; gap:10px;
+    padding:0 14px; border-bottom:1px solid var(--border); background:var(--panel);
+  }
+  .appbar .title{font-weight:600; font-size:15px}
+  .appbar .sub{font-size:11px; color:var(--muted)}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:var(--live);box-shadow:0 0 7px var(--live);animation:beat 1.4s ease-in-out infinite}
+  @keyframes beat{0%,100%{opacity:.55;transform:scale(.9)}50%{opacity:1;transform:scale(1.15)}}
+
+  .stage{flex:1 1 auto; min-height:0; position:relative; display:flex; flex-direction:column}
+
+  /* ── BRAIN ─────────────────────────────────────────────────────────── */
+  .brain{position:relative; background:radial-gradient(120% 90% at 50% 0%, #14182250, #0f1115 70%); overflow:hidden}
+  .brain svg{width:100%; height:100%; display:block; touch-action:none}
+  .edge{stroke:#3a4256; stroke-width:.4; opacity:.55; transition:opacity .4s, stroke .4s}
+  .edge.hot{stroke:var(--accent); opacity:.95}
+  .edge.hidden{opacity:0}
+  .node{cursor:pointer}
+  .node .core{stroke:rgba(0,0,0,.45); stroke-width:.5; transition:stroke .25s, stroke-width .25s}
+  .node[data-kind="memory"] .core{}
+  .node.float{animation:float 7s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.6px)}}
+  .node .lbl{fill:var(--text); font-size:2.7px; text-anchor:middle; opacity:.0; transition:opacity .3s; paint-order:stroke; stroke:#0f1115; stroke-width:.7px}
+  .brain.show-labels .node .lbl, .node.lit .lbl{opacity:.92}
+  .node.hiddenN{opacity:0; pointer-events:none}
+  /* lightup states */
+  .glow{fill:var(--accent); opacity:0; filter:blur(2.2px); transform-box:fill-box; transform-origin:center}
+  .node.read .core{stroke:var(--accent); stroke-width:1.4}
+  .node.read .glow{animation:glow 2.6s ease-out forwards}
+  .node.edit .core{stroke:#fff; stroke-width:1.8}
+  .node.edit .glow{fill:var(--mem); animation:glow 4s ease-out forwards}
+  .node.born .glow{fill:var(--mem); animation:glow 5s ease-out forwards}
+  @keyframes glow{0%{opacity:.0}15%{opacity:.9}100%{opacity:0}}
+  .bornring{fill:none; stroke:var(--mem); stroke-width:0; opacity:0}
+  .node.born .bornring{animation:bornring 1.6s ease-out forwards}
+  @keyframes bornring{0%{stroke-width:2.5;opacity:.95;r:2px}100%{stroke-width:0;opacity:0;r:9px}}
+  .node.appear{animation:pop .6s cubic-bezier(.2,.8,.2,1) forwards}
+  @keyframes pop{0%{transform:scale(.2);opacity:0}100%{transform:scale(1);opacity:1}}
+
+  .brain-legend{
+    position:absolute; left:10px; bottom:8px; display:flex; gap:12px; font-size:10px; color:var(--muted);
+    background:rgba(15,17,21,.6); padding:4px 8px; border-radius:8px; backdrop-filter:blur(3px)
+  }
+  .brain-legend i{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:-1px}
+
+  /* ── CHAT ──────────────────────────────────────────────────────────── */
+  .chat{display:flex; flex-direction:column; min-height:0; background:var(--bg)}
+  .transcript{flex:1 1 auto; overflow:auto; padding:14px 12px 6px; display:flex; flex-direction:column; gap:10px; scroll-behavior:smooth}
+  .ev{max-width:88%; padding:9px 12px; border-radius:13px; font-size:13.5px; white-space:pre-wrap; word-wrap:break-word; animation:rise .35s ease-out}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .ev.user{align-self:flex-end; background:var(--user); border-bottom-right-radius:4px}
+  .ev.assistant{align-self:flex-start; background:var(--assistant); border:1px solid var(--border); border-bottom-left-radius:4px}
+  .ev.thinking{align-self:flex-start; background:transparent; color:var(--muted); font-style:italic; font-size:12.5px; padding:2px 6px; border:0}
+  .ev.tool{align-self:flex-start; background:#12161f; border:1px solid var(--border); color:var(--text); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; display:flex; gap:8px; align-items:center}
+  .ev.tool .tk{color:var(--mem); font-weight:600}
+  .ev.tool .path{color:var(--text)}
+  .ev.tool::before{content:"✎"; color:var(--mem)}
+  .caret{display:inline-block; width:7px; height:14px; background:var(--accent); margin-left:1px; vertical-align:-2px; animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  .composer{flex:0 0 auto; border-top:1px solid var(--border); background:var(--panel); padding:9px 10px; display:flex; gap:8px; align-items:flex-end}
+  .composer textarea{
+    flex:1; resize:none; background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+    border-radius:12px; padding:9px 11px; font:inherit; font-size:13.5px; max-height:90px; min-height:38px;
+  }
+  .composer .send{flex:0 0 auto; width:38px; height:38px; border-radius:50%; border:0; background:var(--accent); color:#fff; font-size:16px; cursor:pointer}
+
+  /* ── VARIANT A — chat-first + expandable brain header ──────────────── */
+  .stage[data-variant="a"] .brainbar{
+    flex:0 0 auto; height:46px; display:flex; align-items:center; gap:8px; padding:0 10px;
+    border-bottom:1px solid var(--border); background:var(--panel); overflow-x:auto; cursor:pointer;
+  }
+  .stage[data-variant="a"] .brainbar .grip{margin-left:auto; color:var(--muted); font-size:12px; flex:0 0 auto}
+  .chip{flex:0 0 auto; display:flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px;
+    border:1px solid var(--border); background:var(--panel-2); font-size:11.5px; color:var(--muted); white-space:nowrap; transition:.3s}
+  .chip i{width:7px;height:7px;border-radius:50%;background:var(--doc)}
+  .chip[data-kind="memory"] i{background:var(--mem)}
+  .chip.lit{color:#fff; border-color:var(--mem); box-shadow:0 0 0 1px var(--mem), 0 0 14px -2px var(--mem)}
+  .chip.lit i{animation:beat 1s ease-in-out infinite}
+  .chip.newchip{animation:pop .5s ease-out}
+  .stage[data-variant="a"] .brain{position:absolute; left:0; right:0; top:46px; height:0; z-index:5; transition:height .32s cubic-bezier(.2,.8,.2,1); border-bottom:1px solid var(--border)}
+  .stage[data-variant="a"].brain-open .brain{height:58%}
+  .stage[data-variant="a"].brain-open .brainbar .grip::after{content:" ▴"}
+  .stage[data-variant="a"]:not(.brain-open) .brainbar .grip::after{content:" ▾"}
+  .stage[data-variant="a"] .chat{flex:1 1 auto}
+
+  /* ── VARIANT B — split: brain top, chat bottom ─────────────────────── */
+  .stage[data-variant="b"] .brainbar{display:none}
+  .stage[data-variant="b"] .brain{flex:0 0 42%; position:relative; height:auto; border-bottom:1px solid var(--border)}
+  .stage[data-variant="b"] .chat{flex:1 1 58%}
+
+  /* ── VARIANT C — tabbed brain / chat ───────────────────────────────── */
+  .stage[data-variant="c"] .brainbar{display:none}
+  .stage[data-variant="c"] .brain{position:absolute; inset:0 0 52px 0; height:auto}
+  .stage[data-variant="c"] .chat{position:absolute; inset:0 0 52px 0}
+  .stage[data-variant="c"] .tabs{display:flex}
+  .tabs{display:none; position:absolute; left:0; right:0; bottom:0; height:52px; border-top:1px solid var(--border); background:var(--panel)}
+  .tabs button{flex:1; background:transparent; border:0; color:var(--muted); font:inherit; font-size:12px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px; padding-top:7px; position:relative}
+  .tabs button .ico{font-size:17px}
+  .tabs button.on{color:var(--accent)}
+  .tabs .badge{position:absolute; top:5px; right:50%; margin-right:-22px; width:8px; height:8px; border-radius:50%; background:var(--live); box-shadow:0 0 7px var(--live); display:none; animation:beat 1.2s infinite}
+  .stage[data-variant="c"][data-tab="brain"] .brain{display:flex}
+  .stage[data-variant="c"][data-tab="brain"] .chat{display:none}
+  .stage[data-variant="c"][data-tab="chat"] .brain{display:none}
+  .stage[data-variant="c"][data-tab="chat"] .chat{display:flex}
+  /* default (non-C) hide tabs + show both regions per variant rules */
+  .stage:not([data-variant="c"]) .brain{display:flex; flex-direction:column}
+  .stage[data-variant="a"]:not(.brain-open) .brain{display:flex} /* height 0 hides it */
+</style>
+</head>
+<body>
+  <div class="proto-bar">
+    <b>VibeRate</b> · unified mobile prototype
+    <span class="seg" id="seg">
+      <button data-v="a" class="on">A · Chat + brain header</button>
+      <button data-v="b">B · Split</button>
+      <button data-v="c">C · Tabbed</button>
+    </span>
+    <button class="play replay" id="replay">↺ Replay</button>
+    <button class="play" id="play">▶ Demo turn</button>
+  </div>
+  <div class="hint" id="hint">
+    Scope: <b>brain + drive chat</b>. Tap <b>▶ Demo turn</b> to watch a memory get written and its node light up in the brain.
+    Variant <b>A</b>: tap the brain strip to expand the network.
+  </div>
+
+  <div class="phone">
+    <div class="notch">9:41</div>
+    <div class="appbar">
+      <span class="live-dot"></span>
+      <div style="flex:1">
+        <div class="title">VibeRate <span style="color:var(--muted);font-weight:400">· Drive</span></div>
+        <div class="sub" id="appsub">following · self-hosting session</div>
+      </div>
+      <span style="color:var(--muted);font-size:18px">⋯</span>
+    </div>
+
+    <div class="stage" id="stage" data-variant="a" data-tab="chat">
+      <!-- A only: collapsible brain strip -->
+      <div class="brainbar" id="brainbar"></div>
+
+      <!-- shared brain network (positioned per-variant by CSS) -->
+      <div class="brain" id="brain">
+        <svg id="svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="brain-legend"><span><i style="background:var(--doc)"></i>brain doc</span><span><i style="background:var(--mem)"></i>memory</span></div>
+      </div>
+
+      <!-- shared chat -->
+      <div class="chat" id="chat">
+        <div class="transcript" id="transcript"></div>
+        <div class="composer">
+          <textarea id="ta" rows="1" placeholder="Message the agent…"></textarea>
+          <button class="send" id="send">↑</button>
+        </div>
+      </div>
+
+      <!-- C only: tab bar -->
+      <div class="tabs" id="tabs">
+        <button data-tab="brain"><span class="ico">🧠</span>Brain<span class="badge" id="brainBadge"></span></button>
+        <button data-tab="chat" class="on"><span class="ico">💬</span>Chat</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────
+   Brain model — VibeRate's real docs + a couple of memories.
+   The demo writes a NEW memory ("drive-writes-into-convos") and lights it.
+   ──────────────────────────────────────────────────────────────────── */
+const NODES = [
+  {id:'claude',   label:'CLAUDE.md',            kind:'doc',    x:50, y:50, r:5.2},
+  {id:'strategy', label:'PRODUCT_STRATEGY',     kind:'doc',    x:27, y:30, r:3.6},
+  {id:'roadmap',  label:'ROADMAP',              kind:'doc',    x:72, y:28, r:3.8},
+  {id:'pview',    label:'PROJECT_VIEW_PLAN',    kind:'doc',    x:78, y:58, r:3.4},
+  {id:'runtime',  label:'PLAN_AGENT_RUNTIME',   kind:'doc',    x:33, y:70, r:4.0},
+  {id:'recon',    label:'DRIVE_CONVO_RECON',    kind:'doc',    x:58, y:78, r:3.4},
+  {id:'artifacts',label:'ARTIFACTS',            kind:'doc',    x:22, y:52, r:2.9},
+  {id:'mem-pos',  label:'mem · positioning',    kind:'memory', x:48, y:22, r:2.8},
+  {id:'mem-heur', label:'mem · no-brittle-text',kind:'memory', x:88, y:42, r:2.8},
+  // born during the demo:
+  {id:'mem-new',  label:'mem · drive→convos',   kind:'memory', x:45, y:92, r:3.0, hidden:true},
+];
+const EDGES = [
+  ['claude','strategy'],['claude','roadmap'],['claude','pview'],['claude','runtime'],
+  ['strategy','roadmap'],['runtime','recon'],['pview','recon'],['runtime','artifacts'],
+  ['strategy','mem-pos'],['claude','mem-pos'],['pview','mem-heur'],['roadmap','runtime'],
+  // born edges (revealed with the new node):
+  ['mem-new','runtime',true],['mem-new','recon',true],
+];
+
+const SVGNS='http://www.w3.org/2000/svg';
+const svg=document.getElementById('svg');
+const byId={};
+function el(tag,attrs){const e=document.createElementNS(SVGNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+
+// edges first (under nodes)
+const edgeEls={};
+EDGES.forEach(([a,b,born])=>{
+  const na=NODES.find(n=>n.id===a), nb=NODES.find(n=>n.id===b);
+  const ln=el('line',{x1:na.x,y1:na.y,x2:nb.x,y2:nb.y,class:'edge'+(born?' hidden':'')});
+  ln.dataset.a=a; ln.dataset.b=b;
+  svg.appendChild(ln);
+  edgeEls[a+'~'+b]=ln;
+});
+// nodes
+NODES.forEach((n,i)=>{
+  const g=el('g',{class:'node float'+(n.hidden?' hiddenN':''),transform:`translate(${n.x} ${n.y})`});
+  g.dataset.id=n.id; g.dataset.kind=n.kind;
+  g.style.animationDelay=(i*0.4)+'s';
+  g.appendChild(el('circle',{class:'glow',r:n.r*2.4,cx:0,cy:0}));
+  g.appendChild(el('circle',{class:'bornring',r:n.r,cx:0,cy:0}));
+  g.appendChild(el('circle',{class:'core',r:n.r,cx:0,cy:0,fill:n.kind==='memory'?'var(--mem)':'var(--doc)'}));
+  const t=el('text',{class:'lbl',y:n.r+3.4,x:0}); t.textContent=n.label;
+  g.appendChild(t);
+  g.addEventListener('click',()=>g.classList.toggle('lit'));
+  svg.appendChild(g);
+  byId[n.id]=g;
+});
+
+/* mini brain-bar (variant A collapsed) */
+const brainbar=document.getElementById('brainbar');
+function renderBar(){
+  brainbar.innerHTML='';
+  NODES.filter(n=>!n.hidden||n._born).forEach(n=>{
+    const c=document.createElement('div'); c.className='chip'; c.dataset.id=n.id; c.dataset.kind=n.kind;
+    c.innerHTML='<i></i>'+n.label.replace('mem · ','🧠 ');
+    brainbar.appendChild(c);
+  });
+  const grip=document.createElement('div'); grip.className='grip'; grip.textContent='brain'; brainbar.appendChild(grip);
+}
+renderBar();
+brainbar.addEventListener('click',()=>stage.classList.toggle('brain-open'));
+
+function chipFor(id){return brainbar.querySelector(`.chip[data-id="${id}"]`);}
+
+/* ── lightup: drives BOTH the svg node and the bar chip ───────────────── */
+function light(id,mode){ // mode: 'read' | 'edit' | 'born'
+  const g=byId[id]; if(!g) return;
+  g.classList.remove('read','edit','born'); void g.offsetWidth;
+  g.classList.add(mode);
+  const chip=chipFor(id); if(chip){chip.classList.add('lit'); if(mode!=='read') setTimeout(()=>{},0);}
+  // hot edges
+  EDGES.forEach(([a,b])=>{ if(a===id||b===id){const e=edgeEls[a+'~'+b]; if(e&&!e.classList.contains('hidden')){e.classList.add('hot'); setTimeout(()=>e.classList.remove('hot'),2600);}} });
+  if(mode==='read') setTimeout(()=>{ if(chip)chip.classList.remove('lit'); },2600);
+}
+function bornNode(id){
+  const n=NODES.find(x=>x.id===id); n._born=true;
+  const g=byId[id]; g.classList.remove('hiddenN'); g.classList.add('appear','born','lit');
+  // reveal its hidden edges
+  EDGES.forEach(([a,b,born])=>{ if(born&&(a===id||b===id)){const e=edgeEls[a+'~'+b]; if(e){e.classList.remove('hidden'); e.classList.add('hot'); setTimeout(()=>e.classList.remove('hot'),3000);} }});
+  renderBar(); const chip=chipFor(id); if(chip){chip.classList.add('lit','newchip');}
+  // nudge variant C badge if user is on chat tab
+  if(stage.dataset.variant==='c' && stage.dataset.tab!=='brain') document.getElementById('brainBadge').style.display='block';
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Chat helpers
+   ──────────────────────────────────────────────────────────────────── */
+const transcript=document.getElementById('transcript');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function bubble(cls,html){const d=document.createElement('div');d.className='ev '+cls;d.innerHTML=html;transcript.appendChild(d);transcript.scrollTop=transcript.scrollHeight;return d;}
+async function stream(d,text,sp=18){
+  d.innerHTML=''; const car=document.createElement('span'); car.className='caret'; d.appendChild(car);
+  for(const ch of text){ car.insertAdjacentText('beforebegin',ch); transcript.scrollTop=transcript.scrollHeight; await sleep(sp); }
+  car.remove();
+}
+
+/* ── the scripted demo turn ───────────────────────────────────────────── */
+let running=false;
+async function runDemo(){
+  if(running) return; running=true;
+  document.getElementById('play').disabled=true;
+  document.getElementById('appsub').textContent='agent working…';
+
+  bubble('user','Remember that Drive should write *into* the convos rail, not replace it — convos is the durable log.');
+  await sleep(550);
+
+  const th=bubble('thinking','reading PLAN_AGENT_RUNTIME.md…');
+  light('runtime','read');
+  await sleep(1100);
+  th.textContent='reading DRIVE_CONVO_RECON…'; light('recon','read');
+  await sleep(1000); th.remove();
+
+  const a1=bubble('assistant','');
+  await stream(a1,'Got it. That belongs in the project brain — saving it as a memory and linking it to your Drive plan.');
+  await sleep(400);
+
+  bubble('tool','<span class="tk">Write</span><span class="path">memory/drive-writes-into-convos.md</span>');
+  await sleep(500);
+  bornNode('mem-new');                 // ← the moment: node is born + glows + links in
+  if(stage.dataset.variant==='a' && !stage.classList.contains('brain-open')){
+    // peek the brain open briefly so the lightup is visible from chat-first mode
+    stage.classList.add('brain-open'); setTimeout(()=>{},0);
+  }
+  await sleep(900);
+  light('roadmap','edit');             // cross-link touched
+  await sleep(700);
+
+  const a2=bubble('assistant','');
+  await stream(a2,'Saved ✦ New memory node "drive→convos" is now in the brain, linked to PLAN_AGENT_RUNTIME and DRIVE_CONVO_RECON. Watch it settle in.');
+  document.getElementById('appsub').textContent='following · self-hosting session';
+  document.getElementById('play').disabled=false; running=false;
+}
+
+/* ── reset / replay ───────────────────────────────────────────────────── */
+function resetDemo(){
+  transcript.innerHTML='';
+  const n=NODES.find(x=>x.id==='mem-new'); n._born=false;
+  const g=byId['mem-new']; g.className='node float hiddenN'; g.style.animationDelay='3.6s';
+  EDGES.forEach(([a,b,born])=>{ if(born){const e=edgeEls[a+'~'+b]; if(e){e.classList.add('hidden'); e.classList.remove('hot');}} });
+  ['runtime','recon','roadmap'].forEach(id=>byId[id].classList.remove('read','edit','born','lit'));
+  document.getElementById('brainBadge').style.display='none';
+  renderBar();
+  seedChat();
+}
+function seedChat(){
+  bubble('assistant','Driving the VibeRate repo. Ask me to change something and watch the brain react.');
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Layout variant + tab wiring
+   ──────────────────────────────────────────────────────────────────── */
+const stage=document.getElementById('stage');
+document.getElementById('seg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
+  stage.dataset.variant=b.dataset.v;
+  stage.classList.toggle('show-labels', false);
+  document.getElementById('brain').classList.toggle('show-labels', b.dataset.v!=='a');
+  if(b.dataset.v==='c'){ stage.dataset.tab='chat'; syncTabs(); }
+  if(b.dataset.v==='a'){ stage.classList.remove('brain-open'); }
+});
+function syncTabs(){ document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab===stage.dataset.tab)); }
+document.getElementById('tabs').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  stage.dataset.tab=b.dataset.tab; syncTabs();
+  if(b.dataset.tab==='brain') document.getElementById('brainBadge').style.display='none';
+});
+
+document.getElementById('play').addEventListener('click',runDemo);
+document.getElementById('replay').addEventListener('click',()=>{ resetDemo(); });
+document.getElementById('send').addEventListener('click',()=>{ const ta=document.getElementById('ta'); if(ta.value.trim()){ bubble('user',ta.value.replace(/</g,'&lt;')); ta.value=''; } });
+
+// labels visible by default in B/C; in A they live in the chips
+document.getElementById('brain').classList.add('show-labels');
+seedChat();
+</script>
+</body>
+</html>
