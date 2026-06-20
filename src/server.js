@@ -12,8 +12,8 @@ import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCoo
 import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner } from './accounts.js';
 import { mountAgent } from './agentRoutes.js';
-import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl, setIngestHook } from './agent.js';
-import { ingestDriveTurn } from './driveIngest.js';
+import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl, setIngestHook, setTranscriptLoader } from './agent.js';
+import { ingestDriveTurn, loadDriveTranscript } from './driveIngest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -290,6 +290,11 @@ export function startServer(port = 4317) {
       console.error('[drive-ingest] failed:', e && (e.message || e));
     }
   });
+
+  // Lets the Drive runtime revive a session after a redeploy wiped its in-memory
+  // record: it asks for the saved transcript by claude session id, we locate +
+  // parse the on-disk JSONL (driveIngest), and it replays that to reconnect.
+  setTranscriptLoader((claudeSessionId) => loadDriveTranscript(claudeSessionId));
 
   // Read guard: resolves the project and enforces visibility. Returns null (and
   // sends 404 — we don't reveal that a private project exists) when not allowed.

@@ -7,7 +7,7 @@
 //     — an empty/missing allowlist locks the control plane entirely.
 
 import fs from 'node:fs';
-import { startSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk } from './agent.js';
+import { startSession, adoptSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk } from './agent.js';
 import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { currentUser } from './oauth.js';
 
@@ -77,6 +77,31 @@ export function mountAgent(app, opts = {}) {
       // back into this project's rail (driveIngest.js). Only set when driving a
       // real project — ad-hoc sessions on the default cwd have nowhere to land.
       res.json(startSession({ cwd: workdir, prompt, permissionMode, projectSlug: projectSlug || null }));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Re-adopt a session whose in-memory record a server restart / redeploy wiped.
+  // The browser kept the durable claude session id (localStorage), so we rebind a
+  // fresh local handle to it and replay the saved transcript — the "/resume" path
+  // that survives a redeploy, so "return to Drive" reconnects instead of dying.
+  // Defined BEFORE /sessions/:id so "adopt" isn't swallowed by the :id param. cwd
+  // resolves from the bound project's workspace checkout, like the start route.
+  app.post('/api/agent/sessions/adopt', guard, async (req, res) => {
+    try {
+      const { claudeSessionId, cwd, projectSlug, permissionMode } = req.body || {};
+      let workdir = cwd || defaultCwd;
+      if (projectSlug) {
+        const resolved = resolveProjectCwd(projectSlug);
+        if (resolved) workdir = resolved;
+      }
+      res.json(await adoptSession({
+        claudeSessionId,
+        cwd: workdir,
+        projectSlug: projectSlug || null,
+        permissionMode: permissionMode || 'default',
+      }));
     } catch (err) {
       fail(res, err);
     }

@@ -58,6 +58,16 @@ export function setIngestHook(fn) {
   onTurnIngest = fn;
 }
 
+// Optional loader that returns the saved transcript for a claude session id (the
+// parsed {cwd, title, messages} shape from parsers.parseClaude), or null if no
+// JSONL exists on disk. Injected by the server (which owns the storage layout) so
+// this runtime stays storage-agnostic — same pattern as setIngestHook. Used by
+// adoptSession to revive a session whose in-memory record a redeploy wiped.
+let loadTranscript = null;
+export function setTranscriptLoader(fn) {
+  loadTranscript = fn;
+}
+
 // Pending `ask` round-trips, keyed by askId: the sidecar's POST is parked here
 // until the Drive UI answers (resolveAsk) or the wait times out.
 const pendingAsks = new Map();
@@ -556,6 +566,47 @@ export function startSession({ cwd, prompt, permissionMode = 'default', projectS
   const session = createSession({ cwd, permissionMode, projectSlug });
   session.title = String(prompt).trim().slice(0, 120);
   runTurn(session, String(prompt), { resume: false });
+  return publicView(session);
+}
+
+// Re-adopt a session whose in-memory record was lost to a server restart /
+// redeploy, rebinding the durable claude session id so it can keep going. This is
+// the `/resume` analogue: the claude transcript on disk is the source of truth, so
+// we recreate a fresh local handle around the same claudeSessionId, replay the
+// saved transcript into the event log (so a reconnecting client's after=0 backfill
+// shows the prior conversation, not an empty window), and leave it idle — the next
+// message resumes via `claude --resume`. Idempotent: if a live session already
+// wraps this claude id (e.g. a same-process reload raced us), return it instead of
+// minting a duplicate. Refuses ids with no transcript on disk (nothing to revive).
+export async function adoptSession({ claudeSessionId, cwd, projectSlug = null, permissionMode = 'default' }) {
+  if (!claudeSessionId || typeof claudeSessionId !== 'string') throw new Error('claudeSessionId is required');
+  if (!PERMISSION_MODES.has(permissionMode)) throw new Error(`unknown permission mode: ${permissionMode}`);
+  for (const s of sessions.values()) {
+    if (s.claudeSessionId === claudeSessionId) return publicView(s);
+  }
+  // Load the saved transcript first: it both proves the session is real (we won't
+  // adopt an id with no JSONL) and supplies the cwd when the caller's reload didn't
+  // carry one across.
+  let transcript = null;
+  if (loadTranscript) {
+    try { transcript = await loadTranscript(claudeSessionId); } catch { transcript = null; }
+  }
+  if (!transcript) throw new Error('no saved transcript for that session; cannot resume');
+  const workdir = cwd || transcript.cwd || null;
+  assertIdleCwd(workdir);
+  const session = createSession({ cwd: workdir, permissionMode, projectSlug });
+  session.claudeSessionId = claudeSessionId;
+  session.status = 'idle';
+  session.title = transcript.title || null;
+  const messages = Array.isArray(transcript.messages) ? transcript.messages : [];
+  for (const m of messages) {
+    if (m.kind === 'text' && m.role === 'user') { if (m.text && m.text.trim()) emit(session, { kind: 'user_prompt', text: m.text }); }
+    else if (m.kind === 'text' && m.role === 'assistant') { if (m.text) emit(session, { kind: 'assistant_text', text: m.text }); }
+    else if (m.kind === 'thinking') { if (m.text) emit(session, { kind: 'thinking', text: m.text }); }
+    else if (m.kind === 'tool_use') emit(session, { kind: 'tool_use', name: m.name, input: m.input || {} });
+    else if (m.kind === 'tool_result') emit(session, { kind: 'tool_result', isError: false, text: String(m.text || '') });
+  }
+  emit(session, { kind: 'note', text: '↩ reconnected to your earlier session — continue the conversation below.' });
   return publicView(session);
 }
 

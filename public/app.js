@@ -3557,7 +3557,7 @@ function enterDrive(s) {
   state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, es: null };
   // Record the durable handle so this session is resumable after navigating away.
   // Starting a new session here supersedes any prior active handle for this project.
-  setDriveActive({ id: s.id, project: state.driveProject || null, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, status: s.status });
+  setDriveActive({ id: s.id, project: state.driveProject || null, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, status: s.status, permissionMode: s.permissionMode || null });
   state._driveLive = { text: null, thinking: null };
   renderDriveView();
   driveOpenStream(s.id, 0);
@@ -3651,16 +3651,36 @@ async function resumeDrive(slug) {
   let s;
   try { s = await driveApi('/sessions/' + encodeURIComponent(da.id)); }
   catch {
-    // The session is gone (server restart / GC). Drop the handle; the work was
-    // ingested into the rail, so show that saved convo instead of an empty Drive.
-    setDriveActive(null);
-    state._driveOpen = false;
-    state.driveProvisional = null;
-    if (da.claudeSessionId) return selectSession(slug, da.claudeSessionId);
-    return exitDrive();
+    // The in-memory record is gone (server restart / redeploy wiped the agent Map).
+    // The claude session itself is durable on disk, so re-adopt it by id — the
+    // `/resume` analogue: the server replays the saved transcript and rebinds a
+    // fresh local handle so the conversation is revived and can continue, instead
+    // of the old behavior of declaring it dead.
+    if (da.claudeSessionId) {
+      try {
+        s = await drivePost('/sessions/adopt', {
+          claudeSessionId: da.claudeSessionId,
+          cwd: da.cwd,
+          projectSlug: da.project,
+          permissionMode: da.permissionMode,
+        });
+      } catch {
+        // Truly unrecoverable (no transcript on disk). Drop the handle and show the
+        // read-only ingested convo instead of an empty Drive.
+        setDriveActive(null);
+        state._driveOpen = false;
+        state.driveProvisional = null;
+        return selectSession(slug, da.claudeSessionId);
+      }
+    } else {
+      setDriveActive(null);
+      state._driveOpen = false;
+      state.driveProvisional = null;
+      return exitDrive();
+    }
   }
   if (!state._driveOpen) return; // navigated away mid-fetch
-  setDriveActive({ id: s.id, project: state.driveProject, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, status: s.status });
+  setDriveActive({ id: s.id, project: state.driveProject, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, status: s.status, permissionMode: s.permissionMode || da.permissionMode || null });
   state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, es: null };
   state._driveLive = { text: null, thinking: null };
   renderDriveView();
@@ -3808,6 +3828,7 @@ function driveRender(ev) {
       driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
       if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; driveActivePatch({ claudeSessionId: ev.sessionId }); const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; setDriveProvisional({ sessionId: ev.sessionId }); } break;
     case 'error': driveAddEv('error', 'error', ev.message); break;
+    case 'note': driveResetLive(); driveAddEv('sys', 'session', ev.text); break;
     case 'stopped': driveAddEv('sys', 'session', 'stopped by user'); break;
     case 'status': driveSetStatus(ev.status); break;
     // 'raw', 'turn_end' intentionally not rendered.

@@ -229,6 +229,13 @@ Social features all require a shared backend, so a thin deploy gates most of wha
     inferring state from push output. Nudge agents to **end with `vbrt status`** so the
     tool, not the output log, is the source of truth.
   - Later, if needed: `doctor --fix`, SSE/WebSocket streaming, coalescing watch deltas.
+- **Mobile — responsive port** *(planned 2026-06-20 → `PLAN_MOBILE.md`)* — full
+  read+drive port to mobile, delivered responsively in the one codebase (no separate
+  route/SPA), centered on the **Variant A** unified screen (chat-first + expandable brain
+  header strip). Decided with Mike. Slices: responsive shell + nav → Variant-A project home
+  → brain⇄chat live link (Drive `tool_use` glows the touched brain node, desktop too) →
+  polish. Desktop above the breakpoint stays untouched. Prototype:
+  `public/proto/mobile-unified.html`.
 - **Minimap** for the conversation viewer (overview + jump for long sessions).
 - **"Launch terminal session" from a convo** *(idea — value TBD)* — a per-conversation button that spawns a new WSL terminal running the matching agent (e.g. Codex/Claude) with that conversation already loaded/resumed, so you can pick up an archived session live. Needs: local-only affordance (won't work for hosted/shared views), a way to map a captured session back to its agent + resume command, and a host-side launcher (the browser can't open a WSL terminal directly — likely a small local helper / protocol handler). Park as exploratory until the resume-mapping is proven.
 - **Collapse the repo-selector sidebar on drill-in** ✅ — once you click into a repo, the project picker hides for a focused view with an obvious workspace-back affordance.
@@ -254,4 +261,48 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   and the **B2 inline picker** (custom MCP `ask` tool). Still open: per-tool approvals,
   dual-provider event model, and hosted multi-user (BYO per-user key). Full status in
   `PLAN_AGENT_RUNTIME.md`.
+  - **Resume a Drive across a redeploy** ✅ shipped — the common dogfooding loop is
+    "drive → commit + push → Fly redeploys → refresh". A redeploy wipes the agent's
+    in-memory session Map, so the red **Return to Drive** button used to land on an
+    empty/dead view (the `GET /sessions/:id` 404 dropped the handle). The claude
+    session itself is durable on the volume, so we now treat that on-disk transcript
+    as the source of truth: a new `POST /api/agent/sessions/adopt` re-binds a fresh
+    local handle to the persisted `claudeSessionId`, replays the saved transcript into
+    the event log (so the reconnect shows the prior conversation, not a blank box), and
+    leaves it idle — the next message resumes via `claude --resume`. This is the
+    `/resume` analogue the redeploy loop needed. `resumeDrive()` tries the live record
+    first (fast path for a same-process reload) and falls back to adopt on 404; only a
+    genuinely missing transcript drops back to the read-only ingested convo. Wiring:
+    `agent.adoptSession` + `setTranscriptLoader`, `driveIngest.loadDriveTranscript`,
+    server wires the loader. The durable handle now also carries `permissionMode` so a
+    resumed session keeps its mode (e.g. `bypassPermissions` for a push-capable drive).
+- **Prompt chips / "frequently used phrases" on the first-message page** *(idea — documented, not built)*.
+  Motivation: starting a Drive session almost always opens with the same boilerplate
+  ("read the codebase and the .md files, then follow the plan doc, commit and push when
+  finished"). Retyping it is friction, and the first-message page (`renderDrivePrompt`)
+  has lots of unused real estate below the textarea. Proposal:
+  - **v1 (cheap, ship-anytime):** clickable chips above/below the `#dv-prompt` textarea
+    that insert a saved phrase at the cursor. Seed from a small static list + a
+    user-editable "saved phrases" list persisted in `localStorage` (mirrors the
+    `vbrt_drive_active` handle pattern). A "★ save this as a phrase" affordance on the
+    composer captures the current text.
+  - **v2 (suggested phrases):** mine the user's own history for recurring openers. We
+    already parse every session's first user message (`parsers.peekClaude` →
+    `firstUserText`, and prompt-unit data per project). A cheap pass — cluster/rank
+    frequent opening sentences, optionally normalized by a Haiku call
+    (`claude-haiku-4-5`) to merge near-duplicates and produce a clean canonical phrase
+    — surfaces the top N as suggestion chips. Haiku (not a bigger model) keeps it cheap
+    and fast; the server already holds an API key for the classifier (`classify.js`).
+  - **v3 (prompt coaching):** once suggestions exist, steer toward *better* prompts —
+    e.g. flag a vague opener and offer a tighter rewrite, or attach the relevant plan
+    doc automatically. Tie-in with `PROMPT_GALLERY.md`. Park until v1/v2 prove the chip
+    UI earns its space.
+  - Open question for v2: where to gather the corpus in hosted mode (per-account prompt
+    history vs. the local `~/.claude` logs the watcher sees) — local has the richest
+    history; hosted would lean on ingested prompt-units.
+- **Mobile projects header — chat-bubble icon** ✅ shipped — the project screen's app
+  bar showed two near-identical stacked-line glyphs (left `☰` = projects drawer, right
+  `≣` = conversations rail), easy to misread as two hamburgers. The right button is now
+  an inline-SVG speech bubble (currentColor, theme-aware) so it reads as "conversations".
+  Markup only (`public/index.html`); the `#m-rail` id + `toggleSheet` wiring are unchanged.
 - How much conversation content is safe to expose publicly even after redaction?

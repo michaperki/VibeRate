@@ -54,3 +54,15 @@ export async function ingestDriveTurn({ projectSlug, claudeSessionId }) {
   const session = await parseClaude(file);
   return ingestDriveSession(projectSlug, session);
 }
+
+// Load the saved transcript for a claude session id, parsed into the normalized
+// {cwd, title, messages} shape — or null if no JSONL exists on the volume. Powers
+// the Drive runtime's adoptSession ("return to Drive" after a redeploy): the
+// in-memory session is gone, but this on-disk transcript is the durable record we
+// replay to revive it. Same locate+parse as ingest, minus the storage write.
+export async function loadDriveTranscript(claudeSessionId) {
+  if (!claudeSessionId) return null;
+  const file = findSessionJsonl(claudeSessionId);
+  if (!file) return null;
+  return parseClaude(file);
+}

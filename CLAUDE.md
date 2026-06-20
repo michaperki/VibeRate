@@ -17,3 +17,4 @@ test fixture.
 - `SEED.md` — the original genesis prompt (a brain node, kept as history)
 - `public/app.js` — the dashboard front-end (brain web, progress rings, live mode)
 - `src/` — the `vbrt` CLI, parsers, server, push/watch
+- `PLAN_MOBILE.md` — the mobile-unified plan (responsive port; Variant A chat + brain header)

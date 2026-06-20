@@ -283,6 +283,16 @@ concept it changed — that link is the "living history."
    "🧠 brain edits", "🧠 AI architecture", "🧠 Brain history", the context gauge,
    and the "glow = recency" key.
 
+### H. Mobile — responsive port → **`PLAN_MOBILE.md`**
+- [ ] Full read+drive port of the app to mobile, delivered **responsively in the one
+  codebase** (no separate route/SPA), centered on the **Variant A** unified screen
+  (chat-first + expandable **brain header strip**). Decided 2026-06-20 (Mike).
+  Prototype: `public/proto/mobile-unified.html`. The dashboard / timeline / side rails
+  / reader all get a mobile home as drill-ins off the Variant-A project screen. Signature
+  net-new feature: **brain ⇄ chat live link** (a Drive `tool_use` on a brain doc glows its
+  node — lands on desktop too). Full architecture, IA, component-porting table, and slicing
+  in `PLAN_MOBILE.md`.
+
 ## 🎮 Experiment 2 feedback (Codex · 2026-06-17)
 
 Mike ran the artifact/brain loop with **Codex** on a 2048-style game. The loop held
