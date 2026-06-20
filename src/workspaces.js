@@ -25,6 +25,37 @@ export function workspaceDir(slug) {
   return path.join(workspacesRoot(), slug);
 }
 
+// The repo's bare name, e.g. https://github.com/me/viberate(.git) -> "viberate".
+function repoLeaf(repo) {
+  const m = /([^/:]+?)(?:\.git)?\/*$/.exec(String(repo || '').trim());
+  return m ? m[1] : '';
+}
+
+// Lowercase, filesystem-safe leaf (no separators, so it can't escape the root).
+function slugifyLeaf(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
+// Choose the on-disk checkout dir. Hosted project slugs are unguessable base64url
+// ids (so share links can't be enumerated), which makes for opaque paths like
+// <root>/kEdJ_GdLCGx. For the checkout itself we'd rather read <root>/viberate, so
+// derive a friendly name from the repo. Rules: once a dir is chosen it's sticky
+// (persisted on the manifest) so re-clones stay put; the friendly name is only
+// claimed if free, else we namespace it by slug — because startClone rm -rf's the
+// dir, two projects sharing a repo basename must never resolve to the same path.
+function pickWorkspaceDir(slug, repo, existingDir) {
+  if (existingDir) return existingDir;
+  const leaf = slugifyLeaf(repoLeaf(repo));
+  if (!leaf) return workspaceDir(slug);
+  const friendly = path.join(workspacesRoot(), leaf);
+  if (!fs.existsSync(friendly)) return friendly;
+  return path.join(workspacesRoot(), `${leaf}-${slug}`);
+}
+
 // Build the URL git actually clones from. For a private github https repo we inject
 // the instance's GITHUB_TOKEN (a Fly secret) as x-access-token; the token is used
 // only here and never persisted or returned. No token ever travels via the browser.
@@ -63,10 +94,10 @@ async function headSha(dir) {
 // Returns the initial workspace record (status `cloning`).
 export async function startClone(slug, { repo, branch } = {}) {
   if (!validRepo(repo)) throw new Error('a valid https or git@ repo URL is required');
-  const dir = workspaceDir(slug);
   const cur = getWorkspace(slug);
   if (!cur) throw new Error('unknown project');
   if (cur.workspace && cur.workspace.status === 'cloning') throw new Error('a clone is already in progress');
+  const dir = pickWorkspaceDir(slug, repo, cur.workspace && cur.workspace.dir);
 
   const ws = setWorkspace(slug, { repo, branch: branch || null, dir, status: 'cloning', error: null });
 
