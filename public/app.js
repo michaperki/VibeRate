@@ -4510,9 +4510,15 @@ async function boot() {
   if (byId('m-rail')) byId('m-rail').onclick = toggleSheet;
   if (byId('m-backdrop')) byId('m-backdrop').onclick = closeAll;
   if (byId('m-brainbar')) byId('m-brainbar').onclick = (e) => {
-    // Chips open the network; the grip / bare strip toggles it. One handler, so a
-    // chip tap doesn't also fire a strip tap (no double-toggle).
-    if (e.target.closest('.chip')) { if (!brainOpen()) toggleBrain(); return; }
+    // A chip taps straight into the doc lightbox for that file; the grip / bare
+    // strip toggles the network. One handler, so a chip tap doesn't also fire a
+    // strip tap (no double-toggle).
+    const chip = e.target.closest('.chip');
+    if (chip) {
+      const node = (state.docGraph?.nodes || []).find((n) => n.name === chip.dataset.name);
+      if (node) openDocLightbox(node);
+      return;
+    }
     toggleBrain();
   };
   if (byId('m-follow')) byId('m-follow').onclick = () => {
