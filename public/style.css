@@ -1312,6 +1312,12 @@ body.is-mobile .pane { height: auto; min-height: 40dvh; }
 body.is-mobile #conversation { width: 100%; padding: 0; }
 body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
 
+/* The app bar (and, while driving, the brain strip) are position:fixed at the top.
+   A sticky toolbar with top:0 would pin behind them and slide up out of view — so
+   offset its sticky top to land just below the fixed header(s) and keep it visible. */
+body.is-mobile .conv-toolbar { top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px)); }
+body.is-mobile.m-driving .dv-toolbar { top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
+
 /* tighten desktop-fixed paddings that overflow a phone */
 body.is-mobile .conv-toolbar { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .conv-body { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
