@@ -4786,6 +4786,14 @@ async function boot() {
     const title = byId('m-title');
     const sub = byId('m-sub');
     body.classList.toggle('is-live', !!state.live);
+    // The brain header strip + expand overlay are a Drive-view affordance: there the
+    // chat owns #conversation so the inline centerpiece brain isn't on screen, and the
+    // strip is the only way to reach the brain (collapsed to give the chat real estate).
+    // On the plain dashboard the centerpiece brain renders inline, so the strip would be
+    // a redundant second brain — gate it on Drive only.
+    const driving = !!state._driveOpen;
+    body.classList.toggle('m-driving', driving);
+    if (!driving) closeBrain(); // no grip off the Drive view → don't strand the overlay open
     if (body.classList.contains('view-project') && state.projectData) {
       if (title) title.textContent = state.projectData.name || state.project || 'Project';
       let s;

@@ -1285,8 +1285,10 @@ body.is-mobile.hosted #m-menu, body.is-mobile.public #m-menu { display: none; }
 body.is-mobile:not(.view-project) #m-rail,
 body.is-mobile:not(.view-project) #m-follow { display: none; }
 
-/* Brain header strip — sits directly under the app bar on the project screen. */
-body.is-mobile.view-project #m-brainbar {
+/* Brain header strip — sits directly under the app bar, Drive view only. On the
+   dashboard the centerpiece brain renders inline, so the strip would be a redundant
+   second brain; it's gated on .m-driving (set from state._driveOpen in mobileSync). */
+body.is-mobile.m-driving #m-brainbar {
   display: flex; align-items: center; gap: 8px;
   position: fixed; left: 0; right: 0; z-index: 290;
   top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
@@ -1300,7 +1302,7 @@ body.is-mobile.m-brain-open #m-brainbar .m-grip::after { content: ""; }
 
 /* App becomes a single column; content clears the fixed header. */
 body.is-mobile #app { display: block; height: auto; min-height: 100dvh; padding-top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px)); }
-body.is-mobile.view-project #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
+body.is-mobile.m-driving #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
 body.is-mobile #main { display: block; min-width: 0; }
 body.is-mobile .pane { height: auto; min-height: 40dvh; }
 body.is-mobile #conversation { width: 100%; padding: 0; }
