@@ -1318,6 +1318,7 @@ function renderTimeline() {
   if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderTimeline(); };
   state._brainEntrance = false; // consumed — don't replay on layout toggles / re-renders
   state._streamIn = null; // consumed — the new nodes have rendered with their fade-in
+  liveBrain.attach(el('#conversation').querySelector('.centerpiece')); // start the live force-sim
 }
 
 // Tier-2: this repo's cold-start context — what an agent preloads when launched
@@ -1706,6 +1707,15 @@ function renderCenterpiece(opts = {}) {
           Re-run <code>vbrt</code> in the repo to capture them.</div>
       </section>`;
   }
+  // The brain is now the live force-sim (liveBrain): persistent doc/plan/memory
+  // nodes seeded from the docGraph + ephemeral code-file nodes that flare off the
+  // Drive stream. Callers mount this markup, then call liveBrain.attach(host).
+  return liveBrain.panel(opts);
+
+  /* --- superseded: the static doc-graph centerpiece (web/tree/recent + time travel).
+     Kept below (unreachable) as reference until the live brain has fully replaced its
+     features; remove in a follow-up. --- */
+  // eslint-disable-next-line no-unreachable
   const g = state.docGraph;
   const files = state.docs.files;
 
@@ -1873,6 +1883,7 @@ function rerenderCenterpiece() {
   if (cp) {
     cp.outerHTML = renderCenterpiece();
     wireDocTabs();
+    liveBrain.attach(el('#conversation').querySelector('.centerpiece'));
   }
 }
 
@@ -3581,37 +3592,6 @@ function renderDriveView() {
         </div>
       </div>
       <div id="dv-banner" class="dv-banner hidden"></div>
-      <div id="dv-brain" class="dv-brain${state._driveBrainOpen === false ? ' collapsed' : ''}">
-        <div class="dvb-bar">
-          <div class="dvb-hero">
-            <svg viewBox="0 0 54 54" width="44" height="44" aria-hidden="true">
-              <circle cx="27" cy="27" r="22" fill="none" stroke="#2b3340" stroke-width="5"/>
-              <circle id="dvb-prog" cx="27" cy="27" r="22" fill="none" stroke="#3fb950" stroke-width="5"
-                      stroke-linecap="round" transform="rotate(-90 27 27)" stroke-dasharray="0 999"
-                      style="transition:stroke-dasharray .5s ease, stroke .5s ease"/>
-            </svg>
-            <span class="dvb-pct" id="dvb-pct">0%</span>
-          </div>
-          <div class="dvb-meta">
-            <div class="dvb-title">live brain</div>
-            <div class="dvb-subline" id="dvb-sub">no plan checklists</div>
-          </div>
-          <span class="dvb-livedot"><i></i>live</span>
-          <button class="dvb-toggle" id="dvb-toggle" title="Show / hide the live brain">▾</button>
-        </div>
-        <div class="dvb-stage"><svg id="dvb-svg" class="dvb-brain" preserveAspectRatio="xMidYMid meet"></svg></div>
-        <div class="dvb-foot">
-          <span class="dvb-spin" id="dvb-spin"></span>
-          <span class="dvb-verb read" id="dvb-verb">idle</span>
-          <span class="dvb-file" id="dvb-file">waiting for the agent…</span>
-          <span class="dvb-legend">
-            <span><i style="background:#a978ff"></i>doc</span>
-            <span><i style="background:#2ecf8f"></i>plan/mem</span>
-            <span><i style="background:#5aa9e6"></i>code</span>
-            <span><i style="background:#ff9d5c"></i>edited</span>
-          </span>
-        </div>
-      </div>
       <div class="dv-body"><div id="dv-transcript" class="dv-transcript"></div></div>
       <button id="dv-jump" class="dv-jump hidden" title="Jump to the latest activity">↓ new activity</button>
       <div class="dv-composer">
@@ -3636,14 +3616,6 @@ function renderDriveView() {
   el('#dv-new').addEventListener('click', () => openDriveForProject(state.driveProject || state.project));
   el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
   el('#dv-jump').addEventListener('click', () => driveScroll(true));
-  // Live brain: bind + seed the force-sim against this session's panel. The toggle
-  // collapses the stage (the rAF loop self-stops when the svg is hidden/detached).
-  el('#dvb-toggle').addEventListener('click', () => {
-    const open = el('#dv-brain').classList.toggle('collapsed');
-    state._driveBrainOpen = !open;
-    if (!open) liveBrain.attach();   // re-expanded → rebind + restart the loop
-  });
-  if (state._driveBrainOpen !== false) liveBrain.attach();
   // Sticky-bottom intent: stay glued to the latest only while the reader is parked at
   // the bottom. Once they scroll up to read history, new activity no longer yanks them
   // down — it surfaces the "new activity" pill instead. The pane (#conversation) is the
@@ -4222,7 +4194,7 @@ const liveBrain = (() => {
 
   let last = 0;
   function step(now) {
-    if (!svg || !svg.isConnected || svg.closest('.dv-brain.collapsed')) { raf = null; return; }   // torn down / collapsed → stop the loop
+    if (!svg || !svg.isConnected) { raf = null; return; }   // view torn down → stop the loop
     const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016); last = now;
     // decay heat; ephemeral code nodes that have gone cold fade out and die
     for (const n of nodes.values()) {
@@ -4306,15 +4278,52 @@ const liveBrain = (() => {
     }
   }
 
-  // (Re)bind to the freshly-rendered Drive brain panel and (re)seed from the docGraph.
-  function attach() {
-    svg = document.getElementById('dvb-svg');
+  // The panel markup. Class-based (NOT ids) so the brain can live in several places
+  // at once — the dashboard centerpiece and the mobile expand overlay can both be in
+  // the DOM — without selector collisions. attach(host) binds to one specific copy.
+  function panel(opts = {}) {
+    return `
+    <section class="dash-card centerpiece live-brain">
+      <div class="dvb-bar">
+        <div class="dvb-hero">
+          <svg viewBox="0 0 54 54" width="44" height="44" aria-hidden="true">
+            <circle cx="27" cy="27" r="22" fill="none" stroke="#2b3340" stroke-width="5"/>
+            <circle class="dvb-prog" cx="27" cy="27" r="22" fill="none" stroke="#3fb950" stroke-width="5"
+                    stroke-linecap="round" transform="rotate(-90 27 27)" stroke-dasharray="0 999"
+                    style="transition:stroke-dasharray .5s ease, stroke .5s ease"/>
+          </svg>
+          <span class="dvb-pct">0%</span>
+        </div>
+        <div class="dvb-meta">
+          <div class="dvb-title">🧠 live brain</div>
+          <div class="dvb-subline">no plan checklists</div>
+        </div>
+        <span class="dvb-livedot"><i></i>live</span>
+      </div>
+      <div class="dvb-stage"><svg class="dvb-svg" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="dvb-foot">
+        <span class="dvb-spin"></span>
+        <span class="dvb-verb read">idle</span>
+        <span class="dvb-file">waiting for the agent…</span>
+        <span class="dvb-legend">
+          <span><i style="background:#a978ff"></i>doc</span>
+          <span><i style="background:#2ecf8f"></i>plan/mem</span>
+          <span><i style="background:#5aa9e6"></i>code</span>
+          <span><i style="background:#ff9d5c"></i>edited</span>
+        </span>
+      </div>
+    </section>`;
+  }
+
+  // (Re)bind to one rendered brain panel (scoped to `host`) and (re)seed from the
+  // docGraph. The rAF loop drives whichever copy was attached last; others freeze on
+  // their final frame (only one brain is ever on-screen at a time on a given device).
+  function attach(host) {
+    const root = host || document;
+    svg = root.querySelector('.dvb-svg');
     if (!svg) { if (raf) cancelAnimationFrame(raf); raf = null; return; }
-    refs = {
-      prog: document.getElementById('dvb-prog'), pct: document.getElementById('dvb-pct'), sub: document.getElementById('dvb-sub'),
-      verb: document.getElementById('dvb-verb'), file: document.getElementById('dvb-file'), spin: document.getElementById('dvb-spin'),
-      hero: document.querySelector('#dv-brain .dvb-hero'),
-    };
+    const q = (sel) => root.querySelector(sel);
+    refs = { prog: q('.dvb-prog'), pct: q('.dvb-pct'), sub: q('.dvb-subline'), verb: q('.dvb-verb'), file: q('.dvb-file'), spin: q('.dvb-spin'), hero: q('.dvb-hero') };
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.innerHTML = '';
     layers = { edges: document.createElementNS(SVGNS, 'g'), fx: document.createElementNS(SVGNS, 'g'), nodes: document.createElementNS(SVGNS, 'g') };
@@ -4326,6 +4335,7 @@ const liveBrain = (() => {
   }
 
   return {
+    panel,
     attach,
     feed(name, file) { const v = verbFor(name); if (v === 'plan') planPulse(); else touch(v, file); },
     idle,
@@ -4748,21 +4758,14 @@ async function boot() {
   function toggleBrain() { const o = !brainOpen(); body.classList.toggle('m-brain-open', o); if (o) mountBrain(); syncGrip(); }
   function syncGrip() { const g = byId('m-grip'); if (g) g.textContent = brainOpen() ? 'brain ▴' : 'brain ▾'; }
 
-  // --- brain expand overlay: mount the REAL centerpiece SVG (renderCenterpiece) ---
+  // --- brain expand overlay: mount the live brain (same renderer as the dashboard
+  // centerpiece, scoped to this overlay so the two copies don't collide). ---
   function mountBrain() {
     const host = byId('m-bo-inner');
     if (!host) return;
     if (!state.docGraph) { host.innerHTML = '<div class="empty">No brain captured yet.</div>'; return; }
-    // Time travel doesn't work in the drive overlay (no history scrubber here), so suppress it.
-    host.innerHTML = renderCenterpiece({ noTimeTravel: true });
-    // Node tap → doc lightbox; layout / time-travel toggles re-mount in place.
-    // Hover-peek is intentionally skipped (touch has no hover; CSS hides it).
-    host.querySelectorAll('[data-doc]').forEach((b) => (b.onclick = () => {
-      const node = (state.docGraph?.nodes || []).find((n) => n.name === b.dataset.doc);
-      if (node) openDocLightbox(node);
-    }));
-    host.querySelectorAll('[data-layout]').forEach((b) => (b.onclick = () => { setLayout(b.dataset.layout); mountBrain(); }));
-    host.querySelectorAll('[data-tt]').forEach((b) => (b.onclick = () => { state.timeTravel = !state.timeTravel; mountBrain(); }));
+    host.innerHTML = liveBrain.panel({ noTimeTravel: true });
+    liveBrain.attach(host);
   }
 
   // --- brain header strip: a chip per brain doc, lit by the live link ---

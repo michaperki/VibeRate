@@ -13,39 +13,8 @@
 </head>
 <body class="view-project">
   <div class="dv-wrap">
-    <p class="note">Harness — runs the <b>real</b> <code>liveBrain</code> module sliced out of <code>/app.js</code>, fed synthetic tool_use events. Not the shipped page.</p>
-    <!-- markup mirrors renderDriveView()'s #dv-brain panel -->
-    <div id="dv-brain" class="dv-brain">
-      <div class="dvb-bar">
-        <div class="dvb-hero">
-          <svg viewBox="0 0 54 54" width="44" height="44" aria-hidden="true">
-            <circle cx="27" cy="27" r="22" fill="none" stroke="#2b3340" stroke-width="5"/>
-            <circle id="dvb-prog" cx="27" cy="27" r="22" fill="none" stroke="#3fb950" stroke-width="5"
-                    stroke-linecap="round" transform="rotate(-90 27 27)" stroke-dasharray="0 999"
-                    style="transition:stroke-dasharray .5s ease, stroke .5s ease"/>
-          </svg>
-          <span class="dvb-pct" id="dvb-pct">0%</span>
-        </div>
-        <div class="dvb-meta">
-          <div class="dvb-title">live brain</div>
-          <div class="dvb-subline" id="dvb-sub">no plan checklists</div>
-        </div>
-        <span class="dvb-livedot"><i></i>live</span>
-        <button class="dvb-toggle" id="dvb-toggle" title="Show / hide the live brain">▾</button>
-      </div>
-      <div class="dvb-stage"><svg id="dvb-svg" class="dvb-brain" preserveAspectRatio="xMidYMid meet"></svg></div>
-      <div class="dvb-foot">
-        <span class="dvb-spin" id="dvb-spin"></span>
-        <span class="dvb-verb read" id="dvb-verb">idle</span>
-        <span class="dvb-file" id="dvb-file">waiting for the agent…</span>
-        <span class="dvb-legend">
-          <span><i style="background:#a978ff"></i>doc</span>
-          <span><i style="background:#2ecf8f"></i>plan/mem</span>
-          <span><i style="background:#5aa9e6"></i>code</span>
-          <span><i style="background:#ff9d5c"></i>edited</span>
-        </span>
-      </div>
-    </div>
+    <p class="note">Harness — runs the <b>real</b> <code>liveBrain</code> module sliced out of <code>/app.js</code> (markup from <code>liveBrain.panel()</code>), fed synthetic tool_use events. Not the shipped page.</p>
+    <div class="dashboard"><div id="brain-host"></div></div>
   </div>
 
 <script>
@@ -73,11 +42,9 @@ window.state = {
   const mod = src.slice(start, end) + '\nreturn liveBrain;';
   const liveBrain = new Function('state', mod)(window.state);
 
-  document.getElementById('dvb-toggle').addEventListener('click', () => {
-    const open = document.getElementById('dv-brain').classList.toggle('collapsed');
-    if (!open) liveBrain.attach();
-  });
-  liveBrain.attach();
+  const host = document.getElementById('brain-host');
+  host.innerHTML = liveBrain.panel();
+  liveBrain.attach(host);
 
   // Drive a realistic turn: reads, edits, a bash run, a plan tick, ephemeral churn.
   const SCRIPT = [
