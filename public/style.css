@@ -436,6 +436,21 @@ pre.code {
 @keyframes promptslide { from { transform: translateX(-10px); opacity: 0.25; } to { transform: translateX(0); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .prompt-row.fresh { animation: none; } }
 
+/* Drive → rail live-merge (Option B). The provisional card is the in-flight turn
+   shown in the rail before ingest cools it into a real parsed unit; .driving badges
+   the real card while you're still driving it (continuity across follow-up turns). */
+.prompt-row.provisional {
+  cursor: default; border-style: dashed;
+  border-color: rgba(124, 92, 255, 0.5); background: rgba(124, 92, 255, 0.07);
+  animation: promptslide 0.4s ease-out;
+}
+.prompt-row.provisional:hover { background: rgba(124, 92, 255, 0.07); border-color: rgba(124, 92, 255, 0.5); }
+.prompt-row.driving, .sess.driving { border-color: rgba(248, 81, 73, 0.55); }
+.live-sw { background: #f85149 !important; box-shadow: 0 0 6px #f85149; }
+.drive-live { display: inline-flex; align-items: center; gap: 5px; color: #f85149; font-weight: 600; }
+.drive-live .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #f85149; box-shadow: 0 0 6px #f85149; animation: livepulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .drive-live .live-dot { animation: none; } .prompt-row.provisional { animation: none; } }
+
 /* "code" lane — per-convo line churn, green (added) stacked over red (removed) */
 .rib-codetrack { height: 28px; }
 .rib-code { position: absolute; bottom: 0; width: 5px; margin-left: -2.5px; display: flex; flex-direction: column-reverse; border-radius: 1px; overflow: hidden; cursor: pointer; }

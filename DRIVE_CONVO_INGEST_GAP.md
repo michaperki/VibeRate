@@ -145,12 +145,35 @@ process, so it already knows the session id the instant the turn ends. Polling a
 file you just wrote — via a second process and a lock — to rediscover data you
 hold is backwards. Ingest fires on the `turn_end` you already emit.
 
-### Known limit (the seam to Option B)
+### Shipped next (2026-06-20) — the same-view live-merge (Option B)
 
-Ingest lands the convo in the *stored* manifest; it does not yet live-merge into
+The seam below is now closed. A streaming Drive turn renders **in the Convos rail
+as a provisional card that cools in place**, without leaving the Drive view:
+
+- **`public/app.js`** — while Drive owns `#conversation`, the rail (`#sessions`)
+  stays visible beside it. `state.driveProvisional` (`{ project, sessionId,
+  prompt, status }`) describes the in-flight turn; `driveProvisionalRow()` draws it
+  as a dashed, pulsing `prompt-row` at the top of the rail. It's seeded on the
+  `user_prompt` event and learns its `sessionId` from the `system` event.
+- **Cooling.** On the `result` event, `driveCoolProvisional()` flips the card to
+  "cooling…" and polls the bundle (`driveRefreshRail`) until the server's turn-end
+  ingest surfaces the real parsed unit — then drops the provisional so the cooled
+  card (archetype, outcome rail) stands in its place, flashed via
+  `_liveFreshPrompts`. Bounded (~15 tries); a no-op ingest just leaves "cooling…".
+- **Dedup / continuity.** The provisional is suppressed the instant its
+  `sessionId` appears among the real units, so it never doubles the cooled card.
+  `isDrivingSession()` badges the real card "● live" while you keep driving, so a
+  follow-up turn reads as the same live convo rather than spawning a second
+  provisional.
+- **Trust boundary untouched.** This is pure rail rendering off data the read APIs
+  already return; the composer/RCE gate is unchanged.
+
+### Original known limit (now resolved by the above)
+
+Ingest lands the convo in the *stored* manifest; it did not yet live-merge into
 the rail **while you're still in the Drive view**. Return to the project (or
 reload) and the convo is there — and since ingest bumps `lastPushAt`, the project
 auto-enters Live mode. Making a streaming Drive turn render as a provisional rail
-card that cools in place is exactly Option B's "live head of the reader," and is
-the next step. The durable-preservation requirement ("return to a Drive session
-later") is met now; the same-view live-merge is not.
+card that cools in place is exactly Option B's "live head of the reader." The
+durable-preservation requirement ("return to a Drive session later") was met by
+the bridge; the same-view live-merge is the work shipped above.

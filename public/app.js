@@ -51,6 +51,10 @@ const state = {
   _driveOpen: false, // the Drive view owns #conversation (suppress timeline re-renders)
   _driveLive: { text: null, thinking: null }, // streaming partial bubbles being filled
   _drivePoll: null, // setTimeout handle while polling a workspace clone
+  // Option B (DRIVE_CONVO_RECONCILIATION.md): the live driven turn shown in the rail
+  // as a provisional card that "cools" into the real parsed unit once ingest lands.
+  driveProvisional: null, // { project, sessionId, prompt, status } | null
+  _driveCoolPoll: null, // setTimeout handle awaiting ingest after a turn's `result`
 };
 
 // ---------- helpers ----------
@@ -428,8 +432,10 @@ function showHome() {
   stopLive();
   if (state.drive && state.drive.es) state.drive.es.close();
   if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
+  if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
   state.drive = null;
   state.driveProject = null;
+  state.driveProvisional = null;
   state._driveOpen = false;
   state.project = null;
   state.session = null;
@@ -1072,12 +1078,13 @@ function renderSessionList() {
     const dl = act ? diffLabel(act) : '';
     // Preview the most-recent prompt ("where the convo is now"), not its opener.
     const preview = esc(s.lastUserText || s.title || '');
+    const driving = isDrivingSession(s.id);
     return `
-        <div class="sess${isFresh(s) ? ' fresh' : ''} ${state.session === s.id ? 'active' : ''}${state.selectedConvo === s.id ? ' hl' : ''}" data-id="${esc(s.id)}">
+        <div class="sess${isFresh(s) ? ' fresh' : ''} ${state.session === s.id ? 'active' : ''}${state.selectedConvo === s.id ? ' hl' : ''}${driving ? ' driving' : ''}" data-id="${esc(s.id)}">
           <div class="row">
             <span class="sw" style="background:${color}"></span>
             <span class="badge ${s.source}">${s.source}</span>
-            <span class="meta">${fmtDate(s.endedAt || s.startedAt)}</span>
+            ${driving ? '<span class="meta drive-live"><span class="live-dot"></span>live</span>' : `<span class="meta">${fmtDate(s.endedAt || s.startedAt)}</span>`}
           </div>
           <div class="sess-preview">${preview}</div>
           <div class="meta">${label}${dur ? ` · ${dur}` : ''}${dl ? ` · ${dl}` : ''}</div>
@@ -1127,11 +1134,12 @@ function renderSessionList() {
       const color = (state.colorById || {})[u.sessionId] || 'var(--muted)';
       const id = u.cardId || u.id;
       const active = state.session === u.sessionId && state.currentTurn === u.index ? ' active' : '';
-      return `<div class="prompt-row${fresh.has(id) ? ' fresh' : ''}${active}" data-session="${esc(u.sessionId)}" data-turn="${u.index}">
+      const driving = isDrivingSession(u.sessionId);
+      return `<div class="prompt-row${fresh.has(id) ? ' fresh' : ''}${active}${driving ? ' driving' : ''}" data-session="${esc(u.sessionId)}" data-turn="${u.index}">
         <div class="row">
           <span class="sw" style="background:${color}"></span>
           <span class="badge ${esc(u.source)}">${esc(u.source)}</span>
-          <span class="meta">${fmtDate(u.ts || u.sessionStartedAt)}</span>
+          ${driving ? '<span class="meta drive-live"><span class="live-dot"></span>live</span>' : `<span class="meta">${fmtDate(u.ts || u.sessionStartedAt)}</span>`}
         </div>
         <div class="sess-preview">${esc(u.prompt || '')}</div>
         ${outcomeChips(u, { compact: true })}
@@ -1151,6 +1159,7 @@ function renderSessionList() {
     </div>
     <div class="list-legend"><span class="sw legend-rainbow"></span> a colour per session · <span class="badge claude">claude</span> / <span class="badge codex">codex</span> = agent</div>
     ${brushBanner}
+    ${driveProvisionalRow()}
     ${state.railMode === 'prompts' ? promptRows() : `${list || (empties.length ? '' : '<div class="empty">No sessions in this range.</div>')}${emptyBlock}`}`;
 
   const back = el('#sessions').querySelector('[data-back-projects]');
@@ -1181,7 +1190,7 @@ function renderSessionList() {
     .querySelectorAll('.sess')
     .forEach((node) => node.addEventListener('click', () => selectSession(state.project, node.dataset.id)));
   el('#sessions')
-    .querySelectorAll('.prompt-row')
+    .querySelectorAll('.prompt-row:not(.provisional)')
     .forEach((node) => node.addEventListener('click', () => selectSession(state.project, node.dataset.session, Number(node.dataset.turn))));
   state._liveFreshPrompts = null;
 }
@@ -2633,7 +2642,7 @@ function backToDashboard() {
 
 async function selectSession(slug, id, turnIndex = null) {
   // Leaving Drive (if open) for a historical convo: tear down its stream first.
-  if (state._driveOpen) { if (state.drive && state.drive.es) state.drive.es.close(); if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; } state.drive = null; state.driveProject = null; state._driveOpen = false; }
+  if (state._driveOpen) { if (state.drive && state.drive.es) state.drive.es.close(); if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; } if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; } state.drive = null; state.driveProject = null; state.driveProvisional = null; state._driveOpen = false; }
   // Keep streaming on (if it was) so the reader can *follow* a live conversation.
   state.session = id;
   state._pendingTurn = Number.isFinite(turnIndex) ? turnIndex : null;
@@ -3368,10 +3377,12 @@ function driveShell(title, metaHtml, bodyHtml) {
 function openDriveForProject(slug) {
   stopLive();
   if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
+  if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
   state.session = null;
   state._driveOpen = true;
   if (state.drive && state.drive.es) state.drive.es.close();
   state.drive = null;
+  state.driveProvisional = null;
   state.driveProject = slug || null;
   el('#conversation').innerHTML = driveShell('✦ Drive', 'checking workspace…', '<div class="dv-body"><div class="empty">Checking workspace…</div></div>');
   el('#conversation').scrollTop = 0;
@@ -3551,9 +3562,12 @@ function wireDriveBackDash() {
 function exitDrive() {
   if (state.drive && state.drive.es) state.drive.es.close();
   if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
+  if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
   state.drive = null;
   state.driveProject = null;
+  state.driveProvisional = null;
   state._driveOpen = false;
+  renderSessionList(); // drop the "live"/provisional rail markers now that we've left
   renderTimeline();
 }
 
@@ -3661,7 +3675,7 @@ function driveResetLive() { state._driveLive = { text: null, thinking: null }; }
 function driveRender(ev) {
   const L = state._driveLive;
   switch (ev.kind) {
-    case 'user_prompt': driveResetLive(); driveAddEv('user', 'you', ev.text); break;
+    case 'user_prompt': driveResetLive(); driveAddEv('user', 'you', ev.text); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
     case 'assistant_text': driveAddEv('assistant', 'claude', ev.text); break;
     case 'thinking': driveAddEv('thinking', 'thinking', ev.text); break;
     case 'assistant_text_start': L.text = driveAddEv('assistant', 'claude', ''); break;
@@ -3687,10 +3701,11 @@ function driveRender(ev) {
         ev.numTurns != null ? ev.numTurns + ' turns' : null,
         ev.durationMs != null ? (ev.durationMs / 1000).toFixed(1) + 's' : null,
         ev.costUsd != null ? '$' + ev.costUsd.toFixed(4) : null,
-      ].filter(Boolean).join(' · ')); break;
+      ].filter(Boolean).join(' · '));
+      driveCoolProvisional(); break;
     case 'system':
       driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
-      if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; } break;
+      if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; setDriveProvisional({ sessionId: ev.sessionId }); } break;
     case 'error': driveAddEv('error', 'error', ev.message); break;
     case 'stopped': driveAddEv('sys', 'session', 'stopped by user'); break;
     case 'status': driveSetStatus(ev.status); break;
@@ -3704,6 +3719,111 @@ function driveOpenStream(id, after) {
   es.onmessage = (m) => { if (state.drive && state.drive.id === id) { try { driveRender(JSON.parse(m.data)); } catch {} } };
   es.addEventListener('error', () => {/* EventSource auto-reconnects */});
   if (state.drive) state.drive.es = es;
+}
+
+// ---------- Drive → rail live-merge (Option B) ----------
+// The Drive transcript owns #conversation, but the Convos rail (#sessions) stays
+// visible beside it. These keep the rail honest *while you drive*: the live turn
+// shows as a provisional card that cools into the real parsed unit once the
+// turn-end ingest (DRIVE_CONVO_INGEST_GAP.md) lands it in the bundle.
+
+// True while a row's session is the one being driven right now — used to badge the
+// real cooled card as still-live (continuity across the provisional→cooled→follow-up
+// lifecycle, so a follow-up turn keeps a "working" pulse without a second provisional).
+function isDrivingSession(id) {
+  return !!(state._driveOpen && state.drive && state.drive.claudeSessionId
+    && state.drive.claudeSessionId === id);
+}
+
+// Merge a patch into the provisional descriptor and repaint *only* the rail (Drive
+// owns #conversation). No-op once we've navigated off the driven project.
+function setDriveProvisional(patch) {
+  // Seed the session id from the live session so a *follow-up* turn (whose id is
+  // already known) dedupes against its existing rail card instead of drawing a
+  // second provisional next to it. On turn 1 the id is still null here and arrives
+  // with the `system` event — by which point no real card exists yet anyway.
+  const base = state.driveProvisional || {
+    project: state.driveProject,
+    sessionId: (state.drive && state.drive.claudeSessionId) || null,
+    prompt: '', status: 'working',
+  };
+  state.driveProvisional = { ...base, ...patch };
+  if (state.project && state.project === state.driveProvisional.project) renderSessionList();
+}
+
+// The provisional rail card for the in-flight turn. Suppressed once its session id
+// surfaces among the real units/sessions — at that point the cooled card has won
+// and renders in its place ("cools in place"). Returns '' when there's nothing live
+// to show, or the live convo is already a real rail entry.
+function driveProvisionalRow() {
+  const pv = state.driveProvisional;
+  if (!pv || pv.project !== state.project) return '';
+  const known = pv.sessionId && (
+    (state.promptUnits || []).some((u) => u.sessionId === pv.sessionId)
+    || (state.projectData.sessions || []).some((s) => s.id === pv.sessionId));
+  if (known) return ''; // the real (cooled) card is in the list now
+  const word = pv.status === 'cooling' ? 'cooling…' : 'working…';
+  return `<div class="prompt-row provisional" title="Live driven turn — cools into a saved card when it finishes">
+      <div class="row">
+        <span class="sw live-sw"></span>
+        <span class="badge claude">claude</span>
+        <span class="meta drive-live"><span class="live-dot"></span>${word}</span>
+      </div>
+      <div class="sess-preview">${esc(pv.prompt || 'starting…')}</div>
+    </div>`;
+}
+
+// Re-fetch just the bundle data the rail renders from (manifest + activity + units)
+// without touching #conversation, then repaint the rail. The cooled Drive card
+// surfaces here once ingest has folded the turn in.
+async function driveRefreshRail(slug) {
+  if (!slug) return;
+  const [proj, act, units] = await Promise.all([
+    api(`/api/projects/${slug}`).catch(() => null),
+    api(`/api/projects/${slug}/activity`).catch(() => null),
+    api(`/api/projects/${slug}/prompts`).catch(() => null),
+  ]);
+  if (slug !== state.project) return;
+  if (proj) state.projectData = proj;
+  if (act) state.activity = { ok: true, byId: Object.fromEntries(act.map((a) => [a.id, a])) };
+  if (units) state.promptUnits = units;
+  // A brand-new session needs a thread swatch — recompute the color map (cheap).
+  state.colorById = {};
+  [...state.projectData.sessions].filter((s) => s.startedAt)
+    .sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt))
+    .forEach((s, i) => { state.colorById[s.id] = colorForIndex(i); });
+  renderSessionList();
+}
+
+// A turn finished (`result`): flip the provisional to "cooling" and poll the bundle
+// until the ingest fires and the real unit appears, then drop the provisional so the
+// cooled card stands alone. Ingest is detached server-side (fires on turn_end after
+// `result`), so we can't assume it's done the instant we hear `result` — poll, bounded.
+function driveCoolProvisional() {
+  if (!state.driveProvisional) return;
+  setDriveProvisional({ status: 'cooling' });
+  if (state._driveCoolPoll) { clearTimeout(state._driveCoolPoll); state._driveCoolPoll = null; }
+  let tries = 0;
+  const tick = async () => {
+    state._driveCoolPoll = null;
+    const pv = state.driveProvisional;
+    if (!pv || pv.project !== state.project) return; // navigated away / superseded
+    await driveRefreshRail(pv.project);
+    const cooled = pv.sessionId && (state.promptUnits || []).filter((u) => u.sessionId === pv.sessionId);
+    const landed = (cooled && cooled.length)
+      || (pv.sessionId && (state.projectData.sessions || []).some((s) => s.id === pv.sessionId));
+    if (landed) {
+      state.driveProvisional = null;
+      // Flash the parsed unit(s) as they take the provisional's place ("cool in place").
+      if (cooled && cooled.length) state._liveFreshPrompts = new Set(cooled.map((u) => u.cardId || u.id));
+      renderSessionList();
+      return;
+    }
+    if (++tries < 15) state._driveCoolPoll = setTimeout(tick, 1000);
+    // else: give up waiting (ingest may have no-op'd); the provisional stays until
+    // the next turn or exit — better a lingering "cooling…" than a vanished convo.
+  };
+  state._driveCoolPoll = setTimeout(tick, 600);
 }
 
 async function bootDashboard() {
