@@ -3786,6 +3786,10 @@ function driveRender(ev) {
     case 'block_stop': driveResetLive(); break;
     case 'tool_use':
       driveResetLive();
+      // Brain↔chat live link (PLAN_MOBILE.md Slice 3): a Write/Edit/Read of a brain
+      // doc glows its node + header chip. Reads the tool_use the runtime already
+      // emits — no extra capture. No-op when no matching brain node is on screen.
+      if (window.mobileBrainTouch) { const f = toolFile(ev); if (f) window.mobileBrainTouch(f, classifyTool(ev.name)); }
       if (ev.name === 'mcp__viberate__ask') break; // renders as the picker via the 'ask' event
       driveAddEv('tool', '⚙ ' + ev.name, driveSummarizeInput(ev.input)); break;
     case 'tool_result': driveAddEv('toolresult' + (ev.isError ? ' err' : ''), ev.isError ? 'tool error' : 'tool result', ev.text); break;
@@ -4204,6 +4208,148 @@ async function boot() {
   showHome();
   await Promise.all([loadProjects(), loadContext()]);
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// MOBILE — responsive shell + nav + brain header strip + brain↔chat live link
+// (PLAN_MOBILE.md, Variant A). Dormant on desktop: the single entry point is the
+// `is-mobile` body class, set from matchMedia below. Above the 760px breakpoint
+// none of this applies, so the desktop layout is byte-for-byte unchanged.
+//
+// Rather than scatter calls through the desktop render paths, we wrap a handful
+// of existing render functions so every surface transition (project → reader →
+// drive → home) re-syncs the mobile chrome from one place.
+// ══════════════════════════════════════════════════════════════════════════
+(function mobileInit() {
+  const mq = window.matchMedia('(max-width: 760px)');
+  const body = document.body;
+  const byId = (id) => document.getElementById(id);
+  const isMobile = () => body.classList.contains('is-mobile');
+  const brainOpen = () => body.classList.contains('m-brain-open');
+
+  // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
+  const closeDrawer = () => body.classList.remove('m-drawer-open');
+  const closeSheet = () => body.classList.remove('m-sheet-open');
+  const closeBrain = () => body.classList.remove('m-brain-open');
+  const closeAll = () => { closeDrawer(); closeSheet(); closeBrain(); };
+  function toggleDrawer() { const o = !body.classList.contains('m-drawer-open'); closeSheet(); body.classList.toggle('m-drawer-open', o); }
+  function toggleSheet() { const o = !body.classList.contains('m-sheet-open'); closeDrawer(); body.classList.toggle('m-sheet-open', o); }
+  function toggleBrain() { const o = !brainOpen(); body.classList.toggle('m-brain-open', o); if (o) mountBrain(); syncGrip(); }
+  function syncGrip() { const g = byId('m-grip'); if (g) g.textContent = brainOpen() ? 'brain ▴' : 'brain ▾'; }
+
+  // --- brain expand overlay: mount the REAL centerpiece SVG (renderCenterpiece) ---
+  function mountBrain() {
+    const host = byId('m-bo-inner');
+    if (!host) return;
+    if (!state.docGraph) { host.innerHTML = '<div class="empty">No brain captured yet.</div>'; return; }
+    host.innerHTML = renderCenterpiece();
+    // Node tap → doc lightbox; layout / time-travel toggles re-mount in place.
+    // Hover-peek is intentionally skipped (touch has no hover; CSS hides it).
+    host.querySelectorAll('[data-doc]').forEach((b) => (b.onclick = () => {
+      const node = (state.docGraph?.nodes || []).find((n) => n.name === b.dataset.doc);
+      if (node) openDocLightbox(node);
+    }));
+    host.querySelectorAll('[data-layout]').forEach((b) => (b.onclick = () => { setLayout(b.dataset.layout); mountBrain(); }));
+    host.querySelectorAll('[data-tt]').forEach((b) => (b.onclick = () => { state.timeTravel = !state.timeTravel; mountBrain(); }));
+  }
+
+  // --- brain header strip: a chip per brain doc, lit by the live link ---
+  function renderStrip() {
+    const chips = byId('m-chips');
+    if (!chips) return;
+    const nodes = (state.docGraph?.nodes || []).filter((n) => !n.archived);
+    if (!nodes.length) { chips.innerHTML = '<span class="m-sub">no brain docs</span>'; return; }
+    chips.innerHTML = nodes.map((n) => {
+      const kind = /(^|\/)memory\//i.test(n.name) || n.role === 'memory' ? 'memory' : 'doc';
+      return `<div class="chip" data-name="${esc(n.name)}" data-base="${esc((n.base || '').toLowerCase())}" data-kind="${kind}"><i></i>${esc(n.base)}</div>`;
+    }).join('');
+  }
+
+  // --- app bar: title / sub / follow state, recomputed on every sync ---
+  function mobileSync() {
+    if (!isMobile()) return;
+    const title = byId('m-title');
+    const sub = byId('m-sub');
+    body.classList.toggle('is-live', !!state.live);
+    if (body.classList.contains('view-project') && state.projectData) {
+      if (title) title.textContent = state.projectData.name || state.project || 'Project';
+      let s;
+      if (state._driveOpen) s = 'driving · ' + ((state.drive && state.drive.status) || 'live');
+      else if (state.session) s = 'reading a conversation';
+      else if (state.live) s = 'following';
+      else s = `${plural((state.promptUnits || []).length, 'prompt')} · ${plural((state.projectData.sessions || []).length, 'session')}`;
+      if (sub) sub.textContent = s;
+      renderStrip();
+      if (brainOpen()) mountBrain();
+    } else {
+      if (title) title.textContent = 'VibeRate';
+      if (sub) sub.textContent = body.classList.contains('workspace') ? 'workspace' : '';
+    }
+    syncGrip();
+  }
+  window.mobileSync = mobileSync;
+
+  // --- brain↔chat live link: a touched brain doc glows its chip + node(s) ---
+  function brainTouch(path, mode) {
+    if (!path) return;
+    const base = String(path).split(/[\\/]/).pop().toLowerCase();
+    const cls = mode === 'read' ? 'touch-read' : 'touch-edit';
+    document.querySelectorAll('#m-chips .chip').forEach((c) => {
+      if (c.dataset.base !== base) return;
+      c.classList.remove('newchip'); void c.offsetWidth; c.classList.add('lit', 'newchip');
+      if (mode === 'read') setTimeout(() => c.classList.remove('lit'), 2600);
+    });
+    // Light the node in any rendered brain (dashboard inline + expand overlay).
+    document.querySelectorAll('.gnode[data-doc]').forEach((g) => {
+      const nb = (g.dataset.doc.split(/[\\/]/).pop() || '').toLowerCase();
+      if (nb !== base) return;
+      g.classList.remove('touch-read', 'touch-edit'); void g.offsetWidth;
+      g.classList.add(cls);
+      setTimeout(() => g.classList.remove(cls), mode === 'read' ? 2600 : 3600);
+    });
+  }
+  window.mobileBrainTouch = brainTouch;
+
+  // --- wiring ---
+  if (byId('m-menu')) byId('m-menu').onclick = toggleDrawer;
+  if (byId('m-rail')) byId('m-rail').onclick = toggleSheet;
+  if (byId('m-backdrop')) byId('m-backdrop').onclick = closeAll;
+  if (byId('m-brainbar')) byId('m-brainbar').onclick = (e) => {
+    // Chips open the network; the grip / bare strip toggles it. One handler, so a
+    // chip tap doesn't also fire a strip tap (no double-toggle).
+    if (e.target.closest('.chip')) { if (!brainOpen()) toggleBrain(); return; }
+    toggleBrain();
+  };
+  if (byId('m-follow')) byId('m-follow').onclick = () => {
+    if (state._driveOpen) return; // Drive is inherently live — follow doesn't apply
+    state.live ? stopLive() : startLive();
+    if (state.session) renderSessionReader();
+    else renderTimeline();
+    mobileSync();
+  };
+  // Picking a project (drawer) or a conversation (rail sheet) dismisses the surface.
+  const sb = byId('sidebar'); if (sb) sb.addEventListener('click', (e) => { if (e.target.closest('.proj')) closeDrawer(); });
+  const ss = byId('sessions'); if (ss) ss.addEventListener('click', (e) => { if (e.target.closest('.sess, .prompt-row')) closeSheet(); });
+
+  // Wrap the desktop render fns so each surface transition re-syncs the chrome.
+  ['renderTimeline', 'renderSessionReader', 'renderSessionList', 'renderDriveView', 'showHome', 'showProject'].forEach((name) => {
+    const orig = window[name];
+    if (typeof orig !== 'function') return;
+    window[name] = function (...a) { const r = orig.apply(this, a); try { mobileSync(); } catch { /* chrome sync is best-effort */ } return r; };
+  });
+
+  // Leaving a project / going home should never strand an open sheet or overlay.
+  const origShowHome = window.showHome;
+  window.showHome = function (...a) { closeAll(); return origShowHome.apply(this, a); };
+
+  function applyMode() {
+    body.classList.toggle('is-mobile', mq.matches);
+    if (!mq.matches) closeAll(); // crossing back to desktop: drop mobile-only surfaces
+    mobileSync();
+  }
+  if (mq.addEventListener) mq.addEventListener('change', applyMode);
+  else if (mq.addListener) mq.addListener(applyMode); // older Safari
+  applyMode();
+})();
 
 boot().catch((e) => {
   el('#home').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;

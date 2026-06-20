@@ -10,6 +10,10 @@
   --codex: #2ecf8f;
   --user: #2a3142;
   --assistant: #1b2230;
+  /* mobile / brain-strip tokens (PLAN_MOBILE.md) */
+  --live: #f85149;
+  --doc: #a978ff;
+  --mem: #2ecf8f;
 }
 
 * { box-sizing: border-box; }
@@ -1114,3 +1118,147 @@ body.public #feed { margin: 0 auto; }
 .dv-spin { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: dv-spin 0.8s linear infinite; flex: none; }
 @keyframes dv-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .dv-spin { animation: none; } }
+
+/* ════════════════════════════════════════════════════════════════════════
+   MOBILE — responsive port (PLAN_MOBILE.md, Variant A)
+   Everything below is gated by `body.is-mobile`, a class JS sets from
+   matchMedia('(max-width: 760px)'). Desktop above the breakpoint never sees
+   these rules, so its layout is byte-for-byte unchanged.
+
+   Two exceptions live OUTSIDE the gate because they enhance desktop too:
+   the brain↔chat live-link glow classes (.gnode.touch-*, .chip.lit).
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* --- brain↔chat live link (Slice 3): a touched doc's node/chip glows.
+   Driven from the Drive SSE tool_use stream; works on the desktop brain too. */
+.gnode.touch-read { filter: drop-shadow(0 0 5px var(--doc)); animation: nodepulse 2.4s ease-out 1; }
+.gnode.touch-edit { filter: drop-shadow(0 0 8px var(--mem)); animation: nodepulse 3.6s ease-out 1; }
+@keyframes nodepulse { 0% { opacity: 0.55; } 12% { opacity: 1; } 100% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .gnode.touch-read, .gnode.touch-edit { animation: none; } }
+
+/* The chip strip + its lit state (shared by the brain header strip). */
+.brainbar .chip {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-2); font-size: 11.5px; color: var(--muted);
+  white-space: nowrap; transition: color .3s, border-color .3s, box-shadow .3s;
+  cursor: pointer; max-width: 46vw; overflow: hidden; text-overflow: ellipsis;
+}
+.brainbar .chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--doc); flex: none; }
+.brainbar .chip[data-kind="memory"] i { background: var(--mem); }
+.brainbar .chip.lit { color: #fff; border-color: var(--mem); box-shadow: 0 0 0 1px var(--mem), 0 0 14px -2px var(--mem); }
+.brainbar .chip.lit i { animation: beat 1s ease-in-out infinite; }
+.brainbar .chip.newchip { animation: chippop .5s ease-out; }
+@keyframes beat { 0%,100% { opacity:.55; transform:scale(.9);} 50% { opacity:1; transform:scale(1.15);} }
+@keyframes chippop { 0% { transform: scale(.2); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .brainbar .chip.lit i, .brainbar .chip.newchip { animation: none; } }
+
+/* --- mobile chrome, default OFF (only display:block/flex under body.is-mobile) --- */
+.m-chrome { display: none; }
+
+body.is-mobile { --m-appbar-h: 52px; --m-brainbar-h: 47px; }
+
+/* App bar — fixed at the top, above the panes; carries the safe-area inset. */
+body.is-mobile #m-appbar {
+  display: flex; align-items: center; gap: 8px;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 300;
+  height: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) 10px 0;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.m-iconbtn {
+  flex: none; width: 40px; height: 40px; border-radius: 10px;
+  background: transparent; border: 1px solid transparent; color: var(--text);
+  font-size: 19px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.m-iconbtn:active { background: var(--panel-2); }
+.m-titlewrap { flex: 1 1 auto; min-width: 0; }
+.m-title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-follow .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: block; }
+body.is-mobile.is-live .m-follow .live-dot { background: var(--live); box-shadow: 0 0 7px var(--live); animation: livepulse 1.4s ease-in-out infinite; }
+/* hide the projects button where there's no project list to open (single hosted project) */
+body.is-mobile.hosted #m-menu, body.is-mobile.public #m-menu { display: none; }
+/* the conversations sheet + follow are project-only affordances */
+body.is-mobile:not(.view-project) #m-rail,
+body.is-mobile:not(.view-project) #m-follow { display: none; }
+
+/* Brain header strip — sits directly under the app bar on the project screen. */
+body.is-mobile.view-project #m-brainbar {
+  display: flex; align-items: center; gap: 8px;
+  position: fixed; left: 0; right: 0; z-index: 290;
+  top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
+  height: var(--m-brainbar-h); padding: 0 10px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+#m-brainbar .m-chips { display: flex; align-items: center; gap: 8px; overflow-x: auto; flex: 1 1 auto; scrollbar-width: none; }
+#m-brainbar .m-chips::-webkit-scrollbar { display: none; }
+#m-brainbar .m-grip { flex: none; color: var(--muted); font-size: 12px; cursor: pointer; padding-left: 4px; }
+body.is-mobile.m-brain-open #m-brainbar .m-grip::after { content: ""; }
+
+/* App becomes a single column; content clears the fixed header. */
+body.is-mobile #app { display: block; height: auto; min-height: 100dvh; padding-top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px)); }
+body.is-mobile.view-project #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
+body.is-mobile #main { display: block; min-width: 0; }
+body.is-mobile .pane { height: auto; min-height: 40dvh; }
+body.is-mobile #conversation { width: 100%; padding: 0; }
+body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+/* tighten desktop-fixed paddings that overflow a phone */
+body.is-mobile .conv-toolbar { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
+body.is-mobile .conv-body { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
+body.is-mobile .dashboard { padding: clamp(12px, 4vw, 28px); gap: 16px; }
+body.is-mobile .dv-composer { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+body.is-mobile .reader-card, body.is-mobile .pc-prompt { max-width: 100%; }
+/* hover-only peek is useless on touch and 248px overflows narrow screens */
+body.is-mobile .brain-peek { display: none !important; }
+body.is-mobile .brain-ticker { white-space: normal; }
+
+/* Projects → off-canvas drawer (reuse #sidebar). Overrides the desktop
+   `view-project #sidebar { display:none }` by re-showing it off-screen. */
+body.is-mobile #sidebar {
+  display: flex; position: fixed; top: 0; bottom: 0; left: 0; z-index: 410;
+  width: min(82vw, 300px); transform: translateX(-100%);
+  transition: transform .26s cubic-bezier(.2,.8,.2,1);
+  padding-top: env(safe-area-inset-top, 0px);
+  box-shadow: 0 0 40px rgba(0,0,0,.5);
+}
+body.is-mobile.m-drawer-open #sidebar { transform: translateX(0); }
+
+/* Conversations rail → bottom sheet (project screen only). */
+body.is-mobile.view-project #sessions {
+  display: block; position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+  width: auto; z-index: 420; max-height: 80dvh; border-right: 0;
+  border-top: 1px solid var(--border); border-radius: 16px 16px 0 0;
+  transform: translateY(110%); transition: transform .28s cubic-bezier(.2,.8,.2,1);
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -10px 40px rgba(0,0,0,.5);
+}
+body.is-mobile.m-sheet-open #sessions { transform: translateY(0); }
+body.is-mobile #sessions::before { content: ""; display: block; width: 38px; height: 4px; border-radius: 4px; background: var(--border); margin: 8px auto 6px; }
+
+/* Shared backdrop for drawer + sheet. */
+body.is-mobile #m-backdrop {
+  position: fixed; inset: 0; z-index: 400; background: rgba(7,8,11,.55);
+  opacity: 0; pointer-events: none; transition: opacity .22s;
+}
+body.is-mobile.m-drawer-open #m-backdrop, body.is-mobile.m-sheet-open #m-backdrop { display: block; opacity: 1; pointer-events: auto; }
+
+/* Brain expand overlay — mounts the real centerpiece SVG (renderCenterpiece). */
+body.is-mobile.m-brain-open #m-brain-overlay {
+  display: block; position: fixed; left: 0; right: 0; z-index: 280;
+  top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px));
+  height: 58dvh; background: var(--bg); border-bottom: 1px solid var(--border);
+  overflow: auto; box-shadow: 0 18px 40px rgba(0,0,0,.5);
+  animation: m-brain-slide .3s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes m-brain-slide { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body.is-mobile.m-brain-open #m-brain-overlay { animation: none; } }
+#m-bo-inner .dash-card { margin: 0; border: 0; border-radius: 0; }
+#m-bo-inner .brain { min-height: 46dvh; }
+
+/* touch targets ≥ 44px on the controls that turn into thumb targets */
+body.is-mobile .lay-btn, body.is-mobile .filter, body.is-mobile .rail-toggle button { min-height: 34px; }
+body.is-mobile .nav button, body.is-mobile .dv-actions button { min-height: 40px; }
+body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-brainbar-h) - env(safe-area-inset-top, 0px)); }

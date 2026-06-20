@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>VibeRate</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
@@ -29,6 +29,25 @@
         </section>
       </main>
     </div>
+
+    <!-- Mobile chrome (PLAN_MOBILE.md Variant A). Inert on desktop: every node
+         here is display:none until body.is-mobile is set from matchMedia. -->
+    <div id="m-appbar" class="m-chrome">
+      <button id="m-menu" class="m-iconbtn" title="Projects" aria-label="Projects">☰</button>
+      <div class="m-titlewrap">
+        <div class="m-title" id="m-title">VibeRate</div>
+        <div class="m-sub" id="m-sub"></div>
+      </div>
+      <button id="m-follow" class="m-iconbtn m-follow" title="Follow" aria-label="Follow"><span class="live-dot"></span></button>
+      <button id="m-rail" class="m-iconbtn" title="Conversations" aria-label="Conversations">≣</button>
+    </div>
+    <div id="m-brainbar" class="m-chrome brainbar">
+      <div class="m-chips" id="m-chips"></div>
+      <span class="m-grip" id="m-grip">brain ▾</span>
+    </div>
+    <div id="m-brain-overlay" class="m-chrome"><div class="m-bo-inner" id="m-bo-inner"></div></div>
+    <div id="m-backdrop" class="m-chrome"></div>
+
     <script src="/app.js"></script>
   </body>
 </html>
