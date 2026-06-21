@@ -1358,7 +1358,12 @@ body.is-mobile #app { display: block; height: auto; min-height: 100dvh; padding-
 body.is-mobile.m-driving #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
 body.is-mobile #main { display: block; min-width: 0; }
 body.is-mobile .pane { height: auto; min-height: 40dvh; }
-body.is-mobile #conversation { width: 100%; padding: 0; }
+/* The document scrolls on mobile (not the pane), so #conversation must NOT stay a
+   scroll container — .pane's `overflow-y:auto` would otherwise capture the flipped
+   flow's sticky .dv-head-stack and clamp it down by its `top` offset, leaving a dead
+   gap (the height of the fixed header) above the Drive title + composer. Resolve the
+   sticky against the viewport instead. */
+body.is-mobile #conversation { width: 100%; padding: 0; overflow: visible; }
 body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
 
 /* On mobile the persistent chrome (app bar + brain strip) owns navigation, so the
