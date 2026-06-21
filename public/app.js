@@ -3401,9 +3401,59 @@ function setDriveActive(d) {
     if (state.driveActive) localStorage.setItem(DRIVE_ACTIVE_KEY, JSON.stringify(state.driveActive));
     else localStorage.removeItem(DRIVE_ACTIVE_KEY);
   } catch { /* private mode / quota — the in-memory handle still works this session */ }
+  // Mirror into the per-project session log so this session stays resumable even
+  // after a newer one supersedes the single active handle above. No-op until the
+  // claude session id is learned (the durable, adoptable transcript id).
+  if (state.driveActive) recordDriveSession(state.driveActive, state._driveStartPrompt);
 }
 function driveActivePatch(patch) {
   if (state.driveActive) setDriveActive({ ...state.driveActive, ...patch });
+}
+
+// ---- per-project Drive session log -----------------------------------------
+// The single active handle above only ever points at the most-recent session, so
+// older sessions used to become unreachable (the resume gap Mike hit). This log
+// keeps every session you've driven per project, keyed by the durable
+// claudeSessionId, so any of them can be re-adopted off its on-disk transcript.
+// Scope is this browser (localStorage); a cross-device, server-side index is the
+// next slice (ROADMAP "fleet / multi-agent session management").
+const DRIVE_SESSIONS_KEY = 'vbrt_drive_sessions';
+const DRIVE_SESSIONS_MAX = 40;
+function readDriveSessions() {
+  try { return JSON.parse(localStorage.getItem(DRIVE_SESSIONS_KEY) || '[]') || []; }
+  catch { return []; }
+}
+function writeDriveSessions(list) {
+  try { localStorage.setItem(DRIVE_SESSIONS_KEY, JSON.stringify(list.slice(0, DRIVE_SESSIONS_MAX))); }
+  catch { /* private mode / quota — active-handle resume still works */ }
+}
+// Upsert by claudeSessionId; title is set once (first known prompt) and preserved
+// across later touches (status / lastAt bumps).
+function recordDriveSession(h, title) {
+  if (!h || !h.claudeSessionId) return;
+  const list = readDriveSessions();
+  const i = list.findIndex((s) => s.claudeSessionId === h.claudeSessionId);
+  const prev = i >= 0 ? list[i] : null;
+  const rec = {
+    claudeSessionId: h.claudeSessionId,
+    project: h.project || (prev && prev.project) || null,
+    cwd: h.cwd || (prev && prev.cwd) || null,
+    permissionMode: h.permissionMode || (prev && prev.permissionMode) || null,
+    title: (prev && prev.title) || (title ? String(title).slice(0, 200) : null),
+    startedAt: (prev && prev.startedAt) || Date.now(),
+    lastAt: Date.now(),
+  };
+  if (i >= 0) list.splice(i, 1);
+  list.unshift(rec);
+  writeDriveSessions(list);
+}
+function listDriveSessions(project) {
+  return readDriveSessions()
+    .filter((s) => s.claudeSessionId && (s.project || null) === (project || null))
+    .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+}
+function forgetDriveSession(cid) {
+  writeDriveSessions(readDriveSessions().filter((s) => s.claudeSessionId !== cid));
 }
 // True for the rail row whose convo is the session we're driving — or have
 // suspended but can still resume — in the current project. Such a row badges
@@ -3549,10 +3599,15 @@ function renderDrivePrompt(slug, st) {
        <label for="dv-prompt">First message</label>
        <textarea id="dv-prompt" placeholder="What should the agent do?"></textarea>
        <div class="dv-actions"><button id="dv-start">Start session</button>${syncBtn}</div>
+       ${driveHistoryHtml(slug)}
      </div>`,
   );
   el('#conversation').scrollTop = 0;
   wireDriveBackDash();
+  el('#conversation').querySelectorAll('[data-resume-cid]').forEach((b) =>
+    b.addEventListener('click', () => resumeDriveSession(slug, b.dataset.resumeCid)));
+  el('#conversation').querySelectorAll('[data-forget-cid]').forEach((b) =>
+    b.addEventListener('click', (e) => { e.stopPropagation(); forgetDriveSession(b.dataset.forgetCid); renderDrivePrompt(slug, st); }));
   el('#dv-perm').addEventListener('change', (e) => {
     el('#dv-permwarn').textContent = e.target.value === 'bypassPermissions'
       ? '⚠ The agent can run any shell command and edit any file with no confirmation.' : '';
@@ -3561,6 +3616,7 @@ function renderDrivePrompt(slug, st) {
     const prompt = el('#dv-prompt').value.trim();
     if (!prompt) return;
     el('#dv-start').disabled = true;
+    state._driveStartPrompt = prompt; // titles the session in the per-project log
     try {
       const body = { prompt, permissionMode: el('#dv-perm').value };
       if (slug) body.projectSlug = slug; else body.cwd = state.driveDefaultCwd || undefined;
@@ -3689,11 +3745,46 @@ function exitDrive() {
   renderTimeline();
 }
 
+// The "Past sessions" list under the new-session form: every Drive session for this
+// project, resumable. The single active handle is just the most-recent of these.
+function driveHistoryHtml(project) {
+  const sessions = listDriveSessions(project);
+  if (!sessions.length) return '';
+  const active = state.driveActive && state.driveActive.claudeSessionId;
+  const rows = sessions.map((s) => {
+    const title = s.title
+      ? esc(s.title.length > 90 ? s.title.slice(0, 89) + '…' : s.title)
+      : '<span class="dim-note">(no first message captured)</span>';
+    const isActive = active && s.claudeSessionId === active;
+    return `<div class="dv-hist-row${isActive ? ' active' : ''}">
+       <button class="dv-hist-resume" data-resume-cid="${esc(s.claudeSessionId)}" title="Reconnect to this session and continue it">↻</button>
+       <div class="dv-hist-main">
+         <div class="dv-hist-title">${title}</div>
+         <div class="dv-hist-meta">${esc(fmtAgo(s.lastAt || s.startedAt || Date.now()))}${s.permissionMode ? ' · ' + esc(s.permissionMode) : ''} · <code>${esc((s.claudeSessionId || '').slice(0, 8))}</code>${isActive ? ' · current' : ''}</div>
+       </div>
+       <button class="dv-hist-forget" data-forget-cid="${esc(s.claudeSessionId)}" title="Remove from this list (doesn't delete the session)">×</button>
+     </div>`;
+  }).join('');
+  return `<div class="dv-history"><div class="dv-history-h">Past sessions <span class="dim-note">· resume any of them</span></div>${rows}</div>`;
+}
+
+// Resume an arbitrary past session from the per-project log (not just the active
+// handle). Promote its record to the active handle, then run the normal resume path
+// — which adopts it by claudeSessionId off the durable transcript when there's no
+// live in-memory record.
+function resumeDriveSession(slug, cid) {
+  const rec = readDriveSessions().find((s) => s.claudeSessionId === cid);
+  if (!rec) return;
+  setDriveActive({ id: null, project: rec.project || slug || null, claudeSessionId: rec.claudeSessionId, cwd: rec.cwd || null, status: 'idle', permissionMode: rec.permissionMode || null });
+  resumeDrive(rec.project || slug);
+}
+
 // Re-enter a session we drove earlier (or are still driving): rebuild the transcript
 // by replaying the server's buffered events from the start, then continue live. The
 // session kept running while we were away, so this reconnects rather than restarts.
-// If the server no longer knows the id (a redeploy wiped the in-memory Map), drop the
-// stale handle and fall back to the ingested transcript in the read-only reader.
+// If the server no longer knows the id (a redeploy wiped the in-memory Map, or we're
+// resuming from the log with no live id), re-adopt by the durable claudeSessionId;
+// only a genuinely missing transcript drops back to the read-only reader.
 async function resumeDrive(slug) {
   const da = state.driveActive;
   if (!da) return;
@@ -3705,14 +3796,17 @@ async function resumeDrive(slug) {
   state.driveProject = da.project || slug || null;
   el('#conversation').innerHTML = driveShell('✦ Drive', 'reconnecting…', '<div class="dv-body"><div class="empty">Reconnecting to your session…</div></div>');
   wireDriveBackDash();
-  let s;
-  try { s = await driveApi('/sessions/' + encodeURIComponent(da.id)); }
-  catch {
-    // The in-memory record is gone (server restart / redeploy wiped the agent Map).
-    // The claude session itself is durable on disk, so re-adopt it by id — the
-    // `/resume` analogue: the server replays the saved transcript and rebinds a
-    // fresh local handle so the conversation is revived and can continue, instead
-    // of the old behavior of declaring it dead.
+  let s = null;
+  // Fast path: a live in-memory record (same-process reload). Skipped when resuming
+  // from the log, where there's no local id — go straight to adopt below.
+  if (da.id) {
+    try { s = await driveApi('/sessions/' + encodeURIComponent(da.id)); }
+    catch { s = null; }
+  }
+  if (!s) {
+    // No live record. The claude session itself is durable on disk, so re-adopt it
+    // by id — the `/resume` analogue: the server replays the saved transcript and
+    // rebinds a fresh local handle so the conversation is revived and can continue.
     if (da.claudeSessionId) {
       try {
         s = await drivePost('/sessions/adopt', {

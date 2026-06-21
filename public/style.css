@@ -1111,6 +1111,21 @@ body.is-mobile .dvb-stage { height: 320px; }
 .dv-banner.ok { background: #10221a; color: #5bd6a0; border: 1px solid #1d3a2c; }
 .dv-banner.hidden { display: none; }
 
+/* Past-sessions log under the new-session form — any prior Drive session, resumable. */
+.dv-history { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 14px; }
+.dv-history-h { font-size: 12px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }
+.dv-hist-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--panel, transparent); }
+.dv-hist-row.active { border-color: var(--accent); }
+.dv-hist-main { flex: 1; min-width: 0; }
+.dv-hist-title { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-hist-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.dv-hist-resume, .dv-hist-forget {
+  flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--muted);
+  border-radius: 6px; min-width: 30px; min-height: 30px; cursor: pointer; font: inherit; line-height: 1;
+}
+.dv-hist-resume { color: var(--accent); font-size: 15px; }
+.dv-hist-resume:hover, .dv-hist-forget:hover { border-color: var(--accent); color: var(--text); }
+
 .dv-pill { padding: 2px 9px; border-radius: 99px; font: 600 11px ui-monospace, Menlo, monospace; }
 .dv-pill.working { background: #2a2410; color: #e7b85b; }
 .dv-pill.idle { background: #10221a; color: #5bd6a0; }

@@ -143,13 +143,24 @@ anyone but the operator using VibeRate to actually drive.
    **scaffold-a-new-project** path. Decide the forks, then make first-run on a phone
    one obvious flow.
 2. **Fleet / multi-agent session management** — the unit of work is shifting from
-   one session to *several agents in flight*. Today only the **most-recent** Drive
-   session per project resumes: the client keeps a single `vbrt_drive_active`
-   handle in `localStorage` (overwritten on each new session — `app.js`), and the
-   server registry is in-memory (cleared on restart), with no per-project index of
-   past sessions — only durable JSONL transcripts + the `adopt` fallback
-   (`agent.js`). Build a real **per-project session list** (resume any past Drive,
-   not just the last) and a way to see/switch agents running concurrently.
+   one session to *several agents in flight*. The root cause of "only the most-recent
+   Drive session resumes" was that the client kept a single `vbrt_drive_active`
+   handle in `localStorage` (overwritten on each new session), and the server
+   registry is in-memory (cleared on restart), with no index of past sessions — only
+   durable JSONL transcripts + the `adopt` fallback (`agent.js`).
+   - **Per-project session log** ✅ *(first pass shipped 2026-06-21)* — a
+     `vbrt_drive_sessions` localStorage log records every session you've driven per
+     project, keyed by the durable `claudeSessionId`, with its first-message title and
+     last-active time. The new-session form now shows a **"Past sessions"** list; ↻
+     resumes any of them (promotes it to the active handle, then re-adopts off the
+     on-disk transcript), × forgets it. `resumeDrive` now handles a log entry with no
+     live `id` by going straight to `adopt`. Reuses the existing adopt path — no server
+     change. (`app.js` `recordDriveSession`/`listDriveSessions`/`driveHistoryHtml`/
+     `resumeDriveSession`.)
+   - **Still open:** the log is **per-browser** (localStorage) — a phone-started
+     session isn't listed on desktop. Next slice is a **server-side session index**
+     (list the workspace's claude transcripts per project) so it's cross-device, plus
+     a way to **see/switch agents running concurrently** (the actual fleet view).
 3. **Mobile as the primary surface** — finish the responsive port (`PLAN_MOBILE.md`)
    so brain, drive, reader, and rail are all first-class on a phone. Default
    assumption flips: a feature is mobile unless it proves it needs desktop (dense
