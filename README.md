@@ -1,18 +1,38 @@
 # viberate
 
-VibeRate is a hosted viewer and feedback layer for terminal-agent development.
-It lets agents publish the work behind a repo — prompts, decisions, screenshots,
-diffs, commits, and brain docs — so developers and reviewers can watch,
-understand, and discuss how the project was built.
+VibeRate is a **mobile, agent-first IDE** for terminal-agent development. You
+**Drive** coding agents (Claude Code today) from your phone or browser — steering
+them through the project's **brain** (its `.md` docs, plans, and memory) and your
+prompts, managing their context, and watching the work land — without opening the
+code. The agent runs on the host; the dashboard is your control surface.
 
-The old shorthand was "GitHub for agent conversations." The current frame is
-closer to an **agent work viewer**: developers increasingly build through
-terminal agents instead of a traditional IDE, and VibeRate gives that work a
-readable, shareable environment.
+VibeRate started as an *observation* tool ("GitHub for agent conversations" — a
+viewer + feedback layer that published prompts, diffs, screenshots, and brain docs
+for review). Drive flipped it: the read-only watcher is now the *read* mode of a
+thing whose center is **driving** agents, not just reviewing them. Sharing and
+feedback are now a later social/learning layer, not the core. Full framing in
+`PRODUCT_STRATEGY.md`.
 
-Product strategy and current priorities live in `PRODUCT_STRATEGY.md`; detailed
-viewer planning lives in `PROJECT_VIEW_PLAN.md`; shipped / next work is tracked
-in `ROADMAP.md`.
+The loop is **capture → understand → drive**:
+
+- **Drive** — a chat box in the dashboard that spawns and steers a real `claude`
+  binary on a bound checkout. The composer is an RCE control plane, so it's
+  loopback-gated locally and admin-gated when hosted (`PLAN_AGENT_RUNTIME.md`,
+  `ONBOARDING.md`).
+- **Understand** — the AI-architecture **brain** (the `.md` network), the live
+  transcript + context meter, the prompt-unit reader, and outcome/evidence chips.
+- **Capture** — the `vbrt` CLI watches/parses your existing Claude & Codex sessions
+  and pushes a shareable bundle. This is the original local mode; the CLI reference
+  below still applies, but the hosted dashboard + Drive is where the product lives.
+
+Product strategy and priorities: `PRODUCT_STRATEGY.md`. Onboarding & credentials:
+`ONBOARDING.md`. Mobile port: `PLAN_MOBILE.md`. Detailed viewer planning:
+`PROJECT_VIEW_PLAN.md`. Shipped / next work: `ROADMAP.md`.
+
+## CLI / local capture mode
+
+The `vbrt` CLI is the local capture-and-push half of the loop (the original
+product). It's still how you ingest existing sessions and publish a bundle.
 
 ## Install
 

@@ -5,20 +5,25 @@ Display. Synthesis of two research passes (Claude + Codex) plus Mike's direction
 
 ## Positioning (the frame)
 
-Canonical strategy: `PRODUCT_STRATEGY.md`.
+Canonical strategy: `PRODUCT_STRATEGY.md` (reframed 2026-06-21).
 
-VibeRate is **not** "GitHub for agent conversations" (that's version control;
-wrong). It is the viewer and feedback layer for terminal-agent development:
-**publish, watch, review, and understand agent work**. It is about **getting
-feedback / collaborating** on agent work, **managing your project's AI brain**
-(the constitution + docs + memory the agent runs on), and **seeing how others
-manage theirs**. The internal product's potential: *a living history of how a
-person and their agents understood, discussed, and changed a project* — every
-claim traceable to the work that created it.
+VibeRate is a **mobile, agent-first IDE**: you **drive** coding agents through the
+project's **AI brain** (the constitution + docs + memory the agent runs on) and your
+prompts, and the Project view is where that happens — read *and* write. It is about
+**managing your project's brain** as the control surface, **driving** agents against
+it, and **understanding** the work they do (the prompt-unit reader + outcome rail).
+Getting feedback / seeing how others manage their brain is a later social layer, not
+the center. The durable potential is still *a living history of how a person and
+their agents understood, discussed, and changed a project* — but now you act on that
+history live, not just read it back.
 
-Category language is intentionally unsettled. "Agentic Code Viewer" and "Agentic
-Work Environment" / "AWE" are plausible, but the product should not depend on
-choosing the acronym before the workflow is obvious.
+> **Reframe note (2026-06-21):** this doc predates the Drive pivot, so parts below
+> still describe a **read-only** viewer. Drive made the Project view a control plane:
+> the brain isn't just visualized, it's the thing you steer the agent through, and the
+> reader's live head *is* the Drive composer (`DRIVE_CONVO_RECONCILIATION.md`). Read
+> "READ-ONLY" below as "the *captured/shared* view is read-only; the *driver's* view
+> writes." Where it says "VibeRate is not the git host, so no editing" — that's still
+> true of the hosted bundle, but Drive edits the bound **workspace checkout** directly.
 
 ## Core organizing principle
 
@@ -42,6 +47,33 @@ concept it changed — that link is the "living history."
   *Not* a separate diverging store reconciled to git (that's the sync mess). The
   agent-as-bridge ("VibeRate surfaces the edit, your agent applies it") is the
   near-free option when we want it.
+  - **Update (post-Drive):** the agent-as-bridge is no longer hypothetical — Drive
+    *is* the agent, editing the bound checkout directly. "Edit the brain from the UI"
+    now means "tell Drive to," and the brain⇄chat live link glows the touched node as
+    it happens (`PLAN_MOBILE.md`). The git-provider-integration / host-native-brain
+    options only matter for editing on a *shared/non-driver* view.
+
+---
+
+## Brain must fit *any* repo's `.md` structure (2026-06-21)
+
+The brain visualizer was tuned on this repo's conventions (`SEED.md`, `DEVLOG.md`,
+plan/roadmap docs). **Most devs don't use those.** For the brain to be useful to
+arbitrary projects it must infer structure from whatever `.md` network a repo
+actually has — headings, links, sizes, recency, role (constitution vs plan vs
+log vs memory) — without depending on our filenames. Concrete experiment on the
+backlog: load Mike's older vibe-coded projects and see how their doc structures map
+into the brain, then generalize the role/clustering heuristics from what's there.
+
+## "Completion %" is non-monotonic — don't headline it (2026-06-21)
+
+The plan/checklist completion view assumes a fixed denominator. But a large share of
+prompts are **discovery** prompts: they *find and document* undiscovered work, which
+correctly pushes "% complete" *down* (this doc-review prompt is itself an example).
+Keep the per-doc checklist parsing, but don't treat a single bar marching to 100% as
+the project's headline status. Pair it with **scope-discovered** and **work-in-flight**
+signals so the dashboard reads "here's what's known, what's in flight, and that known
+scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right metric?".
 
 ---
 

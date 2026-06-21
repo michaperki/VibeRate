@@ -2,16 +2,19 @@
 
 Canonical frame: see `PRODUCT_STRATEGY.md`.
 
-VibeRate is an **Agentic IDE / work environment** for terminal-agent development:
-it captures the work behind a repo — prompts, decisions, screenshots, diffs,
-commits, and brain docs — so a developer can watch, understand, and drive how the
-project gets built. A **social / learning layer** (feedback, sharing, discovery) sits
-on top as a later byproduct, not the core: the first job is making the single-developer
-capture → understand → drive loop frictionless and robust.
+VibeRate is a **mobile, agent-first IDE** for terminal-agent development: you
+**drive** coding agents from your phone — steering them through the project's brain
+(`.md` docs, plans, memory) and your prompts, managing context and the work in
+flight — and watch it land, without opening the code. It also captures the work
+(prompts, diffs, commits, screenshots, brain docs) so you can understand and review
+it. A **social / learning layer** (feedback, sharing, discovery) sits on top as a
+later byproduct, not the core: the first job is making the single-developer
+capture → understand → drive loop frictionless on a phone. Full framing reframed
+2026-06-21 in `PRODUCT_STRATEGY.md`.
 
-Working category remains open. "Agentic Code Viewer" and "Agentic Work
-Environment" are useful probes, but the current product copy should stay concrete:
-publish, watch, review, and understand agent work.
+Working category remains open. "Agentic Code Viewer" / "Agentic Work Environment"
+were useful probes; the center of gravity is now the **drive** verb (the agent
+runtime + control surface), with capture/understand as its read mode.
 
 ## Done (v0 — local + push foundations)
 
@@ -123,6 +126,49 @@ Social features all require a shared backend, so a thin deploy gates most of wha
      tool-history list. `getTicker` prefers the hook stream, falls back to the log.
      *Known limit:* per-step (per event), not a smooth per-token odometer — hooks are
      event-driven, and the CC spinner verbs ("Pondering…") aren't exposed.
+
+## Now — agent-first IDE priorities (2026-06-21 reframe)
+
+The pivot from observation tool to **mobile, agent-first IDE** (Drive at the center)
+puts a new cluster ahead of the old viewer/social backlog. These are the gates to
+anyone but the operator using VibeRate to actually drive.
+
+1. **Onboarding / credentials** *(top blocker)* — today Drive runs only on the
+   operator's Claude credentials, admin-gated (`agent.js`, `agentRoutes.js`), and a
+   new user has no path to "my agent is working." Two open forks, laid out in
+   `ONBOARDING.md`: (a) **whose Claude runs** — lean **operator-Claude + billing**
+   (user adds a payment method, rents our Claude), possibly alongside **BYO** key,
+   with BYO-OAuth-token gated on Anthropic-ToS clarity; (b) **new app vs existing
+   app** — today `workspaces.js` only **clones an existing repo**; we also need a
+   **scaffold-a-new-project** path. Decide the forks, then make first-run on a phone
+   one obvious flow.
+2. **Fleet / multi-agent session management** — the unit of work is shifting from
+   one session to *several agents in flight*. Today only the **most-recent** Drive
+   session per project resumes: the client keeps a single `vbrt_drive_active`
+   handle in `localStorage` (overwritten on each new session — `app.js`), and the
+   server registry is in-memory (cleared on restart), with no per-project index of
+   past sessions — only durable JSONL transcripts + the `adopt` fallback
+   (`agent.js`). Build a real **per-project session list** (resume any past Drive,
+   not just the last) and a way to see/switch agents running concurrently.
+3. **Mobile as the primary surface** — finish the responsive port (`PLAN_MOBILE.md`)
+   so brain, drive, reader, and rail are all first-class on a phone. Default
+   assumption flips: a feature is mobile unless it proves it needs desktop (dense
+   brain editing, side-by-side diffs are the likely desktop-only exceptions).
+4. **Context management as a feature** — beyond the context-fullness gauge, help the
+   driver act on the "dumb zone": surface when to **compact / branch / start fresh**
+   before quality degrades. Context is the scarce resource in agentic-first coding.
+5. **Brain that fits *any* repo** — make the brain useful for devs who don't use our
+   `SEED.md`/`DEVLOG.md` conventions; infer structure from whatever `.md` network a
+   repo actually has. Experiment: load Mike's older vibe-coded projects and see how
+   their doc structures map into the brain (`PROJECT_VIEW_PLAN.md`).
+6. **Rethink "completion %" as the headline metric** — it assumes a fixed
+   denominator, but **discovery prompts** legitimately *grow* known scope (push %
+   down). Keep it as one signal, treat it as non-monotonic, and pair it with
+   **scope-discovered** and **work-in-flight** signals (`PROJECT_VIEW_PLAN.md`).
+
+The items below (prompt-unit nav, outcome chips, hosted hardening, the existing
+onboarding self-view/auto-live work, robustness, live orchestration) remain valid
+and largely shipped — they're the read/understand half of the loop.
 
 ## Phase 2 — Social / learning layer (later — byproduct of the Agentic IDE, not the core)
 
@@ -276,9 +322,12 @@ Social features all require a shared backend, so a thin deploy gates most of wha
 
 ## Open questions / to weigh
 
-- **Hardening vs. social** — feedback is the differentiator, but anonymous hosted
-  ingest plus persistent storage is the operational risk. Do prompt navigation
-  and outcome chips now, then harden ingest/privacy before pushing discovery.
+- **Hardening vs. social** — *(reframed 2026-06-21: the differentiator is now the
+  drive runtime, not feedback)* — anonymous hosted ingest plus persistent storage
+  is still the operational risk for the read side; harden ingest/privacy before any
+  discovery push. But the bigger near-term operational surface is the **drive
+  control plane** (RCE): onboarding/credentials and multi-tenant gating
+  (`ONBOARDING.md`) gate it before non-operator users.
 - What's the right unit to "fork" — a whole project, a session, or a single prompt?
 - **Drive surface (the "drive" in capture → understand → drive)** ✅ shipped — a chat
   box that types to the agent *through* VibeRate, turning the watcher into a local

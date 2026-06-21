@@ -1,5 +1,11 @@
 # VibeRate — agent context
 
+VibeRate is a **mobile, agent-first IDE**: you Drive coding agents from your phone,
+steering them through the project's brain (`.md` docs + prompts) and watching the
+work — without opening the code. It began as an observation tool ("GitHub for agent
+conversations") and pivoted once Drive shipped; capture/sharing is now the byproduct.
+Frame in `PRODUCT_STRATEGY.md`.
+
 We are both building the dev tool VibeRate and using the devtool VibeRate to
 build VibeRate, so tolerate some level of meta.
 
@@ -11,13 +17,18 @@ test fixture.
 
 ## Where things live
 
-- `PRODUCT_STRATEGY.md` — product framing & current priorities
-- `PROJECT_VIEW_PLAN.md` — detailed viewer planning
-- `ROADMAP.md` — shipped / next work
-- `SEED.md` — the original genesis prompt (a brain node, kept as history)
-- `public/app.js` — the dashboard front-end (brain web, progress rings, live mode)
-- `src/` — the `vbrt` CLI, parsers, server, push/watch
+- `PRODUCT_STRATEGY.md` — product framing & current priorities (canonical; reframed 2026-06-21)
+- `ROADMAP.md` — shipped / next work (agent-first priority cluster at top)
+- `ONBOARDING.md` — onboarding & credentials forks (whose Claude runs; new vs existing app)
+- `PLAN_AGENT_RUNTIME.md` — Drive: the local agent runtime (the "drive" half)
+- `PLAN_DRIVE_WORKSPACES.md` — binding a project to a real checkout on the host
+- `DRIVE_CONVO_RECONCILIATION.md` — Drive + the reader are one conversation (live head / cooled history)
 - `PLAN_MOBILE.md` — the mobile-unified plan (responsive port; Variant A chat + brain header)
+- `PROJECT_VIEW_PLAN.md` — detailed viewer/brain planning
+- `AUTH.md` — web-account sign-in (separate from Claude credentials)
+- `SEED.md` — the original genesis prompt (a brain node, kept as history)
+- `public/app.js` — the dashboard front-end (brain web, drive chat, progress rings, live mode)
+- `src/` — the `vbrt` CLI, parsers, server, push/watch, and the agent runtime (`agent.js`, `agentRoutes.js`)
 
 ## Drive runtime env (read this if you were spawned by Drive)
 

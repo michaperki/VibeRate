@@ -1,5 +1,13 @@
 # VibeRate — Information Architecture
 
+> **Reframe note (2026-06-21):** this doc's "hosted/social model = your public
+> profile" framing is from the observation-tool era. VibeRate is now a mobile,
+> agent-first IDE (`PRODUCT_STRATEGY.md`); the public-profile / social reading is a
+> *later* layer, not the center. The **two-tier structure below (Workspace = you,
+> Project = a repo) still holds** — it's the right shape for both driving and
+> reviewing. Read "public profile" as "the future social surface," not today's
+> priority.
+
 Two tiers. The app is no longer "pick a project → see it"; there is a level above
 the project.
 

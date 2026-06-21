@@ -1,99 +1,148 @@
 # VibeRate — Product Strategy
 
 Status: **canonical frame** for near-term product and roadmap decisions.
+Reframed 2026-06-21 (the agent-first IDE pivot — see "How we got here" below).
 
 ## One-sentence frame
 
-VibeRate lets agents publish the work behind a repo — prompts, decisions,
-screenshots, diffs, commits, and brain docs — so developers and reviewers can
-see how the project was built and give feedback on the work as it happens.
+VibeRate is a **mobile, agent-first IDE**: you drive coding agents (Claude Code
+today, other harnesses later) from your phone, steer them through the project's
+**brain** (its `.md` docs, plans, and memory) and your **prompts**, manage their
+context and the work in flight, and watch it land — without ever needing to open
+the code.
 
-## Category, for now
+## How we got here (the pivot)
 
-The category name is still open. "GitHub for agent conversations" is useful as a
-shortcut, but it points at the wrong center of gravity: GitHub is version control,
-while VibeRate is the viewer and feedback surface for agentic development.
+VibeRate started as an **observation tool**: a viewer and feedback surface for
+terminal-agent work. We researched a developer's historical prompts, derived 12
+prompt archetypes, and built bespoke renderers for agent replies — the "Convos"
+half of the app. The thesis was "GitHub for agent conversations": publish, watch,
+review, discuss.
 
-The better analogy starts from the tool shift. Developers used to do most
-development inside an IDE such as VS Code or Neovim. Increasingly, the active
-work happens through terminal agents: Codex, Claude Code, and whatever comes
-next. That means the missing product is not another IDE. It is the environment
-around terminal-agent work: something that watches, explains, reviews, and shares
-what the agent and developer did.
+Then we shipped **Drive** — a chat box in the dashboard that spawns and steers a
+real `claude` binary on a bound checkout. That inverted the product. The read-only
+watcher became the *read* mode of a thing whose center is now **write**: starting,
+steering, and managing agents. Observation didn't disappear — it became the
+byproduct of driving, not the point.
 
-Possible names:
+So the category moved:
 
-- **Agentic Code Viewer** — clear, a little narrow.
-- **Agentic Work Environment** / **AWE** — broader, a little too coined for now.
-- **Agent Work Viewer** — plain, probably closest to current reality.
+- **Was:** an agent *work viewer* — publish and review what already happened.
+- **Is:** an agent *work environment* / **mobile agent-first IDE** — where the work
+  actually happens, control surface and all, with a phone as a first-class client.
 
-Decision: do not force the acronym yet. Keep the product copy concrete: publish,
-watch, review, and understand agent work.
+The old "viewer + feedback + sharing/discovery" surface is now a **later social /
+learning layer**, not the core (see `ROADMAP.md` Phase 2). The first job is making
+the single-developer **capture → understand → drive** loop frictionless on a phone.
 
-## Product thesis
+## Product thesis (agentic-first coding)
 
-The atomic object is the **prompt unit**: before state -> prompt -> agent work ->
-after state. VibeRate should make prompt units easy to scan, deep-link, evaluate,
-and discuss.
+The premise of agentic-first coding is that **you mostly don't read code anymore.**
+The leverage moved up a level:
 
-The durable context is the **project brain**: the repo docs, memory, decisions,
-plans, and architecture notes that shape what the agent does. VibeRate should
-show how the brain changes over time and which prompts caused those changes.
+- **The control surface is the brain + the prompt, not the source.** The `.md`
+  files — `CLAUDE.md`, `SEED.md`, plan/roadmap docs, memory — are where you actually
+  steer the agent. VibeRate's brain web makes that control surface legible and
+  navigable; the prompt is the verb that acts on it. Code is an artifact the agent
+  produces; the brain and the prompt are what you touch.
+- **Context is the scarce resource.** An agent gets dumber as its window fills (the
+  "dumb zone," ~past 75%). Surfacing context fullness, and helping a driver decide
+  *when to compact, branch, or start fresh*, is core IDE work — not a nice-to-have
+  chip.
+- **You run a fleet, not a session.** The unit of work is shifting from one
+  conversation to *several agents in flight at once* on the same or different repos.
+  Starting, parking, resuming, and re-entering the right one is the real ergonomic
+  problem (today only the most-recent Drive session resumes — see `ROADMAP.md`;
+  fixing that is a now-priority).
+- **The atomic object stays the prompt unit** (`before → prompt → agent work →
+  after`), and the **durable context stays the project brain.** Both survive the
+  pivot; what changed is that you now *act* on them live, not just read them back.
 
-The social loop is feedback, not discovery theater. The first social feature
-should help someone comment on a project or a specific prompt card. Forks,
-trending, and broad discovery come after the review loop proves useful.
+## What "mobile, agent-first" actually demands
+
+Drive made the phone the obvious client: you kick off and babysit agents from
+anywhere, and the work runs on the host (the Fly volume), not the device. That sets
+the bar:
+
+- **Mobile is the primary surface, not a port.** Nearly everything belongs on the
+  phone: the brain, the live transcript + composer, context/progress, the rail.
+  Reserve desktop only for genuinely space-hungry tasks (e.g. dense brain editing,
+  side-by-side diffs) — assume mobile-first until a feature proves it can't be.
+- **The conversation is the home.** Drive and the reader are the *same* object —
+  the live head and the cooled history of one JSONL (`DRIVE_CONVO_RECONCILIATION.md`).
+  On mobile that collapses into one vertical scroll with a brain header strip
+  (`PLAN_MOBILE.md`, Variant A).
+- **Driving is an RCE control plane.** Merging the read and write surfaces must
+  never merge their trust boundaries: the composer is admin/loopback-gated; the
+  reader is public/shareable.
+
+## Onboarding & business model (open decision — `ONBOARDING.md`)
+
+The hardest unsolved product question is how a *new* user gets to "my agent is
+working" on their phone. Two sub-questions, both open:
+
+1. **Whose Claude runs the agent?** Today Drive runs on the operator's
+   credentials, admin-gated (`agent.js`). For real users we lean toward
+   **operator-Claude + billing** (the user adds a payment method and rents our
+   Claude) as the clean, ToS-safe path, possibly alongside **BYO** (user supplies
+   their own key/login) for faster time-to-market. BYO an OAuth/subscription token
+   risks Anthropic's ToS and needs legal clarity before we ship it.
+2. **New app vs. existing app.** Today Drive only **clones an existing repo**
+   (`workspaces.js`). We also need a **start-from-scratch** path (scaffold a new
+   project + brain) for users without a repo yet.
+
+These are genuine forks, not yet decided — `ONBOARDING.md` lays out the options and
+tradeoffs. Do not invent a default in product copy until they're picked.
+
+## Is completion % the right metric?
+
+Probably not as the headline number. Completion percentage assumes a fixed
+denominator, but a large share of prompts are **discovery** prompts — they *find*
+and document undiscovered work, which should make "% complete" go *down*, not up.
+(This very doc-review prompt is an example: it uncovers work.) Keep the metric as
+*one* signal, but treat it as non-monotonic and pair it with **scope discovered**
+and **work-in-flight** signals. The honest dashboard answer is "here's what's known,
+what's in flight, and that the known scope is still growing," not a single bar
+marching to 100%.
 
 ## Immediate priority order
 
-1. **Prompt-unit navigation + deep links.** The left rail should make individual
-   prompt units first-class, with sessions available as a secondary view.
-2. **Auto-derived outcome chips.** Every prompt should show cheap, scannable
-   evidence from data we already capture: files changed, commits produced, brain
-   docs changed, commands run, screenshot attached, context-window fullness, and
-   follow-up type. (Command pass/fail is intentionally excluded until real
-   test/diff capture exists — guessing it from exit-code text was noise.)
-3. **Hosted hardening + privacy preview.** Before broader sharing, uploads need
-   rate/size limits, payload validation, owner/project quotas, admin/delete
-   tools, backups/export, and a dry-run or preview that shows exactly what will
-   be published.
+1. **Onboarding / credentials.** Pick the credential-sourcing model and the
+   new-vs-existing-app flow, then make first-run on a phone a single, obvious path
+   (`ONBOARDING.md`). This is the gate to anyone but the operator using Drive.
+2. **Fleet / session management.** Make every past Drive session per project
+   resumable (not just the most recent), and make running several agents at once
+   legible. Today's single `vbrt_drive_active` handle + in-memory registry is the
+   blocker.
+3. **Mobile as the primary surface.** Finish the responsive port (`PLAN_MOBILE.md`)
+   so the brain, drive, reader, and rail are all first-class on a phone.
+4. **Context management as a feature.** Surface dumb-zone risk and offer
+   compact/branch/fresh affordances, not just a gauge.
+5. **Brain that fits *any* repo.** Make the brain useful for devs who don't use our
+   `SEED.md`/`DEVLOG.md` conventions — infer structure from whatever `.md` network a
+   repo has (`PROJECT_VIEW_PLAN.md`).
 
-## What to build before more social
+## What to delay (the old social core, now a byproduct)
 
-- A `Sessions | Prompts` rail, defaulting to prompts.
-- Prompt rows with agent/source color, session identity color, timestamp, intent
-  tag, and outcome chips.
-- Stable prompt-card permalinks.
-- Live mode where new prompt units slide into the rail.
-- Outcome chips from existing captured data before adding more artifact families.
-- Privacy controls that are visible in the hosted dashboard, not only the CLI.
-
-## What to delay
-
-- Forking until the product knows whether the fork unit is a prompt, session, or
-  whole project.
-- Trending/discovery until there is a real feedback loop.
-- Heavy storage migration for its own sake. Do the minimum hardening now, then
-  move comments/ratings/social data to SQLite or Postgres when that behavior
-  becomes real.
+- **Feedback / comments / ratings, sharing controls, discovery/trending, forks.**
+  Valuable as a *learning* layer once the IDE loop is frictionless and
+  battle-tested — not before. First pass of voting shipped; the rest waits.
+- **Heavy storage migration** for its own sake. Minimum hardening now; move to a DB
+  when real social/multi-user behavior demands it.
 
 ## Test spine
 
-Add focused tests before the next schema or social expansion:
+Add focused tests before the next schema or runtime expansion:
 
-- Claude parser.
-- Codex parser.
-- Redaction.
-- Evidence binding.
-- Prompt-unit extraction.
-- Activity attribution.
-- Hosted visibility and private/public behavior.
-- `pushBundle` endpoint and token selection.
+- Claude parser / Codex parser / redaction.
+- Prompt-unit extraction, evidence binding, activity attribution.
+- Hosted visibility and private/public behavior; `pushBundle` token selection.
+- **Drive runtime:** session start/resume/adopt across a redeploy, the loopback /
+  admin gate, workspace clone status, and the ownership-lease single-writer rule.
 
 ## Demo target
 
-Make one canonical public demo that shows the full loop: project brain graph,
-live history and graveyard nodes, prompt-unit chain, before/after screenshots,
-outcome chips, and comment/feedback affordances. The Tasky/2048 experiments are
-good source material because they already exercised brain docs, live capture,
-screenshots, and prompt-by-prompt development.
+One canonical public demo of the full loop **driven live from a phone**: kick off an
+agent against a real repo, watch the brain glow as it edits docs, see the context
+meter and live transcript, then the cooled prompt-unit history with outcome chips
+and evidence. VibeRate building VibeRate is the natural fixture.
