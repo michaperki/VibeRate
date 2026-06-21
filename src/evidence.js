@@ -158,6 +158,17 @@ function ensureGitignore(cwd) {
   }
 }
 
+// In a Drive container the runtime injects this turn's rail session id as
+// VBRT_DRIVE_SESSION_ID (see agent.js childEnv). Prefer it: it's the exact bound
+// conversation, and it sidesteps resolveActiveSession's ~/.claude scan, which finds
+// nothing on the Fly volume where Drive's transcript actually lives. Null outside
+// Drive, or on a session's first turn before the id is known (the turn-end ingest
+// sweep binds those).
+function driveSessionFromEnv() {
+  const id = process.env.VBRT_DRIVE_SESSION_ID;
+  return id ? { id, source: 'claude' } : null;
+}
+
 // The session the agent is "in": among this repo's logs, the one whose file was
 // most recently written (the turn that triggered this work). Parses just that one
 // file so the id matches exactly what the bundle stores — codex ids aren't the
@@ -367,7 +378,9 @@ export async function recordShot(cwd, { target, image, label = null, note = '', 
     throw new Error('nothing to capture: pass a URL, an image path, or --image <file>');
   }
 
-  const sess = session ? { id: session, source: null } : await resolveActiveSession(cwd);
+  const sess = session
+    ? { id: session, source: null }
+    : driveSessionFromEnv() || await resolveActiveSession(cwd);
   const ts = new Date().toISOString();
   const id = `ev-${ts.replace(/[:.]/g, '-')}-${Math.random().toString(36).slice(2, 6)}`;
   const rec = {

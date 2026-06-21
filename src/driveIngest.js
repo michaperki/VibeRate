@@ -18,7 +18,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseClaude, peekClaude } from './parsers.js';
 import { claudeConfigDir } from './agent.js';
-import { ingestDriveSession } from './storage.js';
+import { ingestDriveSession, getEvidence, saveEvidence } from './storage.js';
+import { readEvidence, evidenceDir } from './evidence.js';
 
 // Find the per-session JSONL for `claudeSessionId`. Claude stores it at
 // <config>/projects/<cwd-hash>/<sessionId>.jsonl; we know the id but not the
@@ -52,7 +53,44 @@ export async function ingestDriveTurn({ projectSlug, claudeSessionId }) {
   const file = findSessionJsonl(claudeSessionId);
   if (!file) return null;
   const session = await parseClaude(file);
-  return ingestDriveSession(projectSlug, session);
+  const result = ingestDriveSession(projectSlug, session);
+  forwardTurnEvidence(projectSlug, session);
+  return result;
+}
+
+// Fold the workspace's author-captured evidence (`vbrt shot` artifacts) into the
+// bound project at turn end. Evidence still lands the old way — a JSON sidecar under
+// the workspace's .vbrt/evidence/ — and the old watch/push pipeline was the only
+// thing that ever swept it to the server. Hosted Drive has no watcher, so an in-turn
+// screenshot never reached the rail; worse, a first turn's shot didn't even know its
+// own session id (the ~/.claude scan finds nothing on the Fly volume) and saved
+// `session: null`, which attachEvidence drops. We close that here, the same way we
+// close the transcript gap: when the turn ends we DO know the session, so we bind any
+// still-unbound shots from this session's window to it, persist that back to the
+// sidecar (so a later turn can't re-claim them), and union the workspace's evidence
+// into the project's file — saveEvidence overwrites wholesale, so we pass the full set.
+function forwardTurnEvidence(projectSlug, session) {
+  const cwd = session.cwd;
+  if (!cwd) return;
+  const fileId = `${session.source}-${session.id}`; // the id the rail keys a session by
+  let records;
+  try { records = readEvidence(cwd); } catch { return; }
+  if (!records.length) return;
+
+  const startedAt = session.startedAt || null;
+  for (const rec of records) {
+    if (rec.session) continue; // already bound — env-stamped at shot time, or a prior turn
+    if (startedAt && rec.ts && rec.ts < startedAt) continue; // predates this session → not ours
+    rec.session = { id: fileId, source: session.source };
+    try {
+      fs.writeFileSync(path.join(evidenceDir(cwd), `${rec.id}.json`), JSON.stringify(rec));
+    } catch { /* best-effort: the in-memory copy still forwards below */ }
+  }
+
+  const byId = new Map();
+  for (const e of getEvidence(projectSlug)) byId.set(e.id, e); // prior turns' shots
+  for (const e of records) byId.set(e.id, e); // this workspace's full set, now bound
+  saveEvidence(projectSlug, [...byId.values()], projectSlug);
 }
 
 // Claude stores a workspace's sessions under projects/<encoded-cwd>/, where the

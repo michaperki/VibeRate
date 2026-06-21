@@ -58,7 +58,11 @@ burned turns rediscovering these facts; don't.
   target to loopback so the admin-gated preview route doesn't 403 your headless capture.
   No `vbrt doctor --fix` dance needed. (If you're in an *old* container from before that
   redeploy, the prior workarounds in memory still apply.) Last resort: register a file
-  you produced yourself with `vbrt shot ./shot.png`.
+  you produced yourself with `vbrt shot ./shot.png`. **`--label` only takes `before` or
+  `after`** — not an arbitrary string. The shot **auto-attaches to your prompt card in
+  the Convos rail at turn-end — no `vbrt push`** (Drive binds + ingests evidence itself
+  now; `DRIVE_CONVO_INGEST_GAP.md`). So a shot is the way to *show the human in the
+  conversation* what you built, distinct from handing them a live preview URL.
 - **`prototypes/` is gitignored at any depth** — a prototype under `public/prototypes/`
   won't stage. Use a non-ignored path (e.g. `public/proto/`) if it must be committed,
   or just preview it (above) and skip the commit.

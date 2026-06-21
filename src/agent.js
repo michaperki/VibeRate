@@ -250,6 +250,15 @@ function childEnv(session) {
     const port = process.env.PORT || 8080;
     env.VBRT_PREVIEW_LOOPBACK = `http://127.0.0.1:${port}/preview/${session.projectSlug}`;
   }
+  // When we already know this turn's claude session id (every resumed/follow-up
+  // turn — it's set from the prior turn's init event), hand it to the child as the
+  // rail's session id so an in-turn `vbrt shot` binds its artifact to *this*
+  // conversation directly, instead of scanning ~/.claude — a path a Drive container
+  // on the Fly volume doesn't even have. A brand-new session's first turn doesn't
+  // know the id yet at spawn; driveIngest's turn-end sweep binds those after the fact.
+  if (session && session.claudeSessionId) {
+    env.VBRT_DRIVE_SESSION_ID = `claude-${session.claudeSessionId}`;
+  }
   return env;
 }
 

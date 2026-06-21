@@ -168,6 +168,43 @@ as a provisional card that cools in place**, without leaving the Drive view:
 - **Trust boundary untouched.** This is pure rail rendering off data the read APIs
   already return; the composer/RCE gate is unchanged.
 
+### Also shipped (2026-06-21) — the *evidence* half of the same gap
+
+The bridge above closed the **transcript** gap but left a parallel one for
+**evidence** (`vbrt shot` artifacts): they still rode the dead watch/push pipeline.
+A shot in a hosted Drive turn failed two ways — same root cause, "built for an
+external observer":
+
+1. **It couldn't learn its own session.** `recordShot` binds via
+   `resolveActiveSession`, which scans `~/.claude` — a path that doesn't exist on
+   the Fly volume where Drive's transcript actually lives. So the artifact saved
+   `session: null`, which `attachEvidence` drops.
+2. **It never reached the server.** Only `vbrt watch`/`push` ever swept
+   `.vbrt/evidence/` into a project; nothing runs them server-side. The shot sat in
+   the workspace forever.
+
+Closed the same event-triggered way as the transcript:
+
+- **`src/agent.js`** — `childEnv` injects `VBRT_DRIVE_SESSION_ID` (the rail's
+  `claude-<id>`) whenever the turn's session id is known (every resumed/follow-up
+  turn). An in-turn `vbrt shot` binds to *this* conversation directly, no scan.
+- **`src/evidence.js`** — `recordShot` prefers that env id (`driveSessionFromEnv`)
+  over the `~/.claude` scan.
+- **`src/driveIngest.js`** — `ingestDriveTurn` now also runs `forwardTurnEvidence`:
+  at turn end (when we *do* know the session) it binds any still-unbound shots from
+  this session's time window, persists the binding back to the sidecar so a later
+  turn can't re-claim them, and unions the workspace's evidence into the project so
+  `attachEvidence` places each on its prompt unit. This covers a session's *first*
+  turn, where the id wasn't known at spawn.
+
+Net: a screenshot taken inside Drive now appears on its prompt card in the Convos
+rail with **no `vbrt push`** — capture and delivery are both watcher-free. The
+broader takeaway: watch/push are the external-observer regime; Drive replaces them
+with server-owned ingest, and evidence was the last subsystem still on the old
+rails. (`vbrt push` is retained for now because it is still the only path that
+*creates* a project on the server — `ingestDriveSession` upserts into an existing
+one. A Drive-native create path is the prerequisite before watch/push can retire.)
+
 ### Original known limit (now resolved by the above)
 
 Ingest lands the convo in the *stored* manifest; it did not yet live-merge into

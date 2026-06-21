@@ -17,6 +17,14 @@
 >   browser, admin-gated preview 403). All three are fixed at the root (`Dockerfile` +
 >   `agentRoutes.js`/`agent.js`/`evidence.js`); effective after redeploy. Detail in
 >   **§ Drive-container capture** below.
+> - **✅ Fixed (2026-06-21) — capture *delivery* inside Drive.** The three fixes above
+>   made the *capture* work, but the artifact still never reached the Convos rail: a
+>   Drive shot saved `session: null` (the `~/.claude` scan finds nothing on the Fly
+>   volume) and only the dead `vbrt watch`/`push` path ever swept `.vbrt/evidence/` to
+>   the server. Now `childEnv` injects `VBRT_DRIVE_SESSION_ID` so an in-turn shot
+>   self-binds, and `driveIngest.forwardTurnEvidence` binds+forwards evidence at
+>   turn-end — so a shot lands on its prompt card with **no push**. Detail in
+>   `DRIVE_CONVO_INGEST_GAP.md § the evidence half of the same gap`.
 > - **Deprioritized — the rest of the outcome rail** (provenance, follow-up
 >   classification, prompt-quality signals, multi-viewport, rail-row pill, rollup) is
 >   *read-mode* polish. It belongs to the later social/learning layer
