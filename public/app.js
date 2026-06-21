@@ -3719,6 +3719,7 @@ function renderDriveView() {
   driveEndTurn();            // clear any leaked working-timer from a prior session
   state._drivePending = [];  // fresh transcript → no tool calls awaiting a result
   state._driveTurnBlock = null; // fresh transcript → no current turn block yet
+  state._driveQueue = [];    // fresh view → no messages waiting on the current turn
   // Flipped flow: the toolbar + composer form a sticky stack at the TOP; the
   // transcript scrolls beneath it with the newest turn first (driveStartTurnBlock
   // prepends). So you type at the top and the latest reply appears right below the box.
@@ -3733,7 +3734,7 @@ function renderDriveView() {
               <span class="dv-pill" id="dv-pill">—</span>
               ${(() => { const m = d.permissionMode || (state.driveActive && state.driveActive.permissionMode) || null; return m ? `<span class="dv-mode${m === 'bypassPermissions' ? ' danger' : ''}" title="Permission mode — ${esc(m)}">${esc(driveModeLabel(m))}</span>` : ''; })()}
               <span class="dv-ctx hidden" id="dv-ctx" title="context window used"></span>
-              <code>${esc(d.cwd || '')}</code>
+              ${(() => { const p = d.cwd || ''; const base = p.split('/').filter(Boolean).pop() || p; return `<code class="dv-cwd" title="${esc(p)}">${esc(base)}</code>`; })()}
               <span class="dim-note">claude: <code id="dv-cid">${esc(d.claudeSessionId || '…')}</code></span>
             </div>
           </div>
@@ -3745,6 +3746,7 @@ function renderDriveView() {
             <span class="dv-status-label" id="dv-status-label">Working…</span>
             <span class="dv-status-meta" id="dv-status-meta"></span>
           </div>
+          <div id="dv-queued" class="dv-queued hidden"></div>
           <textarea id="dv-followup" placeholder="Reply to the agent…  (⌘/Ctrl+Enter to send)"></textarea>
           <div class="dv-actions">
             <button id="dv-send">Send</button>
@@ -3784,10 +3786,63 @@ async function driveSend() {
   const ta = el('#dv-followup');
   const prompt = ta && ta.value.trim();
   if (!prompt || !state.drive) return;
+  // Mid-turn the server rejects a new message ("session is busy"). Rather than
+  // block the composer, hold the message and deliver it the moment the turn
+  // settles (driveFlushQueue, called from driveSetStatus on idle).
+  const busy = driveBusy();
+  if (busy) {
+    (state._driveQueue = state._driveQueue || []).push(prompt);
+    ta.value = '';
+    renderDriveQueue();
+    return;
+  }
   try {
     await drivePost('/sessions/' + state.drive.id + '/message', { prompt });
     ta.value = '';
   } catch (e) { driveBanner(e.message, 'bad'); }
+}
+
+function driveBusy() {
+  const s = state.drive && state.drive.status;
+  return s === 'working' || s === 'starting';
+}
+
+// Deliver the next queued message once the agent is idle. Each delivery kicks off
+// a new turn (status → working), so the next idle flushes the one after it — the
+// queue drains one message per turn, in order. A guard prevents a double-send if
+// driveSetStatus fires 'idle' twice before the post's working-status echoes back.
+async function driveFlushQueue() {
+  if (state._driveFlushing || driveBusy() || !state.drive) return;
+  const q = state._driveQueue;
+  if (!q || !q.length) return;
+  state._driveFlushing = true;
+  const prompt = q.shift();
+  renderDriveQueue();
+  try {
+    await drivePost('/sessions/' + state.drive.id + '/message', { prompt });
+  } catch (e) {
+    driveBanner(e.message, 'bad');
+    q.unshift(prompt);      // delivery failed → keep it queued, try again next idle
+    renderDriveQueue();
+  } finally {
+    state._driveFlushing = false;
+  }
+}
+
+// Paint the pending-message chips above the composer. Each row can be cancelled
+// before it's delivered.
+function renderDriveQueue() {
+  const box = el('#dv-queued');
+  if (!box) return;
+  const q = state._driveQueue || [];
+  if (!q.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = `<div class="dv-queued-h">Queued · sends when the turn finishes</div>`
+    + q.map((m, i) => `<div class="dv-queued-row"><span class="dv-queued-text">${esc(m)}</span><button class="dv-queued-x" data-unqueue="${i}" title="Remove from queue">×</button></div>`).join('');
+  box.querySelectorAll('[data-unqueue]').forEach((b) => b.addEventListener('click', () => {
+    state._driveQueue.splice(+b.dataset.unqueue, 1);
+    renderDriveQueue();
+  }));
 }
 
 function wireDriveBackDash() {
@@ -3982,13 +4037,17 @@ function driveSetStatus(status) {
   if (pill) { pill.textContent = status; pill.className = 'dv-pill ' + status; }
   const send = el('#dv-send'); const stop = el('#dv-stop');
   const busy = status === 'working' || status === 'starting';
-  if (send) send.disabled = busy;
+  // Keep Send enabled while busy so a follow-up can be queued mid-turn; it just
+  // relabels to "Queue" to signal the message will land after the current turn.
+  if (send) { send.disabled = false; send.textContent = busy ? 'Queue' : 'Send'; }
   if (stop) stop.disabled = !busy;
   // The composer footer carries the "Claude is working…" indicator (spinner +
   // live activity label + elapsed + token estimate). Show it while a turn is in
   // flight; hide it the moment the turn settles.
   if (busy) { driveStartTurn(); driveStatusLabel(status === 'starting' ? 'Starting…' : 'Working…'); }
   else driveEndTurn();
+  // Turn settled → deliver the next queued message (no-op if the queue is empty).
+  if (status === 'idle') driveFlushQueue();
 }
 
 // ---- working indicator (elapsed + live token estimate) ----

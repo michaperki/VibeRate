@@ -1186,6 +1186,16 @@ body.is-mobile .dv-copy { opacity: .75; }
 .dv-ctx { padding: 2px 8px; border-radius: 99px; font: 600 11px ui-monospace, Menlo, monospace; background: #15202e; color: var(--accent); }
 .dv-ctx.hot { background: #2a2410; color: #e7b85b; }
 .dv-ctx.hidden { display: none; }
+/* Just the workspace basename in the header; full path on hover. */
+.dv-cwd { cursor: default; }
+/* Pending follow-ups, held mid-turn and delivered when the turn settles. */
+.dv-queued { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.dv-queued.hidden { display: none; }
+.dv-queued-h { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.dv-queued-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--panel, transparent); }
+.dv-queued-text { flex: 1; min-width: 0; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-queued-x { flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; min-width: 26px; min-height: 26px; cursor: pointer; font: inherit; line-height: 1; }
+.dv-queued-x:hover { border-color: var(--accent); color: var(--text); }
 .dv-ev.user { background: var(--user); border-color: #2a3550; }
 .dv-ev.user .dv-who { color: var(--accent); }
 .dv-ev.assistant { background: var(--assistant); }
