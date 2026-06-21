@@ -3823,7 +3823,7 @@ function driveHistoryHtml(project, sessions) {
   if (!sessions) sessions = listDriveSessions(project);
   if (!sessions.length) return '';
   const active = state.driveActive && state.driveActive.claudeSessionId;
-  const rows = sessions.map((s) => {
+  const rowHtml = sessions.map((s) => {
     const title = s.title
       ? esc(s.title.length > 90 ? s.title.slice(0, 89) + '…' : s.title)
       : '<span class="dim-note">(no first message captured)</span>';
@@ -3848,8 +3848,17 @@ function driveHistoryHtml(project, sessions) {
        </div>
        ${forget}
      </div>`;
-  }).join('');
-  return `<div class="dv-history"><div class="dv-history-h">Past sessions <span class="dim-note">· resume any of them</span></div>${rows}</div>`;
+  });
+  // The list grows without bound, so show only the most recent few and tuck the
+  // rest behind a native <details> toggle. Hidden rows stay in the DOM, so the
+  // resume/forget wiring (which queries all of #conversation) still finds them.
+  const SHOWN = 5;
+  const head = rowHtml.slice(0, SHOWN).join('');
+  const rest = rowHtml.slice(SHOWN);
+  const more = rest.length
+    ? `<details class="dv-history-more"><summary>${rest.length} older session${rest.length === 1 ? '' : 's'}</summary>${rest.join('')}</details>`
+    : '';
+  return `<div class="dv-history"><div class="dv-history-h">Past sessions <span class="dim-note">· resume any of them</span></div>${head}${more}</div>`;
 }
 
 // After the prompt form paints (from the instant localStorage list), pull the

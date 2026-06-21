@@ -1126,6 +1126,13 @@ body.is-mobile .dvb-stage { height: 320px; }
 }
 .dv-hist-resume { color: var(--accent); font-size: 15px; }
 .dv-hist-resume:hover, .dv-hist-forget:hover { border-color: var(--accent); color: var(--text); }
+/* Collapse the long tail of older sessions behind a toggle. */
+.dv-history-more > summary { cursor: pointer; font-size: 11px; color: var(--muted); padding: 6px 4px 10px; list-style: none; user-select: none; }
+.dv-history-more > summary::-webkit-details-marker { display: none; }
+.dv-history-more > summary::before { content: '▸ '; }
+.dv-history-more[open] > summary::before { content: '▾ '; }
+.dv-history-more[open] > summary { color: var(--text); }
+.dv-history-more > summary:hover { color: var(--text); }
 
 .dv-pill { padding: 2px 9px; border-radius: 99px; font: 600 11px ui-monospace, Menlo, monospace; }
 .dv-pill.working { background: #2a2410; color: #e7b85b; }
