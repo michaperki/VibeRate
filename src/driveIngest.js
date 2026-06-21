@@ -16,7 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseClaude } from './parsers.js';
+import { parseClaude, peekClaude } from './parsers.js';
 import { claudeConfigDir } from './agent.js';
 import { ingestDriveSession } from './storage.js';
 
@@ -53,6 +53,55 @@ export async function ingestDriveTurn({ projectSlug, claudeSessionId }) {
   if (!file) return null;
   const session = await parseClaude(file);
   return ingestDriveSession(projectSlug, session);
+}
+
+// Claude stores a workspace's sessions under projects/<encoded-cwd>/, where the
+// folder name is the absolute cwd with every non-alphanumeric run collapsed to a
+// single dash (e.g. /data/workspaces/viberate → -data-workspaces-viberate). This
+// encoding is deterministic, so we can name the folder directly instead of
+// scanning every project folder.
+function encodeCwdFolder(cwd) {
+  return String(cwd).replace(/[^A-Za-z0-9]+/g, '-');
+}
+
+// List every Drive session ever run in a project's workspace by reading the
+// durable on-disk transcripts under the config dir — NOT the in-memory session
+// Map (which a redeploy wipes) and NOT the browser's localStorage log (which is
+// per-device). This is the cross-device, server-side session index the fleet work
+// needs: a session started on a phone shows up when you open the project on a
+// laptop. Each entry is keyed by the durable claudeSessionId so it re-adopts off
+// the same transcript the per-browser log already resumes from.
+//
+// We peek each JSONL for its first prompt (title) and turn count, and stat it for
+// last-active (mtime). Sessions with no typed user turn (an aborted start) are
+// dropped — they have nothing to resume. Sorted newest-active first.
+export async function listWorkspaceSessions(cwd) {
+  if (!cwd) return [];
+  const dir = path.join(claudeConfigDir(), 'projects', encodeCwdFolder(cwd));
+  let files;
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+  } catch {
+    return []; // no sessions in this workspace yet (folder absent)
+  }
+  const out = [];
+  for (const f of files) {
+    const file = path.join(dir, f);
+    let stat;
+    try { stat = fs.statSync(file); } catch { continue; }
+    let peek;
+    try { peek = await peekClaude(file); } catch { continue; }
+    if (!peek || !peek.userTurns) continue; // nothing typed → nothing to resume
+    out.push({
+      claudeSessionId: f.replace(/\.jsonl$/, ''),
+      title: peek.preview || null,
+      userTurns: peek.userTurns,
+      startedAt: peek.startedAt ? Date.parse(peek.startedAt) || null : null,
+      lastAt: Math.round(stat.mtimeMs),
+      cwd: peek.cwd || cwd,
+    });
+  }
+  return out.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
 }
 
 // Load the saved transcript for a claude session id, parsed into the normalized

@@ -1119,6 +1119,7 @@ body.is-mobile .dvb-stage { height: 320px; }
 .dv-hist-main { flex: 1; min-width: 0; }
 .dv-hist-title { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dv-hist-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.dv-hist-run { color: var(--accent, #6ee7b7); font-weight: 600; }
 .dv-hist-resume, .dv-hist-forget {
   flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--muted);
   border-radius: 6px; min-width: 30px; min-height: 30px; cursor: pointer; font: inherit; line-height: 1;

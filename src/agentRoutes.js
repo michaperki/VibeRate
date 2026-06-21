@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import { startSession, adoptSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk } from './agent.js';
 import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
+import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
 
 // Local guard: refuse any request whose TCP peer isn't loopback. We deliberately
@@ -121,6 +122,30 @@ export function mountAgent(app, opts = {}) {
       const { repo, branch } = req.body || {};
       const ws = await startClone(req.params.slug, { repo, branch });
       res.json(ws);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Cross-device Drive session index: every session ever driven in this project's
+  // workspace, read from the durable on-disk transcripts (driveIngest), not the
+  // in-memory Map or any one browser's localStorage. This is what makes a session
+  // started on a phone resumable from a laptop. We annotate each with its live
+  // status (id + status) when the in-memory session still exists this process, so
+  // the UI can route a still-running one straight back instead of re-adopting.
+  app.get('/api/agent/workspace/:slug/sessions', guard, async (req, res) => {
+    try {
+      const cwd = resolveProjectCwd(req.params.slug);
+      if (!cwd) return res.json({ sessions: [] }); // workspace not set up yet
+      const live = new Map();
+      for (const s of listSessions()) {
+        if (s.claudeSessionId) live.set(s.claudeSessionId, s);
+      }
+      const sessions = (await listWorkspaceSessions(cwd)).map((s) => {
+        const l = live.get(s.claudeSessionId);
+        return l ? { ...s, liveId: l.id, status: l.status } : s;
+      });
+      res.json({ sessions });
     } catch (err) {
       fail(res, err);
     }

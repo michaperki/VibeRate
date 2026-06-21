@@ -3455,6 +3455,59 @@ function listDriveSessions(project) {
 function forgetDriveSession(cid) {
   writeDriveSessions(readDriveSessions().filter((s) => s.claudeSessionId !== cid));
 }
+
+// Cross-device session index (server-side). The localStorage log above only knows
+// sessions this browser drove; the server reads the durable on-disk transcripts in
+// the project's workspace, so a session started on a phone is listed here too.
+// Cached per-slug so resume/forget can resolve a row that isn't in localStorage.
+async function fetchWorkspaceSessions(slug) {
+  if (!slug) return [];
+  try {
+    const j = await driveApi('/workspace/' + encodeURIComponent(slug) + '/sessions');
+    return Array.isArray(j.sessions) ? j.sessions : [];
+  } catch { return []; } // not set up / not driveable — fall back to the local log only
+}
+// Merge the per-browser log with the server index, keyed by claudeSessionId. Local
+// carries the typed title + chosen permissionMode; the server carries liveId/status
+// and catches sessions this device never saw. Newest-active wins on overlap.
+function mergeDriveSessions(local, remote, slug) {
+  const by = new Map();
+  for (const r of remote || []) {
+    by.set(r.claudeSessionId, {
+      claudeSessionId: r.claudeSessionId,
+      project: slug || null,
+      cwd: r.cwd || null,
+      permissionMode: null,
+      title: r.title || null,
+      startedAt: r.startedAt || null,
+      lastAt: r.lastAt || r.startedAt || 0,
+      liveId: r.liveId || null,
+      status: r.status || null,
+      inLocal: false,
+    });
+  }
+  for (const l of local || []) {
+    const ex = by.get(l.claudeSessionId);
+    if (ex) {
+      ex.inLocal = true;
+      if (l.title) ex.title = l.title;
+      if (l.permissionMode) ex.permissionMode = l.permissionMode;
+      if (l.cwd && !ex.cwd) ex.cwd = l.cwd;
+      ex.lastAt = Math.max(ex.lastAt || 0, l.lastAt || 0);
+    } else {
+      by.set(l.claudeSessionId, { ...l, liveId: null, status: null, inLocal: true });
+    }
+  }
+  return [...by.values()].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+}
+// Resolve a session row for resume/forget from the merged cache, falling back to
+// the localStorage log (covers a resume before the server list has loaded).
+function driveSessionRecord(cid) {
+  const cached = (state._driveHistory && state._driveHistory.list) || [];
+  return cached.find((s) => s.claudeSessionId === cid)
+    || readDriveSessions().find((s) => s.claudeSessionId === cid)
+    || null;
+}
 // True for the rail row whose convo is the session we're driving — or have
 // suspended but can still resume — in the current project. Such a row badges
 // "live" and routes a click back into Drive instead of the read-only reader.
@@ -3604,10 +3657,9 @@ function renderDrivePrompt(slug, st) {
   );
   el('#conversation').scrollTop = 0;
   wireDriveBackDash();
-  el('#conversation').querySelectorAll('[data-resume-cid]').forEach((b) =>
-    b.addEventListener('click', () => resumeDriveSession(slug, b.dataset.resumeCid)));
-  el('#conversation').querySelectorAll('[data-forget-cid]').forEach((b) =>
-    b.addEventListener('click', (e) => { e.stopPropagation(); forgetDriveSession(b.dataset.forgetCid); renderDrivePrompt(slug, st); }));
+  state._driveHistory = null;
+  wireDriveHistory(slug);
+  if (slug) hydrateDriveHistory(slug); // fold in the cross-device server index
   el('#dv-perm').addEventListener('change', (e) => {
     el('#dv-permwarn').textContent = e.target.value === 'bypassPermissions'
       ? '⚠ The agent can run any shell command and edit any file with no confirmation.' : '';
@@ -3747,8 +3799,10 @@ function exitDrive() {
 
 // The "Past sessions" list under the new-session form: every Drive session for this
 // project, resumable. The single active handle is just the most-recent of these.
-function driveHistoryHtml(project) {
-  const sessions = listDriveSessions(project);
+// `sessions` is the merged local+server list when available (state._driveHistory),
+// else the localStorage-only list for the instant first paint.
+function driveHistoryHtml(project, sessions) {
+  if (!sessions) sessions = listDriveSessions(project);
   if (!sessions.length) return '';
   const active = state.driveActive && state.driveActive.claudeSessionId;
   const rows = sessions.map((s) => {
@@ -3756,16 +3810,69 @@ function driveHistoryHtml(project) {
       ? esc(s.title.length > 90 ? s.title.slice(0, 89) + '…' : s.title)
       : '<span class="dim-note">(no first message captured)</span>';
     const isActive = active && s.claudeSessionId === active;
+    const running = s.status === 'running' || s.status === 'thinking';
+    // Server-known but not in this browser's log → it ran on another device.
+    const elsewhere = s.inLocal === false;
+    const tags = [
+      isActive ? 'current' : null,
+      running ? '<span class="dv-hist-run">● running</span>' : null,
+      elsewhere ? '<span class="dim-note" title="Started on another device">⤳ other device</span>' : null,
+    ].filter(Boolean);
+    // × only forgets the per-browser log entry; a row that's only on the server has
+    // nothing here to forget, so we hide it rather than offer a no-op.
+    const forget = s.inLocal === false ? ''
+      : `<button class="dv-hist-forget" data-forget-cid="${esc(s.claudeSessionId)}" title="Remove from this list (doesn't delete the session)">×</button>`;
     return `<div class="dv-hist-row${isActive ? ' active' : ''}">
        <button class="dv-hist-resume" data-resume-cid="${esc(s.claudeSessionId)}" title="Reconnect to this session and continue it">↻</button>
        <div class="dv-hist-main">
          <div class="dv-hist-title">${title}</div>
-         <div class="dv-hist-meta">${esc(fmtAgo(s.lastAt || s.startedAt || Date.now()))}${s.permissionMode ? ' · ' + esc(s.permissionMode) : ''} · <code>${esc((s.claudeSessionId || '').slice(0, 8))}</code>${isActive ? ' · current' : ''}</div>
+         <div class="dv-hist-meta">${esc(fmtAgo(s.lastAt || s.startedAt || Date.now()))}${s.permissionMode ? ' · ' + esc(s.permissionMode) : ''} · <code>${esc((s.claudeSessionId || '').slice(0, 8))}</code>${tags.length ? ' · ' + tags.join(' · ') : ''}</div>
        </div>
-       <button class="dv-hist-forget" data-forget-cid="${esc(s.claudeSessionId)}" title="Remove from this list (doesn't delete the session)">×</button>
+       ${forget}
      </div>`;
   }).join('');
   return `<div class="dv-history"><div class="dv-history-h">Past sessions <span class="dim-note">· resume any of them</span></div>${rows}</div>`;
+}
+
+// After the prompt form paints (from the instant localStorage list), pull the
+// server's cross-device index, merge, cache it for resume/forget, and repaint just
+// the history block in place. Bails if the user navigated away mid-fetch.
+async function hydrateDriveHistory(slug) {
+  const remote = await fetchWorkspaceSessions(slug);
+  if (state.driveProject !== slug || !state._driveOpen) return;
+  const merged = mergeDriveSessions(listDriveSessions(slug), remote, slug);
+  state._driveHistory = { slug, list: merged, remote };
+  const start = el('#conversation .dv-start');
+  if (!start) return;
+  const old = start.querySelector('.dv-history');
+  const html = driveHistoryHtml(slug, merged);
+  if (!html) { if (old) old.remove(); return; }
+  if (old) old.outerHTML = html;
+  else start.insertAdjacentHTML('beforeend', html);
+  wireDriveHistory(slug);
+}
+
+// Wire ↻ resume / × forget on the current history rows. Shared by the first paint
+// and the post-hydrate repaint so both lists are interactive.
+function wireDriveHistory(slug) {
+  el('#conversation').querySelectorAll('[data-resume-cid]').forEach((b) =>
+    b.addEventListener('click', () => resumeDriveSession(slug, b.dataset.resumeCid)));
+  el('#conversation').querySelectorAll('[data-forget-cid]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      forgetDriveSession(b.dataset.forgetCid);
+      // Re-merge against the cached server list: a forgotten session that still
+      // exists server-side becomes an "other device" row; one that doesn't, drops.
+      const remote = (state._driveHistory && state._driveHistory.slug === slug && state._driveHistory.remote) || [];
+      const list = mergeDriveSessions(listDriveSessions(slug), remote, slug);
+      state._driveHistory = { slug, list, remote };
+      const start = el('#conversation .dv-start');
+      const old = start && start.querySelector('.dv-history');
+      const html = driveHistoryHtml(slug, list);
+      if (old) { if (html) old.outerHTML = html; else old.remove(); }
+      else if (html && start) start.insertAdjacentHTML('beforeend', html);
+      wireDriveHistory(slug);
+    }));
 }
 
 // Resume an arbitrary past session from the per-project log (not just the active
@@ -3773,9 +3880,12 @@ function driveHistoryHtml(project) {
 // — which adopts it by claudeSessionId off the durable transcript when there's no
 // live in-memory record.
 function resumeDriveSession(slug, cid) {
-  const rec = readDriveSessions().find((s) => s.claudeSessionId === cid);
+  const rec = driveSessionRecord(cid);
   if (!rec) return;
-  setDriveActive({ id: null, project: rec.project || slug || null, claudeSessionId: rec.claudeSessionId, cwd: rec.cwd || null, status: 'idle', permissionMode: rec.permissionMode || null });
+  // `liveId` (from the server index) means the in-memory session is still alive in
+  // this process — pass it so resumeDrive's fast path reconnects to the live handle
+  // instead of re-adopting off the transcript.
+  setDriveActive({ id: rec.liveId || null, project: rec.project || slug || null, claudeSessionId: rec.claudeSessionId, cwd: rec.cwd || null, status: 'idle', permissionMode: rec.permissionMode || null });
   resumeDrive(rec.project || slug);
 }
 

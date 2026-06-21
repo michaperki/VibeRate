@@ -157,10 +157,23 @@ anyone but the operator using VibeRate to actually drive.
      live `id` by going straight to `adopt`. Reuses the existing adopt path — no server
      change. (`app.js` `recordDriveSession`/`listDriveSessions`/`driveHistoryHtml`/
      `resumeDriveSession`.)
-   - **Still open:** the log is **per-browser** (localStorage) — a phone-started
-     session isn't listed on desktop. Next slice is a **server-side session index**
-     (list the workspace's claude transcripts per project) so it's cross-device, plus
-     a way to **see/switch agents running concurrently** (the actual fleet view).
+   - **Server-side session index** ✅ *(shipped 2026-06-21)* — the per-browser log is
+     now backstopped by a cross-device index read from the **durable on-disk
+     transcripts** in the project's workspace, so a session started on a phone is
+     listed (and resumable) on a laptop. `GET /api/agent/workspace/:slug/sessions`
+     (guarded like the rest of the control plane) resolves the project's checkout cwd,
+     reads Claude's `projects/<encoded-cwd>/*.jsonl` for that workspace, and peeks each
+     for title + turn count + last-active (file mtime); sessions with no typed turn are
+     dropped. The new-session form paints the localStorage list instantly, then
+     **hydrates** with the server list (`hydrateDriveHistory`) — the two are merged by
+     `claudeSessionId` (local carries the typed title + chosen permission mode; the
+     server catches what this device never saw and annotates **live status**). Rows
+     started elsewhere badge "⤳ other device"; a still-running session badges "● running"
+     and resumes straight to its live handle via `liveId` (skips re-adopt). Wiring:
+     `driveIngest.listWorkspaceSessions`, `agentRoutes` route, `app.js`
+     `fetchWorkspaceSessions`/`mergeDriveSessions`/`driveSessionRecord`/`hydrateDriveHistory`.
+   - **Still open:** a way to **see/switch agents running concurrently** (the actual
+     fleet view — the index lists *past* sessions; live multi-agent switching is next).
 3. **Mobile as the primary surface** — finish the responsive port (`PLAN_MOBILE.md`)
    so brain, drive, reader, and rail are all first-class on a phone. Default
    assumption flips: a feature is mobile unless it proves it needs desktop (dense
