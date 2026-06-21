@@ -4487,6 +4487,21 @@ const liveBrain = (() => {
   const baseKey = (p) => String(p).split(/[\\/]/).pop().toLowerCase();
   const baseLabel = (p) => String(p).split(/[\\/]/).pop();
   const baseColor = (n) => COLOR[n.kind] || COLOR.code;
+  // Repo-relative path for a touched file: strip the live session's workspace root (or the
+  // known /data/workspaces/<slug>/ container layout) off an absolute tool path. This is what
+  // lets two files that share a basename in different folders (e.g. src/server.js vs the
+  // vendored plugins/.../client/src/server.js) stay distinct nodes instead of merging onto
+  // one basename-keyed dot — and lets the label carry folder context, not a bare filename.
+  const relOf = (p) => {
+    let s = String(p || '').replace(/\\/g, '/');
+    const cwd = (state.drive && state.drive.cwd) || (state.driveActive && state.driveActive.cwd) || state.driveDefaultCwd || '';
+    if (cwd) { const c = cwd.replace(/\\/g, '/').replace(/\/+$/, '') + '/'; if (s.startsWith(c)) s = s.slice(c.length); }
+    return s.replace(/^.*?\/data\/workspaces\/[^/]+\//, '').replace(/^\/+/, '');
+  };
+  const relKey = (p) => relOf(p).toLowerCase();
+  // Folder-aware label: parent/file (or just the file at repo root) — enough context to tell
+  // a CLI module's git.js from a same-named file elsewhere, without dumping the full path.
+  const relLabel = (p) => { const a = relOf(p).split('/').filter(Boolean); return a.length > 1 ? a.slice(-2).join('/') : (a[0] || String(p)); };
 
   // tool name -> visual verb. Reads (read/grep/glob/search/web/other) are a light
   // pulse; writes/edits run hot; bash ripples; plan tools tick the plan rings.
@@ -4543,9 +4558,14 @@ const liveBrain = (() => {
   let activePlan = null;
   function touch(verb, file) {
     if (!file) return;
-    const k = baseKey(file);
-    let n = nodes.get(k);
-    if (!n) n = addNode({ id: k, label: baseLabel(file), kind: 'code', core: false, r: 9, path: file, ephemeral: true });
+    // Editing a brain doc (STORY.md, memory/MEMORY.md, …) should light up its existing
+    // seeded node — those are keyed by basename — so snap to a same-basename non-ephemeral
+    // node first. Otherwise a code file is identified by its full repo-relative path, so
+    // same-named files in different folders stay separate dots (no merge) and the node
+    // carries a folder-aware label.
+    const base = baseKey(file);
+    let n = [...nodes.values()].find((x) => !x.ephemeral && baseKey(x.path) === base) || nodes.get(relKey(file));
+    if (!n) n = addNode({ id: relKey(file), label: relLabel(file), kind: 'code', core: false, r: 9, path: file, ephemeral: true });
     n.fade = 0;
     if (verb === 'read') { n.heat = Math.min(1, n.heat + 0.45); n.flash = 1; n.flashKind = 'read'; }
     else if (verb === 'run') { n.heat = Math.min(1, n.heat + 0.55); n.flash = 1; n.flashKind = 'run'; ripple(n, COLOR.run); }
