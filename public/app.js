@@ -227,6 +227,21 @@ function renderMarkdown(md) {
       i++;
       continue;
     }
+    // GitHub-style table: a row of `| … |` followed by a `| --- | :--: |` delimiter.
+    if (t.includes('|') && i + 1 < lines.length
+      && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(lines[i + 1].trim())) {
+      closeList();
+      const cells = (r) => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+      const heads = cells(t);
+      i += 2; // consume header + delimiter
+      let rows = '';
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+        rows += `<tr>${cells(lines[i]).map((c) => `<td>${inlineMd(c)}</td>`).join('')}</tr>`;
+        i++;
+      }
+      html += `<table class="md-table"><thead><tr>${heads.map((h) => `<th>${inlineMd(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+      continue;
+    }
     const ul = line.match(/^\s*[-*+]\s+(.*)$/);
     if (ul) {
       if (inList !== 'ul') {
@@ -3578,35 +3593,42 @@ function renderDriveView() {
   const d = state.drive;
   driveEndTurn();            // clear any leaked working-timer from a prior session
   state._drivePending = [];  // fresh transcript → no tool calls awaiting a result
+  state._driveTurnBlock = null; // fresh transcript → no current turn block yet
+  // Flipped flow: the toolbar + composer form a sticky stack at the TOP; the
+  // transcript scrolls beneath it with the newest turn first (driveStartTurnBlock
+  // prepends). So you type at the top and the latest reply appears right below the box.
   el('#conversation').innerHTML = `
     <div class="dv-wrap">
-      <div class="conv-toolbar dv-toolbar">
-        <div class="conv-head">
-          <button class="back-dash" data-back-dash title="Back to dashboard">← dashboard</button>
-          <h2>✦ Driving</h2>
-          <div class="meta">
-            <span class="dv-pill" id="dv-pill">—</span>
-            <code>${esc(d.cwd || '')}</code>
-            <span class="dim-note">claude: <code id="dv-cid">${esc(d.claudeSessionId || '…')}</code></span>
+      <div class="dv-head-stack">
+        <div class="conv-toolbar dv-toolbar">
+          <div class="conv-head">
+            <button class="back-dash" data-back-dash title="Back to dashboard">← dashboard</button>
+            <h2>✦ Driving</h2>
+            <div class="meta">
+              <span class="dv-pill" id="dv-pill">—</span>
+              <span class="dv-ctx hidden" id="dv-ctx" title="context window used"></span>
+              <code>${esc(d.cwd || '')}</code>
+              <span class="dim-note">claude: <code id="dv-cid">${esc(d.claudeSessionId || '…')}</code></span>
+            </div>
           </div>
         </div>
+        <div id="dv-banner" class="dv-banner hidden"></div>
+        <div class="dv-composer">
+          <div id="dv-status" class="dv-status hidden">
+            <span class="dv-spin"></span>
+            <span class="dv-status-label" id="dv-status-label">Working…</span>
+            <span class="dv-status-meta" id="dv-status-meta"></span>
+          </div>
+          <textarea id="dv-followup" placeholder="Reply to the agent…  (⌘/Ctrl+Enter to send)"></textarea>
+          <div class="dv-actions">
+            <button id="dv-send">Send</button>
+            <button id="dv-stop" class="ghost">Stop turn</button>
+            <button id="dv-new" class="ghost">New session</button>
+          </div>
+        </div>
+        <button id="dv-jump" class="dv-jump hidden" title="Jump to the latest activity">↑ new activity</button>
       </div>
-      <div id="dv-banner" class="dv-banner hidden"></div>
       <div class="dv-body"><div id="dv-transcript" class="dv-transcript"></div></div>
-      <button id="dv-jump" class="dv-jump hidden" title="Jump to the latest activity">↓ new activity</button>
-      <div class="dv-composer">
-        <div id="dv-status" class="dv-status hidden">
-          <span class="dv-spin"></span>
-          <span class="dv-status-label" id="dv-status-label">Working…</span>
-          <span class="dv-status-meta" id="dv-status-meta"></span>
-        </div>
-        <textarea id="dv-followup" placeholder="Reply to the agent…  (⌘/Ctrl+Enter to send)"></textarea>
-        <div class="dv-actions">
-          <button id="dv-send">Send</button>
-          <button id="dv-stop" class="ghost">Stop turn</button>
-          <button id="dv-new" class="ghost">New session</button>
-        </div>
-      </div>
     </div>`;
   el('#conversation').scrollTop = 0;
   wireDriveBackDash();
@@ -3616,16 +3638,17 @@ function renderDriveView() {
   el('#dv-new').addEventListener('click', () => openDriveForProject(state.driveProject || state.project));
   el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
   el('#dv-jump').addEventListener('click', () => driveScroll(true));
-  // Sticky-bottom intent: stay glued to the latest only while the reader is parked at
-  // the bottom. Once they scroll up to read history, new activity no longer yanks them
-  // down — it surfaces the "new activity" pill instead. The pane (#conversation) is the
-  // scroll container; its children get replaced, so the listener (wired once) survives.
+  // Sticky-TOP intent (flipped flow): the newest turn is at the top, so we stay glued
+  // to the top only while the reader is parked there. Once they scroll down to read
+  // history, new activity no longer yanks them up — it surfaces the "new activity" pill
+  // instead. The pane (#conversation) is the scroll container; its children get
+  // replaced, so the listener (wired once) survives.
   const pane = el('#conversation');
   state._drivePinned = true;
   if (!pane._driveScrollWired) {
     pane._driveScrollWired = true;
     pane.addEventListener('scroll', () => {
-      state._drivePinned = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 120;
+      state._drivePinned = pane.scrollTop <= 80;
       if (state._drivePinned) { const j = el('#dv-jump'); if (j) j.classList.add('hidden'); }
     }, { passive: true });
   }
@@ -3763,6 +3786,27 @@ function driveBumpOut(n) { if (state._driveTurn) state._driveTurn.outChars += n;
 function driveFmtTok(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n); }
 function driveFmtElapsed(s) { return s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's'; }
 
+// Context-window meter: the input side of the turn's usage (fresh + cache) is the
+// context the model saw; show it as tokens + % of the window (mirrors the convos
+// live pill / src/parsers.js). The window is 200k, or 1M for a [1m] model.
+function driveCtxWindow(model) {
+  const m = String(model || '').toLowerCase();
+  return (m.includes('[1m]') || m.includes('-1m')) ? 1_000_000 : 200_000;
+}
+function driveUpdateCtx(ev) {
+  const u = ev.usage || {};
+  const ctx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+  const c = el('#dv-ctx');
+  if (!c || !ctx) return;
+  const model = (state.drive && state.drive.model) || null;
+  const win = driveCtxWindow(model);
+  const pct = Math.min(100, Math.round((ctx / win) * 100));
+  c.textContent = `◔ ${driveFmtTok(ctx)} · ${pct}%`;
+  c.title = `context window used — ${ctx.toLocaleString()} / ${win.toLocaleString()} tokens${model ? ' · ' + model : ''}${pct >= 75 ? ' · getting full' : ''}`;
+  c.classList.toggle('hot', pct >= 75);
+  c.classList.remove('hidden');
+}
+
 // Turn-complete summary line: duration + token usage (exact, from the result event)
 // + step count + cost (when billed). Cache reads fold into the input total.
 function driveResultMeta(ev) {
@@ -3779,14 +3823,17 @@ function driveResultMeta(ev) {
   ].filter(Boolean).join(' · ');
 }
 
-// Keep the reader glued to the newest activity ONLY while they're parked at the
-// bottom. `force` (the jump pill / explicit sends) always snaps down. Otherwise,
-// if they've scrolled up to read, surface the "new activity" pill instead of
-// yanking them around.
+// Flipped flow: the newest turn is at the TOP, so "keep up with activity" means
+// staying at scrollTop 0. `force` (the jump pill / explicit sends) always snaps to
+// the top. Otherwise, if they've scrolled down to read history, surface the "new
+// activity" pill instead of yanking them around.
 function driveScroll(force) {
   const c = el('#conversation'); if (!c) return;
   if (force || state._drivePinned) {
-    c.scrollTop = c.scrollHeight;
+    c.scrollTop = 0;
+    // Mobile scrolls the document (not the pane), so an explicit snap also pulls the
+    // window up so the just-sent message + forming reply sit under the sticky composer.
+    if (force && document.body.classList.contains('is-mobile')) window.scrollTo({ top: 0 });
     state._drivePinned = true;
     const j = el('#dv-jump'); if (j) j.classList.add('hidden');
   } else {
@@ -3797,21 +3844,67 @@ function driveScroll(force) {
 // Append a transcript bubble (user / assistant / thinking-fallback / sys / result).
 // `bodyText` is plain text (set via textContent so streamed deltas can append
 // safely); returns the element for live filling.
+// Flipped flow: each user turn is its own block, prepended so the newest turn sits
+// at the TOP (just under the composer); events still append in order *within* a
+// block, so a turn reads top-to-bottom chronologically. Pre-turn events (system
+// banner on connect) fall back to the transcript root and settle at the bottom.
+function driveContainer() {
+  return state._driveTurnBlock || el('#dv-transcript');
+}
+function driveStartTurnBlock() {
+  const t = el('#dv-transcript'); if (!t) return;
+  const block = document.createElement('div');
+  block.className = 'dv-turn';
+  t.insertBefore(block, t.firstChild); // prepend → newest turn on top
+  state._driveTurnBlock = block;
+}
 function driveAddEv(cls, who, bodyText) {
-  const t = el('#dv-transcript');
+  const t = driveContainer();
   if (!t) return null;
   const div = document.createElement('div');
   div.className = 'dv-ev ' + cls;
   if (who) { const h = document.createElement('div'); h.className = 'dv-who'; h.textContent = who; div.appendChild(h); }
-  if (bodyText != null) { const b = document.createElement('div'); b.className = 'dv-body-t'; b.textContent = bodyText; div.appendChild(b); }
+  if (bodyText != null) {
+    const b = document.createElement('div'); b.className = 'dv-body-t';
+    // Assistant prose is rendered as markdown (tables / code / lists / bold);
+    // everything else stays plain text. `_md` flags a bubble for re-render on
+    // streamed deltas; the raw markdown accumulates in `_raw`.
+    if (cls.indexOf('assistant') !== -1) { b._md = true; b._raw = bodyText; driveRenderMd(b); }
+    else b.textContent = bodyText;
+    div.appendChild(b);
+  }
   t.appendChild(div);
   driveScroll();
   return div;
 }
 function driveAppend(elm, text) {
   if (!elm) return;
-  elm.querySelector('.dv-body-t').textContent += text;
+  const b = elm.querySelector('.dv-body-t');
+  if (b && b._md) { b._raw = (b._raw || '') + text; driveScheduleMd(b); }
+  else if (b) b.textContent += text;
   driveScroll();
+}
+// Render a bubble's accumulated markdown to HTML + wire copy buttons on code.
+function driveRenderMd(b) {
+  b.innerHTML = renderMarkdown(b._raw || '');
+  b.querySelectorAll('pre.md-code').forEach((pre) => {
+    const code = pre.textContent;
+    const btn = document.createElement('button');
+    btn.className = 'dv-copy'; btn.type = 'button'; btn.textContent = 'copy';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = 'copied'; setTimeout(() => { btn.textContent = 'copy'; }, 1200);
+      }).catch(() => {});
+    });
+    pre.appendChild(btn);
+  });
+}
+// Coalesce re-renders during streaming to one per frame (a delta arrives per token).
+function driveScheduleMd(b) {
+  if (b._mdPending) return;
+  b._mdPending = true;
+  requestAnimationFrame(() => { b._mdPending = false; driveRenderMd(b); });
 }
 
 // ---- compact tool chips (Claude-code style) ----
@@ -3848,7 +3941,7 @@ function driveResultSummary(text, isError) {
   return first.length > 60 ? first.slice(0, 60) + '…' : first;
 }
 function driveAddTool(ev) {
-  const t = el('#dv-transcript'); if (!t) return null;
+  const t = driveContainer(); if (!t) return null;
   const cat = classifyTool(ev.name);
   const { verb, target } = driveToolDisplay(ev.name, ev.input, cat);
   driveStatusLabel((verb + ' ' + target).trim() || ev.name);
@@ -3891,7 +3984,7 @@ function driveAttachToolResult(ev) {
 
 // ---- collapsible thinking (live while streaming, tucked to a preview after) ----
 function driveAddThink(text) {
-  const t = el('#dv-transcript'); if (!t) return null;
+  const t = driveContainer(); if (!t) return null;
   const row = document.createElement('div');
   row.className = 'dv-think open';
   const line = document.createElement('div'); line.className = 'dv-think-line';
@@ -3913,7 +4006,7 @@ function driveAppendThink(row, text) {
 // The inline picker (the agent called mcp__viberate__ask). Build a choice card;
 // on submit, POST the selections so the parked tool call returns and the turn continues.
 function driveRenderAsk(ev) {
-  const t = el('#dv-transcript');
+  const t = driveContainer();
   if (!t) return;
   const qs = ev.questions || [];
   const card = document.createElement('div');
@@ -3982,7 +4075,7 @@ function driveResetLive() {
 function driveRender(ev) {
   const L = state._driveLive;
   switch (ev.kind) {
-    case 'user_prompt': driveResetLive(); driveAddEv('user', 'you', ev.text); driveBumpOut(0); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
+    case 'user_prompt': driveResetLive(); driveStartTurnBlock(); driveAddEv('user', 'you', ev.text); driveScroll(true); driveBumpOut(0); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
     case 'assistant_text': driveBumpOut((ev.text || '').length); driveAddEv('assistant', 'claude', ev.text); break;
     case 'thinking': { const r = driveAddThink(ev.text); if (r) r.classList.remove('open'); break; }
     case 'assistant_text_start': driveStatusLabel('Writing…'); L.text = driveAddEv('assistant', 'claude', ''); break;
@@ -4010,8 +4103,10 @@ function driveRender(ev) {
       driveEndTurn();
       liveBrain.idle();
       driveAddEv('result', ev.isError ? 'turn failed' : 'turn complete', driveResultMeta(ev));
+      driveUpdateCtx(ev);
       driveCoolProvisional(); break;
     case 'system':
+      if (state.drive && ev.model) state.drive.model = ev.model;
       driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
       if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; driveActivePatch({ claudeSessionId: ev.sessionId }); const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; setDriveProvisional({ sessionId: ev.sessionId }); } break;
     case 'error': driveAddEv('error', 'error', ev.message); break;

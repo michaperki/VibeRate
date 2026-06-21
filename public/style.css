@@ -1045,7 +1045,10 @@ body.public #feed { margin: 0 auto; }
    Chat transcript + composer living inside #conversation.
    ============================================================================ */
 .dv-wrap { display: flex; flex-direction: column; min-height: 100vh; }
-.dv-toolbar { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+/* Flipped flow: toolbar + composer (+ jump pill) ride a single sticky stack pinned
+   to the TOP; the transcript scrolls beneath it, newest turn first. */
+.dv-head-stack { position: sticky; top: 0; z-index: 6; background: var(--bg); }
+.dv-toolbar { background: var(--bg); }
 
 /* --- live brain (the brain: dashboard centerpiece + mobile expand overlay) --- */
 .centerpiece.live-brain { padding: 0; overflow: hidden; }
@@ -1115,9 +1118,46 @@ body.is-mobile .dvb-stage { height: 320px; }
 .dv-pill.starting { background: #15202e; color: var(--accent); }
 
 .dv-transcript { display: flex; flex-direction: column; gap: 10px; }
+/* A turn = one user prompt + everything it produced, read top-to-bottom. Turns are
+   prepended (newest first); older turns get a divider above them. */
+.dv-turn { display: flex; flex-direction: column; gap: 10px; }
+.dv-turn:not(:first-child) { border-top: 1px dashed var(--border); padding-top: 14px; }
 .dv-ev { border: 1px solid var(--border); border-radius: 10px; padding: 10px 13px; background: var(--panel); }
 .dv-ev .dv-who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
 .dv-ev .dv-body-t { white-space: pre-wrap; word-break: break-word; }
+/* Assistant bubbles render markdown, so the body is normal flow (not pre-wrap) and
+   its block children get tidy spacing. */
+.dv-ev.assistant .dv-body-t { white-space: normal; }
+.dv-body-t p { margin: 0 0 8px; }
+.dv-body-t > :last-child { margin-bottom: 0; }
+.dv-body-t ul, .dv-body-t ol { margin: 4px 0 8px; padding-left: 20px; }
+.dv-body-t li { margin: 2px 0; }
+.dv-body-t h1, .dv-body-t h2, .dv-body-t h3, .dv-body-t h4 { margin: 12px 0 6px; line-height: 1.25; }
+.dv-body-t code { background: #0c0e13; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+.dv-body-t a { color: var(--claude); }
+.dv-body-t blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--muted); background: rgba(124, 92, 255, 0.06); }
+.dv-body-t pre.md-code {
+  position: relative; background: #0c0e13; border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; overflow-x: auto; font-size: 12.5px; margin: 8px 0;
+}
+/* Markdown tables (renderMarkdown): scroll horizontally rather than blow out width. */
+.md-table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; margin: 6px 0 10px; font-size: 13px; }
+.md-table th, .md-table td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; }
+.md-table th { background: rgba(255, 255, 255, .04); font-weight: 650; }
+/* Copy button on code blocks — appears on hover (always-on for touch). */
+.dv-copy {
+  position: absolute; top: 6px; right: 6px; padding: 2px 8px; cursor: pointer;
+  font: 600 10px ui-monospace, Menlo, monospace; color: var(--muted);
+  background: rgba(255, 255, 255, .08); border: 1px solid var(--border); border-radius: 5px;
+  opacity: 0; transition: opacity .12s;
+}
+.dv-body-t pre.md-code:hover .dv-copy { opacity: 1; }
+.dv-copy:hover { color: var(--text); }
+body.is-mobile .dv-copy { opacity: .75; }
+/* Context-window meter in the Drive header. */
+.dv-ctx { padding: 2px 8px; border-radius: 99px; font: 600 11px ui-monospace, Menlo, monospace; background: #15202e; color: var(--accent); }
+.dv-ctx.hot { background: #2a2410; color: #e7b85b; }
+.dv-ctx.hidden { display: none; }
 .dv-ev.user { background: var(--user); border-color: #2a3550; }
 .dv-ev.user .dv-who { color: var(--accent); }
 .dv-ev.assistant { background: var(--assistant); }
@@ -1188,7 +1228,7 @@ body.is-mobile .dvb-stage { height: 320px; }
 .dv-ev.dv-ask.answered { opacity: .55; }
 .dv-askstatus { font-size: 12px; color: var(--muted); margin-top: 8px; }
 
-.dv-composer { position: sticky; bottom: 0; padding: 12px 28px 18px; background: linear-gradient(180deg, transparent, var(--bg) 22%); border-top: 1px solid var(--border); }
+.dv-composer { padding: 12px 28px 14px; background: var(--bg); border-bottom: 1px solid var(--border); }
 
 /* Working indicator — spinner + live activity label + elapsed/token estimate. Lives
    atop the composer so "what is Claude doing" is always in view without scrolling. */
@@ -1197,13 +1237,14 @@ body.is-mobile .dvb-stage { height: 320px; }
 .dv-status-label { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dv-status-meta { margin-left: auto; flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--muted); }
 
-/* Jump-to-latest pill — only shown when the reader has scrolled up off the bottom
-   while new activity arrives, so they're never silently yanked nor left behind. */
+/* Jump-to-latest pill — flipped flow: shown when the reader has scrolled DOWN into
+   history while new activity arrives up top, so they're never silently yanked nor
+   left behind. Rides the sticky head-stack, so it floats just under the composer. */
 .dv-jump {
-  position: sticky; bottom: 92px; z-index: 6; align-self: center; display: block;
-  margin: -28px auto 0; padding: 6px 14px; border-radius: 99px; cursor: pointer;
+  display: block; margin: 0 auto; padding: 6px 14px; border-radius: 99px; cursor: pointer;
   background: var(--accent); color: #0a1020; border: none;
   font: inherit; font-weight: 600; font-size: 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  transform: translateY(50%);
 }
 .dv-jump.hidden { display: none; }
 
@@ -1325,12 +1366,17 @@ body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom
    and drop its back button: the fixed brain strip carries "← dashboard" instead. */
 body.is-mobile .dv-toolbar { position: static; }
 body.is-mobile .dv-toolbar .back-dash { display: none; }
+/* Flipped flow on mobile: the sticky composer stack must pin BELOW the fixed app
+   bar + brain strip, not behind them at viewport top. */
+body.is-mobile.m-driving .dv-head-stack {
+  top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px));
+}
 
 /* tighten desktop-fixed paddings that overflow a phone */
 body.is-mobile .conv-toolbar { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .conv-body { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .dashboard { padding: clamp(12px, 4vw, 28px); gap: 16px; }
-body.is-mobile .dv-composer { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+body.is-mobile .dv-composer { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .reader-card, body.is-mobile .pc-prompt { max-width: 100%; }
 /* hover-only peek is useless on touch and 248px overflows narrow screens */
 body.is-mobile .brain-peek { display: none !important; }
