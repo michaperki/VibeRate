@@ -17,6 +17,7 @@ test fixture.
 
 ## Where things live
 
+- `STORY.md` — the development narrative (good to read on init): how VibeRate got here, in order, with the decisions. Ch. 10 holds the 2026-06-21 thesis course-correction (what "steering" really means; the differentiator; upstream risk; tests deferred; auto-compact).
 - `PRODUCT_STRATEGY.md` — product framing & current priorities (canonical; reframed 2026-06-21)
 - `ROADMAP.md` — shipped / next work (agent-first priority cluster at top)
 - `ONBOARDING.md` — onboarding & credentials forks (whose Claude runs; new vs existing app)
