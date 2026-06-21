@@ -50,7 +50,7 @@ export function setBaseUrl(url) {
 // Optional sink invoked when a driven turn ends with a known claude session id and
 // a bound project. It folds the turn's JSONL into that project's store so the
 // convo shows up in the Convos rail — the watcher-free ingest path (see
-// driveIngest.js / DRIVE_CONVO_INGEST_GAP.md). Injected by the server, which owns
+// driveIngest.js / archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md). Injected by the server, which owns
 // persistence + classification, so this runtime stays storage-agnostic (mirrors
 // setBaseUrl). No-op until set, and only fires for project-bound sessions.
 let onTurnIngest = null;
@@ -560,7 +560,7 @@ function runTurn(session, prompt, { resume }) {
 
     // Fold this turn's transcript into its bound project so the convo lands in the
     // rail. The CLI wrote a durable JSONL as a side effect; in hosted Drive nothing
-    // else ever ingests it (no watcher on the volume — DRIVE_CONVO_INGEST_GAP.md).
+    // else ever ingests it (no watcher on the volume — archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md).
     // Best-effort and detached: a failure here must never affect the turn.
     if (onTurnIngest && session.projectSlug && session.claudeSessionId) {
       Promise.resolve(

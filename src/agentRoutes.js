@@ -178,7 +178,7 @@ export function mountAgent(app, opts = {}) {
 
   // Live preview: serve a file straight from a project's Drive workspace checkout on
   // the shared volume — no commit→push→CI→redeploy. Closes the "I built it but can't
-  // show you" gap (DOGFOODING.md / drive-preview-gap): the hosted server already
+  // show you" gap (archive/DOGFOODING.md / drive-preview-gap): the hosted server already
   // shares the Fly volume with /data/workspaces/<slug>, so a freshly-written file is
   // viewable instantly. Read-only static serve, so `previewGuard` admits the instance
   // admin *or* a loopback peer (the in-container agent capturing its own preview); the
@@ -245,7 +245,7 @@ export function mountAgent(app, opts = {}) {
   // `id: <seq>` so the browser's native auto-reconnect sends `Last-Event-ID`, which
   // we honor over the (connect-time, frozen) `?after` query param — otherwise a
   // dropped EventSource reconnects to the *original* `after=0` URL and replays the
-  // whole log, doubling the client transcript. See DRIVE_LIVE_STREAM_DUP.md.
+  // whole log, doubling the client transcript. See archive/drive-reconciliation/DRIVE_LIVE_STREAM_DUP.md.
   app.get('/api/agent/sessions/:id/stream', guard, (req, res) => {
     const lastEventId = Number(req.headers['last-event-id']);
     const after = Number.isFinite(lastEventId) ? lastEventId : (Number(req.query.after || 0) || 0);

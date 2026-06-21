@@ -51,7 +51,7 @@ const state = {
   _driveOpen: false, // the Drive view owns #conversation (suppress timeline re-renders)
   _driveLive: { text: null, thinking: null }, // streaming partial bubbles being filled
   _drivePoll: null, // setTimeout handle while polling a workspace clone
-  // Option B (DRIVE_CONVO_RECONCILIATION.md): the live driven turn shown in the rail
+  // Option B (archive/drive-reconciliation/DRIVE_CONVO_RECONCILIATION.md): the live driven turn shown in the rail
   // as a provisional card that "cools" into the real parsed unit once ingest lands.
   driveProvisional: null, // { project, sessionId, prompt, status } | null
   _driveCoolPoll: null, // setTimeout handle awaiting ingest after a turn's `result`
@@ -4427,7 +4427,7 @@ function driveRender(ev) {
 // server now tags frames with `id: <seq>` so the native reconnect resumes via
 // `Last-Event-ID`, but we also track `state.drive.lastSeq` and drop any event at
 // or below it — so even a proxy that strips the header (or a manual resync) can't
-// double-append the log. See DRIVE_LIVE_STREAM_DUP.md.
+// double-append the log. See archive/drive-reconciliation/DRIVE_LIVE_STREAM_DUP.md.
 function driveOpenStream(id, after) {
   if (state.drive && state.drive.es) state.drive.es.close();
   if (state.drive) state.drive.lastSeq = after || 0;
@@ -4829,7 +4829,7 @@ window.liveBrain = liveBrain;
 // The Drive transcript owns #conversation, but the Convos rail (#sessions) stays
 // visible beside it. These keep the rail honest *while you drive*: the live turn
 // shows as a provisional card that cools into the real parsed unit once the
-// turn-end ingest (DRIVE_CONVO_INGEST_GAP.md) lands it in the bundle.
+// turn-end ingest (archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md) lands it in the bundle.
 
 // True while a row's session is the one being driven right now — used to badge the
 // real cooled card as still-live (continuity across the provisional→cooled→follow-up

@@ -83,7 +83,7 @@ Social features all require a shared backend, so a thin deploy gates most of wha
    documented limitation.
 6. **Live orchestration + timeline legibility** *(now-priority)* — make the dashboard
    feel real-time and coherent while an agent is actively working. Full breakdown +
-   code root-causes in `LIVE_ORCHESTRATION.md`. ✅ First pass shipped (2026-06-18):
+   code root-causes in `archive/LIVE_ORCHESTRATION.md`. ✅ First pass shipped (2026-06-18):
    - **Real-time watch** ✅ — the watcher debounce gained a `maxWait`, so a push fires
      during continuous agent activity instead of only on a quiet window; previously a
      `plan.md` written early only appeared after the agent finished implementing
@@ -116,7 +116,7 @@ Social features all require a shared backend, so a thin deploy gates most of wha
     overhead**. Hook events now carry `sid` for per-agent grouping. **Now the default** on an
     interactive terminal; `vbrt watch --log` forces the plain scrolling log (also the
     automatic fallback when output is piped/redirected). Deferred: Codex log-tail fallback.
-    Full breakdown in `LIVE_ORCHESTRATION.md §8`.
+    Full breakdown in `archive/LIVE_ORCHESTRATION.md §8`.
   - **Real-time ticker via Claude Code hooks** ✅ — CC flushes its session log in
      chunks (~20–30s lag); `vbrt hooks --install` wires `Pre/PostToolUse` /
      `UserPromptSubmit` / `Stop` hooks that fire `vbrt hook` (zero token cost — runs in
@@ -229,7 +229,7 @@ and largely shipped — they're the read/understand half of the loop.
   transcript (2×/3×). Fixed by emitting `id: <seq>` + honoring `Last-Event-ID`
   server-side, a client-side high-water-`seq` dedup, and a `visibilitychange` resync
   for the frozen-socket case iOS Safari never reports. Full diagnosis +
-  fix: `DRIVE_LIVE_STREAM_DUP.md`.
+  fix: `archive/drive-reconciliation/DRIVE_LIVE_STREAM_DUP.md`.
 - **Drive transcript: markdown + context meter + top-anchored flipped flow** ✅
   Shipped (2026-06-21). Three upgrades to the surface we dogfood in: (1) assistant
   bubbles render real markdown (tables/code/lists/headers), streaming-safe via a
@@ -402,7 +402,7 @@ and largely shipped — they're the read/understand half of the loop.
     and fast; the server already holds an API key for the classifier (`classify.js`).
   - **v3 (prompt coaching):** once suggestions exist, steer toward *better* prompts —
     e.g. flag a vague opener and offer a tighter rewrite, or attach the relevant plan
-    doc automatically. Tie-in with `PROMPT_GALLERY.md`. Park until v1/v2 prove the chip
+    doc automatically. Tie-in with `archive/experiments/PROMPT_GALLERY.md`. Park until v1/v2 prove the chip
     UI earns its space.
   - Open question for v2: where to gather the corpus in hosted mode (per-account prompt
     history vs. the local `~/.claude` logs the watcher sees) — local has the richest

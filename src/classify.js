@@ -15,7 +15,7 @@
 
 const MODEL = 'claude-haiku-4-5';
 
-// The 12 archetypes (PROMPT_GALLERY.md) + the catch-all. `id` is the stable tag
+// The 12 archetypes (archive/experiments/PROMPT_GALLERY.md) + the catch-all. `id` is the stable tag
 // stored per cardId; `def` is the one-line rubric the model classifies against.
 export const ARCHETYPES = [
   { id: 'seed', label: 'Conceptual seed', def: 'Proposes an idea/frame by analogy, not a task ("essentially BPE but for agent behavior").' },

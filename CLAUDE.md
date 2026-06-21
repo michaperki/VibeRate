@@ -23,12 +23,12 @@ test fixture.
 - `ONBOARDING.md` — onboarding & credentials forks (whose Claude runs; new vs existing app)
 - `PLAN_AGENT_RUNTIME.md` — Drive: the local agent runtime (the "drive" half)
 - `PLAN_DRIVE_WORKSPACES.md` — binding a project to a real checkout on the host
-- `DRIVE_CONVO_RECONCILIATION.md` — Drive + the reader are one conversation (live head / cooled history)
 - `PLAN_MOBILE.md` — the mobile-unified plan (responsive port; Variant A chat + brain header)
 - `PROJECT_VIEW_PLAN.md` — detailed viewer/brain planning
 - `DEMO_PLAN.md` — demo & trial plan (the "steering" story; how we show/trial the tool)
 - `AUTH.md` — web-account sign-in (separate from Claude credentials)
 - `SEED.md` — the original genesis prompt (a brain node, kept as history)
+- `archive/` — retired/historical brain docs (dogfooding experiment logs, the resolved Drive ingest-reconciliation saga, concluded research). Out of the live brain by design; see `archive/README.md`. Drive + the reader being one conversation lives in `archive/drive-reconciliation/DRIVE_CONVO_RECONCILIATION.md`.
 - `public/app.js` — the dashboard front-end (brain web, drive chat, progress rings, live mode)
 - `src/` — the `vbrt` CLI, parsers, server, push/watch, and the agent runtime (`agent.js`, `agentRoutes.js`)
 
@@ -63,13 +63,13 @@ burned turns rediscovering these facts; don't.
   you produced yourself with `vbrt shot ./shot.png`. **`--label` only takes `before` or
   `after`** — not an arbitrary string. The shot **auto-attaches to your prompt card in
   the Convos rail at turn-end — no `vbrt push`** (Drive binds + ingests evidence itself
-  now; `DRIVE_CONVO_INGEST_GAP.md`). So a shot is the way to *show the human in the
+  now; `archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md`). So a shot is the way to *show the human in the
   conversation* what you built, distinct from handing them a live preview URL.
 - **Editing `.md` brain docs updates the brain automatically — no `vbrt push`.** When
   a driven turn ends, Drive re-extracts the workspace's docs (+ git timeline +
   time-travel history) into the bound project, so a `STORY.md` you add or a `CLAUDE.md`
   you edit shows up as a brain node on its own (Drive ingests docs itself now, like it
-  does turns and shots; `DRIVE_DOCS_INGEST_GAP.md`). Caveat: a **new** doc nodes only
+  does turns and shots; `archive/drive-reconciliation/DRIVE_DOCS_INGEST_GAP.md`). Caveat: a **new** doc nodes only
   if something already in the brain references it — link it from the `CLAUDE.md` index
   or it stays orphaned. (A `git push` ships server *code*, not project *data*, and
   never refreshed the brain — that was the gap.)

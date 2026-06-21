@@ -281,7 +281,7 @@ export function startServer(port = 4317) {
   // project so it shows in the Convos rail, then (re)classify so the cooled card
   // gets its archetype + outcome rail like any captured convo. This is the
   // watcher-free replacement for "run vbrt watch on the host" — the runtime owns
-  // the process, so it ingests by session id directly (DRIVE_CONVO_INGEST_GAP.md).
+  // the process, so it ingests by session id directly (archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md).
   setIngestHook(async ({ projectSlug, claudeSessionId }) => {
     try {
       const result = await ingestDriveTurn({ projectSlug, claudeSessionId });

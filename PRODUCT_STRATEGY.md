@@ -69,7 +69,8 @@ the bar:
   Reserve desktop only for genuinely space-hungry tasks (e.g. dense brain editing,
   side-by-side diffs) — assume mobile-first until a feature proves it can't be.
 - **The conversation is the home.** Drive and the reader are the *same* object —
-  the live head and the cooled history of one JSONL (`DRIVE_CONVO_RECONCILIATION.md`).
+  the live head and the cooled history of one JSONL
+  (`archive/drive-reconciliation/DRIVE_CONVO_RECONCILIATION.md`).
   On mobile that collapses into one vertical scroll with a brain header strip
   (`PLAN_MOBILE.md`, Variant A).
 - **Driving is an RCE control plane.** Merging the read and write surfaces must

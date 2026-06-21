@@ -1,5 +1,5 @@
 // Drive → rail ingest: the watcher-free path that makes a driven session appear
-// in the Convos rail (DRIVE_CONVO_INGEST_GAP.md).
+// in the Convos rail (archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md).
 //
 // The read-only capture pipeline (vbrt watch/push) assumes an *external* observer
 // polling ~/.claude for a process it didn't spawn. Hosted Drive has no such
@@ -62,7 +62,7 @@ export async function ingestDriveTurn({ projectSlug, claudeSessionId }) {
 }
 
 // Refresh the bound project's brain doc set from the live workspace at turn end —
-// the docs sibling of the convo/evidence gaps (DRIVE_DOCS_INGEST_GAP.md). The
+// the docs sibling of the convo/evidence gaps (archive/drive-reconciliation/DRIVE_DOCS_INGEST_GAP.md). The
 // hosted brain serves a *stored* docs bundle (saveDocs → getDocs), and the only
 // thing that ever wrote it was `vbrt push`. A driven session that edits `.md`
 // files (adds STORY.md, updates CLAUDE.md) and commits never touched that store —
