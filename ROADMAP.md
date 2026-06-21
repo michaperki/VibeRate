@@ -143,8 +143,9 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   full input/output one tap away), thinking tucks to a preview, and a working footer
   carries the live activity label + elapsed + token estimate (exact tokens on the
   turn-complete line, from the result event's `usage`). Reader stays glued to the
-  bottom only while parked there; scrolling up surfaces a "new activity" pill instead
-  of yanking. Cures the mobile thumb-scroll fatigue.
+  newest activity only while parked there; scrolling away surfaces a "new activity"
+  pill instead of yanking. Cures the mobile thumb-scroll fatigue. *(Anchor later
+  flipped to the top — see "Drive transcript: top-anchored flipped flow" below.)*
 - **Drive transcript: reconnect-replay duplication** ✅ Fixed (2026-06-20). The live
   SSE stream replayed from `after=0` on every reconnect and the client appended with
   no dedup, so backgrounding the mobile tab or hitting Resume reprinted the whole
@@ -152,6 +153,18 @@ Social features all require a shared backend, so a thin deploy gates most of wha
   server-side, a client-side high-water-`seq` dedup, and a `visibilitychange` resync
   for the frozen-socket case iOS Safari never reports. Full diagnosis +
   fix: `DRIVE_LIVE_STREAM_DUP.md`.
+- **Drive transcript: markdown + context meter + top-anchored flipped flow** ✅
+  Shipped (2026-06-21). Three upgrades to the surface we dogfood in: (1) assistant
+  bubbles render real markdown (tables/code/lists/headers), streaming-safe via a
+  per-bubble raw buffer re-rendered ≤1×/frame, with copy buttons on code blocks; (2)
+  a context-window meter pill in the header (tokens + % of the 200k/1M window from
+  the result `usage`, amber past 75%); (3) the chat flipped on its head — the
+  composer is pinned to the **top** in a sticky stack and the transcript reads
+  **newest-first** (oldest at the bottom). The first pass (`5caa9cd`) only prepended
+  whole *turns*, so a single long agent turn still streamed downward; the finish
+  (`57db9bd`) prepends events *within* a turn too (`drivePlace`), so the live
+  activity always lands directly under the composer. Scroll/"new activity" logic and
+  the mobile sticky offset track the top.
 - **Prompt-unit rail** — `Sessions | Prompts` toggle, default Prompts; prompt rows
   show source, session color, timestamp, and outcome chips; live mode
   slides new prompt-units into the rail. ✅ Shipped first pass. (Intent auto-tagging

@@ -20,6 +20,13 @@
 > - Slice 3 — `tool_use → brainTouch()` glows a doc's chip + node from the live Drive
 >   SSE (reuses `toolFile`/`classifyTool`; no new capture). Lands on the desktop brain too.
 >
+> **Flow update (2026-06-21):** the Drive chat shipped with a **flipped, top-anchored
+> flow** rather than the bottom-pinned composer the IA below sketches. The composer is a
+> sticky stack at the **top**; the transcript reads **newest-first** (oldest at the
+> bottom), so the live activity always sits directly under the input — no scroll-to-
+> bottom on mobile. Where this plan says "composer pinned bottom," read "pinned top,
+> newest-first." See ROADMAP Phase 3 "top-anchored flipped flow."
+>
 > **Deferred (open question, by design):** project home is still the **dashboard**, with
 > the brain strip on top and Drive (the composer surface) one tap away via the rail. The
 > chat-first "conversation IS the home" default is the one-line `data-screen` flip noted
@@ -168,7 +175,8 @@ Structure (matches the prototype 1:1):
   (history) above, live provisional cards that **cool on `result`** (the Option-B
   flow already shipped for the rail — `driveProvisionalRow` :3855,
   `driveCoolProvisional` :3899 — reused here).
-- **Composer** — pinned bottom, **conditionally rendered** behind the drive
+- **Composer** — pinned **top** (flipped flow; see the 2026-06-21 flow update above),
+  **conditionally rendered** behind the drive
   trust gate (present only when you hold drive rights in your own cwd; absent on a
   shared/public view, degrading to a read-only reader). *Merging surfaces ≠
   merging trust boundaries* (`DRIVE_CONVO_RECONCILIATION.md` constraint 1).
@@ -260,7 +268,7 @@ Desktop renders exactly as today.
    untouched. — proves the layer without touching renderers.
 2. **Variant A project home.** Brain header strip (collapsed chips) + expand
    overlay mounting the real SVG; conversation scroll as the project home;
-   composer pinned + gated. Rail and timeline as sheets.
+   composer pinned (top, flipped flow) + gated. Rail and timeline as sheets.
 3. **Brain ⇄ chat live link.** `tool_use`→brain-node glow bridge (the signature
    moment); lights the strip and the expanded graph from the live SSE. Lands on
    desktop too.

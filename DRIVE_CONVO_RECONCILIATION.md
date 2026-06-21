@@ -111,8 +111,7 @@ because they share a renderer.
 
 ### Option B — Drive becomes the live head of the reader *(the real merge)*
 
-`#conversation` grows a composer at the bottom when the session is live and
-driveable. Streamed events render as **provisional** reader cards that "cool"
+`#conversation` grows a composer when the session is live and driveable. Streamed events render as **provisional** reader cards that "cool"
 into parsed cards on `result`. One rail, one card vocabulary, one URL. Clicking a
 historical convo and picking up the thread are the same gesture.
 - Biggest job: reconcile the two event models — raw stream events
