@@ -2,131 +2,446 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VibeRate — get better at prompting, together</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>VibeRate — drive coding agents from your phone</title>
     <meta
       name="description"
-      content="See how others prompt, rate what works, and learn from the prompts everyone's talking about. Expressing your will is a skill; let's get better together."
+      content="VibeRate is a mobile, agent-first IDE. Drive Claude Code from your phone — steer it through your project's brain, manage its context, watch the work land. Without opening the code."
     />
+    <meta property="og:title" content="VibeRate — drive coding agents from your phone" />
+    <meta property="og:description" content="A mobile, agent-first IDE. Steer agents through your project's brain and prompts, manage context, watch the work land — without opening the code." />
+    <meta name="theme-color" content="#0f1115" />
     <style>
       :root {
         --bg: #0f1115;
+        --bg-2: #0b0d12;
         --panel: #161922;
+        --panel-2: #1d212c;
         --border: #272c38;
+        --border-soft: #1e222d;
         --text: #e6e8ee;
         --muted: #8b92a5;
+        --faint: #5b6275;
         --accent: #7c5cff;
         --claude: #a978ff;
         --codex: #2ecf8f;
+        --live: #f85149;
+        --doc: #a978ff;
+        --mem: #2ecf8f;
       }
       * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
       body {
         margin: 0;
-        background: radial-gradient(1200px 600px at 50% -10%, #1a1d2a 0%, var(--bg) 60%);
+        background:
+          radial-gradient(900px 520px at 80% -8%, rgba(124, 92, 255, 0.16), transparent 60%),
+          radial-gradient(800px 480px at 8% 4%, rgba(46, 207, 143, 0.08), transparent 55%),
+          var(--bg);
         color: var(--text);
-        font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
       }
-      a { color: inherit; }
-      .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
-      header.nav {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 22px 0;
-      }
-      .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
-      .brand .logo { color: var(--accent); font-size: 22px; }
-      .nav a.ghost {
-        text-decoration: none; color: var(--muted); font-size: 14px;
-        padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
-      }
-      .nav a.ghost:hover { color: var(--text); border-color: var(--accent); }
+      a { color: inherit; text-decoration: none; }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, "Cascadia Code", monospace; }
 
-      .hero { text-align: center; padding: 64px 0 36px; }
-      .hero h1 { font-size: 44px; line-height: 1.1; margin: 0 0 14px; letter-spacing: -0.02em; }
-      .hero h1 .grad {
-        background: linear-gradient(90deg, var(--claude), var(--accent), var(--codex));
-        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+      /* ---------- nav ---------- */
+      header.nav {
+        position: sticky; top: 0; z-index: 50;
+        backdrop-filter: blur(12px);
+        background: rgba(15, 17, 21, 0.72);
+        border-bottom: 1px solid var(--border-soft);
       }
-      .hero .tagline { font-size: 18px; color: var(--muted); margin: 0 auto 10px; max-width: 620px; }
-      .hero .sub { color: var(--muted); max-width: 620px; margin: 0 auto 28px; }
-      .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      .nav .wrap { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; }
+      .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+      .brand .logo {
+        color: var(--accent); font-size: 20px;
+        filter: drop-shadow(0 0 10px rgba(124, 92, 255, 0.55));
+      }
+      .nav-links { display: flex; align-items: center; gap: 8px; }
+      .nav-links a.text { color: var(--muted); font-size: 14px; padding: 8px 12px; border-radius: 8px; }
+      .nav-links a.text:hover { color: var(--text); }
       .btn {
-        text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: 600; font-size: 15px;
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 10px 18px; border-radius: 10px; font-weight: 600; font-size: 14.5px;
+        border: 1px solid transparent; cursor: pointer; transition: filter .15s, border-color .15s, transform .05s;
       }
-      .btn.primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
-      .btn.primary:hover { filter: brightness(1.12); }
-      .btn.secondary { color: var(--text); border: 1px solid var(--border); }
+      .btn:active { transform: translateY(1px); }
+      .btn.primary {
+        background: linear-gradient(180deg, #8a6bff, #6a47f5);
+        color: #fff; border-color: #6a47f5;
+        box-shadow: 0 6px 22px rgba(124, 92, 255, 0.35);
+      }
+      .btn.primary:hover { filter: brightness(1.1); }
+      .btn.secondary { color: var(--text); border-color: var(--border); background: rgba(255,255,255,0.02); }
       .btn.secondary:hover { border-color: var(--accent); }
 
-      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 40px 0 16px; }
-      .card {
-        background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px 20px;
+      /* ---------- hero ---------- */
+      .hero { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 48px; align-items: center; padding: 72px 0 56px; }
+      .pill {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-size: 12.5px; color: var(--claude); font-weight: 600;
+        background: rgba(169, 120, 255, 0.1); border: 1px solid rgba(169, 120, 255, 0.28);
+        padding: 5px 12px; border-radius: 999px; margin-bottom: 22px; letter-spacing: 0.01em;
       }
-      .card .n { color: var(--accent); font-weight: 700; font-size: 13px; }
-      .card h3 { margin: 6px 0 6px; font-size: 16px; }
-      .card p { margin: 0; color: var(--muted); font-size: 13.5px; }
-      code {
-        background: #12151c; border: 1px solid var(--border); border-radius: 6px;
-        padding: 1px 6px; font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude); box-shadow: 0 0 8px var(--claude); }
+      h1 { font-size: 52px; line-height: 1.05; margin: 0 0 18px; letter-spacing: -0.025em; font-weight: 800; }
+      h1 .grad {
+        background: linear-gradient(100deg, var(--claude) 10%, var(--accent) 55%, var(--codex) 110%);
+        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
       }
+      .lede { font-size: 18.5px; color: var(--muted); margin: 0 0 14px; max-width: 540px; }
+      .lede strong { color: var(--text); font-weight: 600; }
+      .kicker { color: var(--faint); font-size: 14.5px; margin: 0 0 30px; max-width: 520px; }
+      .cta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      .cta .note { color: var(--faint); font-size: 13px; }
+
+      /* ---------- phone mockup ---------- */
+      .phone-stage { display: flex; justify-content: center; position: relative; }
+      .phone-stage::before {
+        content: ""; position: absolute; inset: -10% -6%;
+        background: radial-gradient(closest-side, rgba(124,92,255,0.22), transparent 70%);
+        filter: blur(6px); z-index: 0;
+      }
+      .phone {
+        position: relative; z-index: 1;
+        width: 300px; border-radius: 36px; padding: 10px;
+        background: linear-gradient(160deg, #20242f, #0e1016);
+        border: 1px solid #2c3140;
+        box-shadow: 0 30px 70px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset;
+      }
+      .screen { background: var(--bg-2); border-radius: 28px; overflow: hidden; border: 1px solid #1a1e27; }
+      .scr-appbar {
+        display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px;
+        border-bottom: 1px solid var(--border-soft);
+      }
+      .scr-appbar .ham { color: var(--muted); font-size: 15px; }
+      .scr-appbar .title { font-size: 13px; font-weight: 700; }
+      .scr-appbar .sub { font-size: 10px; color: var(--faint); }
+      .scr-appbar .live { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--live); }
+      .scr-appbar .live .d { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pulse 1.4s infinite; }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+      .scr-brain { display: flex; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--border-soft); overflow: hidden; }
+      .chip {
+        font-size: 9.5px; padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+        border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
+      }
+      .chip.doc { color: var(--doc); border-color: rgba(169,120,255,0.35); background: rgba(169,120,255,0.08); }
+      .chip.doc.glow { box-shadow: 0 0 0 1px rgba(169,120,255,0.5), 0 0 12px rgba(169,120,255,0.3); }
+      .chip.mem { color: var(--mem); border-color: rgba(46,207,143,0.3); background: rgba(46,207,143,0.07); }
+
+      .scr-body { padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+      .msg { font-size: 11px; line-height: 1.5; border-radius: 12px; padding: 8px 10px; max-width: 90%; }
+      .msg.user { align-self: flex-end; background: #2a3142; border-bottom-right-radius: 4px; }
+      .msg.agent { align-self: flex-start; background: #161d2b; border: 1px solid var(--border-soft); border-bottom-left-radius: 4px; }
+      .msg.agent .who { color: var(--claude); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; }
+      .msg.tool { align-self: flex-start; background: #11141b; border: 1px solid var(--border-soft); color: var(--muted); font-size: 10px; }
+      .msg.tool .fname { color: var(--codex); }
+      .outcome { display: flex; gap: 5px; flex-wrap: wrap; align-self: flex-start; }
+      .ochip { font-size: 9px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
+      .ochip b { color: var(--text); font-weight: 600; }
+
+      .ctx { padding: 8px 12px; border-top: 1px solid var(--border-soft); }
+      .ctx .row { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--faint); margin-bottom: 4px; }
+      .ctx .bar { height: 5px; border-radius: 3px; background: #1a1e27; overflow: hidden; }
+      .ctx .bar i { display: block; height: 100%; width: 58%; border-radius: 3px; background: linear-gradient(90deg, var(--codex), #d8c24a 75%, var(--live)); }
+
+      .scr-composer { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border-soft); }
+      .scr-composer .box { flex: 1; font-size: 10.5px; color: var(--faint); background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 7px 12px; }
+      .scr-composer .send { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(180deg, #8a6bff, #6a47f5); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; }
+
+      /* ---------- inversion strip ---------- */
+      .inversion { padding: 28px 0 8px; }
+      .inv-grid { display: grid; grid-template-columns: 1fr auto 1fr; gap: 22px; align-items: center; }
+      .inv-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; }
+      .inv-card .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 700; }
+      .inv-card.was .tag { color: var(--faint); }
+      .inv-card.now { border-color: rgba(124,92,255,0.4); box-shadow: 0 0 0 1px rgba(124,92,255,0.15); }
+      .inv-card.now .tag { color: var(--accent); }
+      .inv-card h3 { margin: 8px 0 6px; font-size: 18px; letter-spacing: -0.01em; }
+      .inv-card p { margin: 0; color: var(--muted); font-size: 14px; }
+      .inv-card.was h3, .inv-card.was p { opacity: 0.7; }
+      .inv-card.was h3 { text-decoration: line-through; text-decoration-color: var(--faint); }
+      .inv-arrow { font-size: 26px; color: var(--accent); }
+
+      /* ---------- sections ---------- */
+      section.band { padding: 64px 0; }
+      .eyebrow { font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); font-weight: 700; margin: 0 0 10px; }
+      .band h2 { font-size: 34px; letter-spacing: -0.02em; margin: 0 0 14px; max-width: 720px; }
+      .band .intro { color: var(--muted); font-size: 17px; max-width: 680px; margin: 0 0 36px; }
+
+      .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+      .feature {
+        background: linear-gradient(180deg, var(--panel), rgba(22,25,34,0.5));
+        border: 1px solid var(--border); border-radius: 18px; padding: 24px;
+        transition: border-color .18s, transform .18s;
+      }
+      .feature:hover { border-color: var(--accent); transform: translateY(-2px); }
+      .feature .ic { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 19px; margin-bottom: 14px; border: 1px solid var(--border); }
+      .feature.f-drive .ic { background: rgba(124,92,255,0.12); color: var(--accent); border-color: rgba(124,92,255,0.3); }
+      .feature.f-brain .ic { background: rgba(169,120,255,0.12); color: var(--claude); border-color: rgba(169,120,255,0.3); }
+      .feature.f-ctx .ic { background: rgba(248,81,73,0.1); color: var(--live); border-color: rgba(248,81,73,0.3); }
+      .feature.f-fleet .ic { background: rgba(46,207,143,0.1); color: var(--codex); border-color: rgba(46,207,143,0.3); }
+      .feature h3 { margin: 0 0 8px; font-size: 19px; letter-spacing: -0.01em; }
+      .feature p { margin: 0; color: var(--muted); font-size: 14.5px; }
+      .feature p code { background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; }
+
+      /* ---------- loop ---------- */
+      .loop-band { background: linear-gradient(180deg, transparent, rgba(124,92,255,0.04)); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+      .loop { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .loop-step { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+      .loop-step .n { font-size: 12px; font-weight: 700; color: var(--accent); letter-spacing: 0.08em; }
+      .loop-step h3 { margin: 6px 0 8px; font-size: 18px; }
+      .loop-step p { margin: 0; color: var(--muted); font-size: 14px; }
+      .loop-step .arrow { position: absolute; right: -18px; top: 50%; transform: translateY(-50%); color: var(--faint); font-size: 18px; z-index: 2; }
+      .loop-step:last-child .arrow { display: none; }
+
+      /* ---------- meta strip ---------- */
+      .meta-strip { text-align: center; padding: 56px 0; }
+      .meta-strip .q { font-size: 22px; line-height: 1.5; max-width: 760px; margin: 0 auto 14px; letter-spacing: -0.01em; }
+      .meta-strip .q .hl { color: var(--claude); }
+      .meta-strip .by { color: var(--faint); font-size: 14px; }
+
+      /* ---------- final cta ---------- */
+      .final {
+        text-align: center; border: 1px solid rgba(124,92,255,0.3); border-radius: 24px;
+        padding: 56px 32px; margin: 24px 0 64px;
+        background:
+          radial-gradient(600px 300px at 50% 0%, rgba(124,92,255,0.16), transparent 70%),
+          var(--panel);
+      }
+      .final h2 { font-size: 36px; letter-spacing: -0.02em; margin: 0 0 12px; }
+      .final p { color: var(--muted); font-size: 17px; max-width: 540px; margin: 0 auto 28px; }
+      .final .cta { justify-content: center; }
       .install {
-        margin: 28px auto 0; max-width: 560px; background: #12151c; border: 1px solid var(--border);
-        border-radius: 12px; padding: 16px 18px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 13px; color: #cdd2de;
+        margin: 26px auto 0; max-width: 460px; text-align: left;
+        background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px;
+        padding: 14px 16px; font-size: 13px; color: #cdd2de;
       }
-      .install .dim { color: var(--muted); }
-      footer { text-align: center; color: var(--muted); font-size: 13px; padding: 48px 0 32px; }
-      @media (max-width: 680px) { .steps { grid-template-columns: 1fr; } .hero h1 { font-size: 34px; } }
+      .install .dim { color: var(--faint); }
+      .install .pl { color: var(--codex); }
+
+      footer { border-top: 1px solid var(--border-soft); }
+      footer .wrap { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 28px 24px; color: var(--muted); font-size: 13.5px; }
+      footer a:hover { color: var(--text); }
+      footer .links { display: flex; gap: 18px; }
+
+      /* ---------- responsive ---------- */
+      @media (max-width: 880px) {
+        .hero { grid-template-columns: 1fr; gap: 40px; padding: 48px 0 40px; text-align: center; }
+        .hero .lede, .hero .kicker { margin-left: auto; margin-right: auto; }
+        .cta { justify-content: center; }
+        .pill { margin-inline: auto; }
+        h1 { font-size: 40px; }
+        .inv-grid { grid-template-columns: 1fr; }
+        .inv-arrow { transform: rotate(90deg); justify-self: center; }
+        .features { grid-template-columns: 1fr; }
+        .loop { grid-template-columns: 1fr; }
+        .loop-step .arrow { right: 50%; top: auto; bottom: -18px; transform: translateX(50%) rotate(90deg); }
+      }
+      @media (max-width: 480px) {
+        h1 { font-size: 33px; }
+        .band h2, .final h2 { font-size: 27px; }
+        .meta-strip .q { font-size: 18px; }
+      }
     </style>
   </head>
   <body>
-    <div class="wrap">
-      <header class="nav">
+    <header class="nav">
+      <div class="wrap">
         <div class="brand"><span class="logo">★</span> VibeRate</div>
-        <a class="ghost" href="/app">Sign in →</a>
-      </header>
-
-      <section class="hero">
-        <h1>Get better at prompting — <span class="grad">together</span>.</h1>
-        <p class="tagline">Expressing your will is a skill; let's get better together.</p>
-        <p class="sub">
-          See how others prompt, rate what works, and learn from the prompts
-          everyone's talking about — drawn from real Claude Code &amp; Codex sessions.
-        </p>
-        <div class="cta">
-          <a class="btn primary" href="/explore">Explore prompts</a>
+        <nav class="nav-links">
+          <a class="text" href="#how">How it works</a>
+          <a class="text" href="#loop">The loop</a>
           <a class="btn secondary" href="/app">Sign in</a>
-        </div>
-      </section>
-
-      <section class="steps">
-        <div class="card">
-          <div class="n">01</div>
-          <h3>Capture</h3>
-          <p>Bring your Claude Code &amp; Codex sessions in with the skill or <code>vbrt push</code>. Private by default.</p>
-        </div>
-        <div class="card">
-          <div class="n">02</div>
-          <h3>Publish</h3>
-          <p>Surface the prompts worth sharing — the clever, the hard-won, the controversial.</p>
-        </div>
-        <div class="card">
-          <div class="n">03</div>
-          <h3>Get better</h3>
-          <p>See how others express their will, swap feedback, and learn from the prompts that land.</p>
-        </div>
-      </section>
-
-      <div class="install">
-        <div class="dim"># sign in, grab a token from "Connect CLI", then:</div>
-        vbrt login &lt;token&gt;<br />
-        vbrt push
+        </nav>
       </div>
+    </header>
 
-      <footer>
-        VibeRate · <a href="/app">dashboard</a> ·
-        <a href="https://github.com/michaperki/VibeRate" target="_blank" rel="noopener">github</a>
-      </footer>
-    </div>
+    <main class="wrap">
+      <!-- HERO -->
+      <section class="hero">
+        <div>
+          <span class="pill"><span class="dot"></span> Mobile, agent-first IDE</span>
+          <h1>Drive coding agents<br /><span class="grad">from your phone.</span></h1>
+          <p class="lede">
+            VibeRate spawns a real coding agent on your repo and hands you the wheel.
+            <strong>Steer it through your project's brain, manage its context, and watch
+            the work land</strong> — without ever opening the code.
+          </p>
+          <p class="kicker">
+            The control surface isn't the source anymore. It's the brain (your <code class="mono">.md</code>
+            docs, plans, and memory) and the prompt. VibeRate makes both legible on a 6-inch screen.
+          </p>
+          <div class="cta">
+            <a class="btn primary" href="/app">Start driving →</a>
+            <a class="btn secondary" href="#how">See how it works</a>
+          </div>
+          <p class="cta note" style="margin-top:14px;">Runs Claude Code today. Other harnesses next.</p>
+        </div>
+
+        <!-- phone mockup of the Drive surface -->
+        <div class="phone-stage">
+          <div class="phone">
+            <div class="screen">
+              <div class="scr-appbar">
+                <span class="ham">☰</span>
+                <div>
+                  <div class="title">VibeRate</div>
+                  <div class="sub">drive · main</div>
+                </div>
+                <span class="live"><span class="d"></span> LIVE</span>
+              </div>
+              <div class="scr-brain">
+                <span class="chip doc glow">CLAUDE.md</span>
+                <span class="chip doc">ROADMAP.md</span>
+                <span class="chip mem">memory</span>
+                <span class="chip">SEED.md</span>
+              </div>
+              <div class="scr-body">
+                <div class="msg user">Overhaul the landing page for the Drive pivot.</div>
+                <div class="msg agent">
+                  <div class="who">Claude</div>
+                  Reading the brain — PRODUCT_STRATEGY.md reframes us as a mobile, agent-first IDE. Rewriting the hero now.
+                </div>
+                <div class="msg tool">✎ edit <span class="fname">public/landing.html</span></div>
+                <div class="outcome">
+                  <span class="ochip"><b>1</b> file</span>
+                  <span class="ochip"><b>+182</b> −47</span>
+                  <span class="ochip">brain ✓</span>
+                </div>
+              </div>
+              <div class="ctx">
+                <div class="row"><span>context</span><span>58% · steady</span></div>
+                <div class="bar"><i></i></div>
+              </div>
+              <div class="scr-composer">
+                <div class="box">Steer the agent…</div>
+                <div class="send">↑</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- INVERSION -->
+      <section class="inversion" id="how">
+        <div class="inv-grid">
+          <div class="inv-card was">
+            <div class="tag">Where it started</div>
+            <h3>A viewer for agent work</h3>
+            <p>“GitHub for agent conversations” — publish what already happened and review it after the fact.</p>
+          </div>
+          <div class="inv-arrow">→</div>
+          <div class="inv-card now">
+            <div class="tag">Where it's going</div>
+            <h3>Where the work happens</h3>
+            <p>Then we shipped <strong style="color:var(--text)">Drive</strong>. Read-only became the read mode of a thing whose center is now <em>write</em> — starting, steering, and managing agents live.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- FEATURES -->
+      <section class="band">
+        <p class="eyebrow">The control plane</p>
+        <h2>Everything you need to run an agent — none of the code you don't.</h2>
+        <p class="intro">
+          Agentic-first coding moved the leverage up a level. You mostly don't read source
+          anymore; you direct. VibeRate gives you the four surfaces that actually matter.
+        </p>
+        <div class="features">
+          <div class="feature f-drive">
+            <div class="ic">▶</div>
+            <h3>Drive</h3>
+            <p>A composer that spawns a real <code class="mono">claude</code> on a bound checkout and steers it turn by turn. Kick off and babysit agents from anywhere — the work runs on the host, not your device.</p>
+          </div>
+          <div class="feature f-brain">
+            <div class="ic">◈</div>
+            <h3>The brain</h3>
+            <p>Your <code class="mono">.md</code> docs, plans, and memory are the real steering wheel — not the source. The brain web makes that control surface legible, navigable, and glows live as the agent edits it.</p>
+          </div>
+          <div class="feature f-ctx">
+            <div class="ic">◐</div>
+            <h3>Context, managed</h3>
+            <p>An agent gets dumber as its window fills — the “dumb zone” past ~75%. VibeRate surfaces fullness in real time and helps you decide when to compact, branch, or start fresh.</p>
+          </div>
+          <div class="feature f-fleet">
+            <div class="ic">⊞</div>
+            <h3>A fleet, not a session</h3>
+            <p>The unit of work is several agents in flight at once. Start, park, resume, and re-enter the right one — across devices, across redeploys, across repos.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- THE LOOP -->
+      <section class="band loop-band" id="loop">
+        <div class="wrap" style="padding:0;">
+          <p class="eyebrow">The single-developer loop</p>
+          <h2>Capture → understand → drive. On a phone, frictionless.</h2>
+          <p class="intro">
+            One vertical scroll: the live transcript and composer, a brain header strip,
+            context and progress. The cooled history is the same object — prompt units with
+            outcome chips and evidence, ready to review.
+          </p>
+          <div class="loop">
+            <div class="loop-step">
+              <div class="n">01 · CAPTURE</div>
+              <h3>It records itself</h3>
+              <p>Every prompt, diff, commit, command, and screenshot is captured as the agent works — private by default, no extra step.</p>
+              <span class="arrow">→</span>
+            </div>
+            <div class="loop-step">
+              <div class="n">02 · UNDERSTAND</div>
+              <h3>See what landed</h3>
+              <p>Prompt units carry auto-derived outcome chips: files changed, commits, brain docs touched, context fullness. Read the work, not the diff.</p>
+              <span class="arrow">→</span>
+            </div>
+            <div class="loop-step">
+              <div class="n">03 · DRIVE</div>
+              <h3>Send the next move</h3>
+              <p>The transcript's live head <em>is</em> the composer. Steer, branch, or hand off the next prompt — the loop closes without leaving the conversation.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- META -->
+      <section class="meta-strip">
+        <p class="q">
+          We build VibeRate <span class="hl">by driving VibeRate</span> — the sessions, brain
+          docs, and progress rings in our own dashboard are this project steering itself.
+        </p>
+        <p class="by">The product is its own test fixture.</p>
+      </section>
+
+      <!-- FINAL CTA -->
+      <section class="final">
+        <h2>Put a coding agent in your pocket.</h2>
+        <p>Sign in, bind a repo, and send your first prompt. The agent runs on the host; you just steer.</p>
+        <div class="cta">
+          <a class="btn primary" href="/app">Open the dashboard →</a>
+          <a class="btn secondary" href="https://github.com/michaperki/VibeRate" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+        <div class="install mono">
+          <div class="dim"># prefer the terminal? capture &amp; watch from the CLI:</div>
+          <span class="pl">vbrt</span> login &lt;token&gt;<br />
+          <span class="pl">vbrt</span> watch
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <div class="brand"><span class="logo">★</span> VibeRate</div>
+        <div class="links">
+          <a href="/app">Dashboard</a>
+          <a href="#how">How it works</a>
+          <a href="https://github.com/michaperki/VibeRate" target="_blank" rel="noopener">GitHub</a>
+        </div>
+        <div style="color:var(--faint)">Drive coding agents from your phone.</div>
+      </div>
+    </footer>
   </body>
 </html>
