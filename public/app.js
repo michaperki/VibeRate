@@ -3735,7 +3735,7 @@ function renderDriveView() {
               ${(() => { const m = d.permissionMode || (state.driveActive && state.driveActive.permissionMode) || null; return m ? `<span class="dv-mode${m === 'bypassPermissions' ? ' danger' : ''}" title="Permission mode — ${esc(m)}">${esc(driveModeLabel(m))}</span>` : ''; })()}
               <span class="dv-ctx hidden" id="dv-ctx" title="context window used"></span>
               ${(() => { const p = d.cwd || ''; const base = p.split('/').filter(Boolean).pop() || p; return `<code class="dv-cwd" title="${esc(p)}">${esc(base)}</code>`; })()}
-              <span class="dim-note">claude: <code id="dv-cid">${esc(d.claudeSessionId || '…')}</code></span>
+              <span class="dim-note">claude: <code id="dv-cid" title="${esc(d.claudeSessionId || '')}">${esc((d.claudeSessionId || '…').slice(0, 8))}</code></span>
             </div>
           </div>
         </div>
@@ -4410,7 +4410,7 @@ function driveRender(ev) {
     case 'system':
       if (state.drive && ev.model) state.drive.model = ev.model;
       driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));
-      if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; driveActivePatch({ claudeSessionId: ev.sessionId }); const c = el('#dv-cid'); if (c) c.textContent = ev.sessionId; setDriveProvisional({ sessionId: ev.sessionId }); } break;
+      if (ev.sessionId) { if (state.drive) state.drive.claudeSessionId = ev.sessionId; driveActivePatch({ claudeSessionId: ev.sessionId }); const c = el('#dv-cid'); if (c) { c.textContent = String(ev.sessionId).slice(0, 8); c.title = ev.sessionId; } setDriveProvisional({ sessionId: ev.sessionId }); } break;
     case 'error': driveAddEv('error', 'error', ev.message); break;
     case 'note': driveResetLive(); driveAddEv('sys', 'session', ev.text); break;
     case 'stopped': driveAddEv('sys', 'session', 'stopped by user'); break;
