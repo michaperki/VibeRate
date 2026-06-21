@@ -25,6 +25,7 @@ test fixture.
 - `DRIVE_CONVO_RECONCILIATION.md` — Drive + the reader are one conversation (live head / cooled history)
 - `PLAN_MOBILE.md` — the mobile-unified plan (responsive port; Variant A chat + brain header)
 - `PROJECT_VIEW_PLAN.md` — detailed viewer/brain planning
+- `DEMO_PLAN.md` — demo & trial plan (the "steering" story; how we show/trial the tool)
 - `AUTH.md` — web-account sign-in (separate from Claude credentials)
 - `SEED.md` — the original genesis prompt (a brain node, kept as history)
 - `public/app.js` — the dashboard front-end (brain web, drive chat, progress rings, live mode)

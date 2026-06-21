@@ -189,6 +189,13 @@ anyone but the operator using VibeRate to actually drive.
    denominator, but **discovery prompts** legitimately *grow* known scope (push %
    down). Keep it as one signal, treat it as non-monotonic, and pair it with
    **scope-discovered** and **work-in-flight** signals (`PROJECT_VIEW_PLAN.md`).
+7. **Demo & first trial** *(`DEMO_PLAN.md`)* — how we *show* and *trial* the loop.
+   Core reframe: the demo is the **intervention, not the build** (a one-shot
+   advertises Claude Code; the steering loop is ours). Thesis: *"real development
+   requires steering."* Trial ≠ video: the trial needs a pre-seeded **"starter
+   brain"** to bias users toward steering-shaped tasks (ties into the new-app fork in
+   item 1 / `ONBOARDING.md`); the recommended build is a screen-recordable demo set on
+   the real mobile Drive view.
 
 The items below (prompt-unit nav, outcome chips, hosted hardening, the existing
 onboarding self-view/auto-live work, robustness, live orchestration) remain valid

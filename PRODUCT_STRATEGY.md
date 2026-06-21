@@ -122,6 +122,19 @@ marching to 100%.
    `SEED.md`/`DEVLOG.md` conventions — infer structure from whatever `.md` network a
    repo has (`PROJECT_VIEW_PLAN.md`).
 
+## Showing it / first trial (`DEMO_PLAN.md`)
+
+How we *demonstrate* and *trial* the loop is its own problem, captured in
+`DEMO_PLAN.md`. The core reframe: **the demo is the intervention, not the build** —
+a clean one-shot advertises Claude Code, not us; the only thing unique to VibeRate
+is the steering loop (a human catching the agent's drift from their phone). Thesis
+line: *"real development requires steering"* (vibe coding is a slot machine; this is
+a skill game). Trial and video are separate problems — the trial needs a pre-seeded
+**"starter brain"** to bias users toward steering-shaped tasks (ties into the
+new-vs-existing-app fork in `ONBOARDING.md`), the video can stage the perfect
+redirect. Leans on the mobile Drive view (`PLAN_MOBILE.md`) and the brain web
+(`PROJECT_VIEW_PLAN.md`).
+
 ## What to delay (the old social core, now a byproduct)
 
 - **Feedback / comments / ratings, sharing controls, discovery/trending, forks.**
