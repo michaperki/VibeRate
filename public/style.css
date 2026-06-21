@@ -1367,6 +1367,10 @@ body.is-mobile.hosted #m-menu, body.is-mobile.public #m-menu { display: none; }
 /* the conversations sheet + follow are project-only affordances */
 body.is-mobile:not(.view-project) #m-rail,
 body.is-mobile:not(.view-project) #m-follow { display: none; }
+/* Follow is a watcher-era "poll for new snapshots" toggle; a Drive session streams over
+   SSE and is inherently live, so the button is inert while driving — hide the dead chrome
+   rather than leave a tappable no-op. (See DRIVE_CONVO_RECONCILIATION.md, Follow rename.) */
+body.is-mobile.m-driving #m-follow { display: none; }
 
 /* Brain header strip — sits directly under the app bar, Drive view only. On the
    dashboard the centerpiece brain renders inline, so the strip would be a redundant
@@ -1467,6 +1471,13 @@ body.is-mobile.m-brain-open #m-brain-overlay {
 @media (prefers-reduced-motion: reduce) { body.is-mobile.m-brain-open #m-brain-overlay { animation: none; } }
 #m-bo-inner .dash-card { margin: 0; border: 0; border-radius: 0; }
 #m-bo-inner .brain { min-height: 46dvh; }
+/* Fill the overlay as a column so the footer/legend stay in frame (no vertical scroll
+   pushing the legend out of the container): the stage flex-shrinks and the SVG, sized by
+   viewBox + preserveAspectRatio, scales down to whatever height is left. */
+#m-bo-inner { height: 100%; }
+#m-bo-inner .live-brain { display: flex; flex-direction: column; height: 100%; }
+#m-bo-inner .dvb-bar, #m-bo-inner .dvb-foot { flex: 0 0 auto; }
+#m-bo-inner .dvb-stage { flex: 1 1 auto; height: auto; min-height: 120px; }
 
 /* touch targets ≥ 44px on the controls that turn into thumb targets */
 body.is-mobile .lay-btn, body.is-mobile .filter, body.is-mobile .rail-toggle button { min-height: 34px; }

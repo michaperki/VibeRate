@@ -4510,7 +4510,13 @@ const liveBrain = (() => {
 
   // Seed persistent brain-doc nodes from the live doc graph (skip archived ghosts).
   function seed() {
-    nodes.clear(); els.clear(); edges = []; plans = {};
+    // Snapshot live positions/heat first so a re-seed (reopening the brain overlay, or
+    // a docGraph refresh) keeps the existing formation in place instead of re-exploding
+    // every node from its spawn radius. Only genuinely new nodes animate in. This is the
+    // fix for the "dots stretch to the edges and snap back" flash on every brain open.
+    const prev = new Map(nodes);
+    nodes.clear(); edges = []; plans = {};
+    const restore = (n) => { const p = prev.get(n.id); if (p) { n.x = p.x; n.y = p.y; n.vx = p.vx; n.vy = p.vy; n.heat = p.heat; n.flash = p.flash; n.fade = p.fade; } };
     const g = ((state.docGraph && state.docGraph.nodes) || []).filter((n) => !n.archived);
     for (const d of g) {
       const isMem = d.role === 'memory' || /(^|\/)memory\//i.test(d.name || '');
@@ -4519,8 +4525,11 @@ const liveBrain = (() => {
       const core = d.role === 'constitution';
       const spec = { id: baseKey(d.name), label: d.base || baseLabel(d.name), kind, core, r: core ? 12 : hasPlan ? 11 : 9, path: d.name };
       if (hasPlan) { spec.plan = spec.id; plans[spec.id] = { done: d.completion.done, total: d.completion.total }; }
-      addNode(spec);
+      restore(addNode(spec));
     }
+    // Keep ephemeral code nodes the agent recently touched — they're live recency state,
+    // not docGraph-derived, so a re-seed would otherwise wipe the trail of dots.
+    for (const [id, p] of prev) if (!nodes.has(id) && p.ephemeral) nodes.set(id, p);
     // A light backbone so the force layout has structure: hang every orbit node off
     // the first constitution core, and chain the cores together.
     const cores = [...nodes.values()].filter((n) => n.core);
@@ -4779,6 +4788,7 @@ const liveBrain = (() => {
     svg.append(layers.edges, layers.fx, layers.nodes);
     svg.removeEventListener('click', onPick);
     svg.addEventListener('click', onPick);
+    els.clear();  // DOM was just thrown away (svg.innerHTML=''); node *positions* persist in `nodes` so seed() can restore them
     seed();
     last = 0;
     if (raf) cancelAnimationFrame(raf);
@@ -5288,6 +5298,15 @@ async function boot() {
   if (byId('m-menu')) byId('m-menu').onclick = toggleDrawer;
   if (byId('m-rail')) byId('m-rail').onclick = toggleSheet;
   if (byId('m-backdrop')) byId('m-backdrop').onclick = closeAll;
+  // Tap anywhere off the brain (and off its trigger strip) closes the dropdown. The
+  // overlay drops below the header over the chat and has no backdrop of its own, so we
+  // catch the outside tap here. Excluding #m-brainbar stops the opening tap from also
+  // closing it; once closed brainOpen() is false so a closing grip-tap is a no-op.
+  document.addEventListener('click', (e) => {
+    if (!brainOpen()) return;
+    if (e.target.closest('#m-brain-overlay') || e.target.closest('#m-brainbar')) return;
+    closeBrain(); syncGrip();
+  });
   if (byId('m-brainbar')) byId('m-brainbar').onclick = (e) => {
     // The leading "← dashboard" pill leaves Drive for the project dashboard (the
     // strip is fixed chrome, so this back affordance never scrolls out of reach).
