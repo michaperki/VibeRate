@@ -266,9 +266,15 @@ A driven session's *live head* and its *cooled history* are two views of one JSO
 So a finished turn ingests into the **Convos rail** (watcher-free), a streaming turn
 **live-merges** into it (Option B), sessions become **resumable** ("Return to Drive"
 survives a redeploy, a `/resume` analogue), and "live" gets reframed as "**follow**."
-The `DRIVE_CONVO_INGEST_GAP.md` and `DRIVE_LIVE_STREAM_DUP.md` docs chronicle the
-fiddly bugs along the way (evidence binding without a push; killing reconnect-replay
-duplication) — the unglamorous plumbing that makes "it just shows up" true.
+The `DRIVE_CONVO_INGEST_GAP.md`, `DRIVE_LIVE_STREAM_DUP.md`, and
+`DRIVE_DOCS_INGEST_GAP.md` docs chronicle the fiddly bugs along the way (evidence
+binding without a push; killing reconnect-replay duplication; the **brain doc set
+not refreshing** when a *driven* session edited `.md` and committed) — the
+unglamorous plumbing that makes "it just shows up" true. Each had the same shape and
+the same fix: the read-only capture pipeline (`vbrt push`/`watch`) fed a surface the
+write-path didn't, so the Drive runtime — which *owns* the spawned process — closes
+the gap at turn-end by feeding that surface itself (transcript, then evidence, then,
+as of 2026-06-21, the docs/time-travel bundle) with no manual push.
 
 A consequential ergonomic gap surfaced and was named here: today only the
 **most-recent** Drive session resumes cleanly. The move toward a real **fleet** —

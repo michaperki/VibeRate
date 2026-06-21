@@ -18,8 +18,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseClaude, peekClaude } from './parsers.js';
 import { claudeConfigDir } from './agent.js';
-import { ingestDriveSession, getEvidence, saveEvidence } from './storage.js';
+import { ingestDriveSession, getEvidence, saveEvidence, saveDocs, saveGit, saveDocHistory } from './storage.js';
 import { readEvidence, evidenceDir } from './evidence.js';
+import { extractDocs, brainBasenames } from './docs.js';
+import { extractGit, extractDocHistory } from './git.js';
 
 // Find the per-session JSONL for `claudeSessionId`. Claude stores it at
 // <config>/projects/<cwd-hash>/<sessionId>.jsonl; we know the id but not the
@@ -55,7 +57,40 @@ export async function ingestDriveTurn({ projectSlug, claudeSessionId }) {
   const session = await parseClaude(file);
   const result = ingestDriveSession(projectSlug, session);
   forwardTurnEvidence(projectSlug, session);
+  await forwardTurnDocs(projectSlug, session);
   return result;
+}
+
+// Refresh the bound project's brain doc set from the live workspace at turn end —
+// the docs sibling of the convo/evidence gaps (DRIVE_DOCS_INGEST_GAP.md). The
+// hosted brain serves a *stored* docs bundle (saveDocs → getDocs), and the only
+// thing that ever wrote it was `vbrt push`. A driven session that edits `.md`
+// files (adds STORY.md, updates CLAUDE.md) and commits never touched that store —
+// a `git push` ships server *code*, not project *data* — so the brain kept showing
+// the last-pushed snapshot. We close it the way turns and evidence are closed: the
+// runtime owns the process, so when the turn ends we re-extract the docs from the
+// workspace checkout (session.cwd) and re-save them under the bound slug.
+//
+// Keyed by slug (never cwd), so — like ingestDriveSession — this can't repoint the
+// project at the host's checkout path and fork it from the user's real repo on a
+// later local push. We also refresh git + per-doc history so the timeline and the
+// time-travel scrubber reflect commits the driven session made. Best-effort and
+// fully wrapped: a docs refresh must never break turn ingest.
+async function forwardTurnDocs(projectSlug, session) {
+  const cwd = session.cwd;
+  if (!cwd) return;
+  try {
+    const docs = extractDocs(cwd);
+    if (docs.length) saveDocs(cwd, docs, projectSlug);
+    const git = await extractGit(cwd);
+    if (git && git.commits && git.commits.length) {
+      saveGit(cwd, git, projectSlug); // timeline overlay: pick up the turn's new commits
+      const history = await extractDocHistory(git.cwd, git.commits, brainBasenames(docs, git.commits));
+      if (history) saveDocHistory(cwd, history, projectSlug); // brain time-travel versions
+    }
+  } catch (e) {
+    console.error('[drive-docs] refresh failed:', e && (e.message || e));
+  }
 }
 
 // Fold the workspace's author-captured evidence (`vbrt shot` artifacts) into the

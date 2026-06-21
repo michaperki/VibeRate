@@ -65,6 +65,14 @@ burned turns rediscovering these facts; don't.
   the Convos rail at turn-end — no `vbrt push`** (Drive binds + ingests evidence itself
   now; `DRIVE_CONVO_INGEST_GAP.md`). So a shot is the way to *show the human in the
   conversation* what you built, distinct from handing them a live preview URL.
+- **Editing `.md` brain docs updates the brain automatically — no `vbrt push`.** When
+  a driven turn ends, Drive re-extracts the workspace's docs (+ git timeline +
+  time-travel history) into the bound project, so a `STORY.md` you add or a `CLAUDE.md`
+  you edit shows up as a brain node on its own (Drive ingests docs itself now, like it
+  does turns and shots; `DRIVE_DOCS_INGEST_GAP.md`). Caveat: a **new** doc nodes only
+  if something already in the brain references it — link it from the `CLAUDE.md` index
+  or it stays orphaned. (A `git push` ships server *code*, not project *data*, and
+  never refreshed the brain — that was the gap.)
 - **`prototypes/` is gitignored at any depth** — a prototype under `public/prototypes/`
   won't stage. Use a non-ignored path (e.g. `public/proto/`) if it must be committed,
   or just preview it (above) and skip the commit.

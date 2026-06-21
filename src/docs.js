@@ -25,6 +25,26 @@ const KNOWN_UPPER = new Set(KNOWN.map((n) => n.toUpperCase()));
 const MAX_BYTES = 512 * 1024;
 const MAX_DOCS = 50;
 
+// The agent-doc basenames (lowercased) that seed brain time-travel history, and a
+// loose "brain-ish" matcher for docs that no longer exist in the tree (so a
+// *deleted* plan still ghost-nodes in the scrubber). Canonical home for both —
+// shared by the capture path (`vbrt push`) and the Drive turn-end refresh
+// (driveIngest) so they decide "what counts as a brain doc" identically.
+export const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
+export const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|stream|_next_pass/i;
+
+// The set of doc basenames (lowercased) whose per-commit history we keep for the
+// brain time-travel scrubber: the live brain-graph nodes (`docs`) ∪ the known
+// agent-doc names ∪ any brain-ish doc that was *deleted* somewhere in `commits`.
+export function brainBasenames(docs = [], commits = []) {
+  const set = new Set([...docs.map((d) => d.name.split('/').pop().toLowerCase()), ...AGENT_DOCS]);
+  for (const c of commits) for (const d of c.docs || []) {
+    const base = (d.name || '').split('/').pop();
+    if (d.status === 'deleted' && BRAINISH.test(base)) set.add(base.toLowerCase());
+  }
+  return set;
+}
+
 function readDoc(full, displayName) {
   try {
     const st = fs.statSync(full);

@@ -9,7 +9,7 @@ import { discoverSessions } from '../src/discover.js';
 import { parseClaude, parseCodex } from '../src/parsers.js';
 import { saveBundle } from '../src/storage.js';
 import { extractGit, extractDocHistory } from '../src/git.js';
-import { extractDocsMulti } from '../src/docs.js';
+import { extractDocsMulti, brainBasenames } from '../src/docs.js';
 import { extractMemory } from '../src/workspace.js';
 import { readEvidence, recordShot, captureCapabilities, installCapture } from '../src/evidence.js';
 import { buildBundle } from '../src/bundle.js';
@@ -196,9 +196,6 @@ function paintFrame(lines) {
   process.stdout.write(out);
 }
 
-const AGENT_DOCS = ['soul.md', 'agents.md', 'agent.md', 'claude.md', 'claude.local.md', 'seed.md', 'context.md', 'memory.md', 'backlog.md', 'decisions.md', 'attempts.md', 'log.md', 'roadmap.md', 'project.md', 'tasks.md'];
-const BRAINISH = /soul|agents?|claude|seed|roadmap|backlog|tasks|memory|context|decisions|attempts|plan|stream|_next_pass/i;
-
 function bytesOf(obj) {
   return Buffer.byteLength(JSON.stringify(obj), 'utf8');
 }
@@ -248,12 +245,7 @@ async function assembleBundle(cwd, sessions, parsed, { includeMemory = true } = 
   commits.sort((a, b) => b.t - a.t);
 
   const docs = extractDocsMulti(repoPaths);
-  const brainBasenames = new Set([...docs.map((d) => d.name.split('/').pop().toLowerCase()), ...AGENT_DOCS]);
-  for (const c of commits) for (const d of c.docs || []) {
-    const base = d.name.split('/').pop();
-    if (d.status === 'deleted' && BRAINISH.test(base)) brainBasenames.add(base.toLowerCase());
-  }
-  const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames) : null;
+  const docHistory = gitCwd && commits.length ? await extractDocHistory(gitCwd, commits, brainBasenames(docs, commits)) : null;
   const memory = includeMemory ? extractMemory(cwd) : null;
   const evidence = readEvidence(cwd); // author-captured screenshots/gifs (full set each push)
   const stream = readStream(cwd, 40); // real-time hook events (working/idle, current action, ctx)
