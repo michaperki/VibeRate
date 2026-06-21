@@ -719,7 +719,11 @@ async function cmdShot(args = []) {
       console.log(C.yellow('  ⚠ No commit yet — captured, but not tied to a code checkpoint. Commit first, then capture for a clean before/after.'));
     }
     const w = watchStatus(cwd);
-    if (w.active) {
+    if (process.env.VBRT_DRIVE_SESSION_ID) {
+      // In a Drive container there's no watcher and no push — driveIngest folds this
+      // artifact into the bound conversation when the turn ends. See forwardTurnEvidence.
+      console.log(C.dim('  Attaches to this conversation in the Convos rail at turn-end — no push needed.\n'));
+    } else if (w.active) {
       console.log(C.dim('  `vbrt watch` is live — this streams up automatically. No manual push needed.'));
       if (w.url) console.log(C.dim(`  Share/view: ${C.cyan(w.url)}`));
       else console.log(C.dim('  (share link appears after the first stream lands — `vbrt status` shows it)'));
