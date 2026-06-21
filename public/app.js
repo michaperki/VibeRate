@@ -3522,11 +3522,22 @@ function railIsLive(id) {
 }
 
 const DRIVE_PERMS = [
+  ['bypassPermissions', 'bypassPermissions — run anything, no approvals (DANGER, local only)'],
   ['default', 'default — read/chat only (edits & shell need approval)'],
   ['plan', 'plan — research & propose, no writes'],
   ['acceptEdits', 'acceptEdits — auto-accept file edits'],
-  ['bypassPermissions', 'bypassPermissions — run anything (DANGER, local only)'],
 ];
+const DRIVE_PERM_KEY = 'vbrt.drivePerm';
+
+// Compact badge for the live header so the mode is always in view while driving.
+function driveModeLabel(mode) {
+  return ({
+    bypassPermissions: '⚡ bypass',
+    acceptEdits: 'auto-edit',
+    plan: 'plan',
+    default: 'default',
+  })[mode] || mode;
+}
 
 function driveBanner(msg, kind) {
   const b = el('#dv-banner');
@@ -3636,7 +3647,11 @@ function renderDriveCloning(slug, st) {
 // default cwd; otherwise the session runs in the project's bound workspace.
 function renderDrivePrompt(slug, st) {
   const ws = (st && st.workspace) || null;
-  const opts = DRIVE_PERMS.map(([v, label]) => `<option value="${v}">${esc(label)}</option>`).join('');
+  // Default to the last mode used, falling back to bypassPermissions — Drive is local
+  // and unattended, so approvals-required modes just stall the agent waiting on a tap.
+  let lastPerm; try { lastPerm = localStorage.getItem(DRIVE_PERM_KEY); } catch { lastPerm = null; }
+  if (!DRIVE_PERMS.some(([v]) => v === lastPerm)) lastPerm = 'bypassPermissions';
+  const opts = DRIVE_PERMS.map(([v, label]) => `<option value="${v}"${v === lastPerm ? ' selected' : ''}>${esc(label)}</option>`).join('');
   const where = ws
     ? `workspace <code>${esc(ws.dir || '')}</code>${ws.head ? ' · ' + esc(ws.head) : ''}`
     : `host default <code>${esc(state.driveDefaultCwd || '')}</code>`;
@@ -3661,9 +3676,11 @@ function renderDrivePrompt(slug, st) {
   wireDriveHistory(slug);
   if (slug) hydrateDriveHistory(slug); // fold in the cross-device server index
   el('#dv-perm').addEventListener('change', (e) => {
+    try { localStorage.setItem(DRIVE_PERM_KEY, e.target.value); } catch { /* private mode / quota */ }
     el('#dv-permwarn').textContent = e.target.value === 'bypassPermissions'
       ? '⚠ The agent can run any shell command and edit any file with no confirmation.' : '';
   });
+  el('#dv-perm').dispatchEvent(new Event('change')); // surface the warning for the pre-selected mode
   const start = async () => {
     const prompt = el('#dv-prompt').value.trim();
     if (!prompt) return;
@@ -3688,7 +3705,7 @@ function renderDrivePrompt(slug, st) {
 // Enter a live driven session: render the transcript shell + composer, open the stream.
 function enterDrive(s) {
   state._driveOpen = true;
-  state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, es: null };
+  state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, permissionMode: s.permissionMode || null, es: null };
   // Record the durable handle so this session is resumable after navigating away.
   // Starting a new session here supersedes any prior active handle for this project.
   setDriveActive({ id: s.id, project: state.driveProject || null, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, status: s.status, permissionMode: s.permissionMode || null });
@@ -3714,6 +3731,7 @@ function renderDriveView() {
             <h2>✦ Driving</h2>
             <div class="meta">
               <span class="dv-pill" id="dv-pill">—</span>
+              ${(() => { const m = d.permissionMode || (state.driveActive && state.driveActive.permissionMode) || null; return m ? `<span class="dv-mode${m === 'bypassPermissions' ? ' danger' : ''}" title="Permission mode — ${esc(m)}">${esc(driveModeLabel(m))}</span>` : ''; })()}
               <span class="dv-ctx hidden" id="dv-ctx" title="context window used"></span>
               <code>${esc(d.cwd || '')}</code>
               <span class="dim-note">claude: <code id="dv-cid">${esc(d.claudeSessionId || '…')}</code></span>
@@ -3942,7 +3960,7 @@ async function resumeDrive(slug) {
   }
   if (!state._driveOpen) return; // navigated away mid-fetch
   setDriveActive({ id: s.id, project: state.driveProject, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, status: s.status, permissionMode: s.permissionMode || da.permissionMode || null });
-  state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, es: null };
+  state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, permissionMode: s.permissionMode || da.permissionMode || null, es: null };
   state._driveLive = { text: null, thinking: null };
   renderDriveView();
   driveOpenStream(s.id, 0); // after=0 → replay the buffered transcript, then live
@@ -4274,22 +4292,26 @@ function driveMarkAskResolved(ev) {
   card.appendChild(status);
 }
 
-// Reset the streaming block handles. `block_stop` collapses a live thinking block
-// to its preview (it stays one tap from full) rather than dropping the handle blind.
+// Reset the streaming block handles. Thinking is ephemeral: we stream it live so you
+// can watch the agent reason, but we don't leave a collapsed block littering the flow
+// between every reply and tool call — the status spinner ("Thinking…") already marks
+// that a turn is mid-thought. So `block_stop` (and every turn boundary) removes the
+// live thinking element outright rather than tucking it to a persistent preview.
 function driveResetLive() {
   const L = state._driveLive;
-  if (L && L.thinking) L.thinking.classList.remove('open');
+  if (L && L.thinking) L.thinking.remove();
   state._driveLive = { text: null, thinking: null };
 }
 
 // One normalized agent event → the transcript. Tool calls collapse to compact
-// chips; thinking tucks to a preview; the working footer tracks live activity.
+// chips; thinking streams live then clears at the turn boundary; the working footer
+// tracks live activity.
 function driveRender(ev) {
   const L = state._driveLive;
   switch (ev.kind) {
     case 'user_prompt': driveResetLive(); driveStartTurnBlock(); driveAddEv('user', 'you', ev.text); driveScroll(true); driveBumpOut(0); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
     case 'assistant_text': driveBumpOut((ev.text || '').length); driveAddEv('assistant', 'claude', ev.text); break;
-    case 'thinking': { const r = driveAddThink(ev.text); if (r) r.classList.remove('open'); break; }
+    case 'thinking': { if (L.thinking) L.thinking.remove(); L.thinking = driveAddThink(ev.text); break; } // ephemeral: cleared at the next turn boundary
     case 'assistant_text_start': driveStatusLabel('Writing…'); L.text = driveAddEv('assistant', 'claude', ''); break;
     case 'assistant_text_delta':
       if (!L.text) L.text = driveAddEv('assistant', 'claude', '');

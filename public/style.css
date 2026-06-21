@@ -1133,6 +1133,11 @@ body.is-mobile .dvb-stage { height: 320px; }
 .dv-pill.error, .dv-pill.exited { background: #2a1416; color: #ef6f6f; }
 .dv-pill.starting { background: #15202e; color: var(--accent); }
 
+/* Permission-mode badge — always in view while driving so the active mode is never a
+   mystery. Bypass (the everyday Drive default) gets a loud danger chip. */
+.dv-mode { padding: 2px 9px; border-radius: 99px; font: 600 11px ui-monospace, Menlo, monospace; background: var(--panel); color: var(--muted); border: 1px solid var(--border); }
+.dv-mode.danger { background: #2a1416; color: #ef8f8f; border-color: #5a2a2e; }
+
 .dv-transcript { display: flex; flex-direction: column; gap: 10px; }
 /* A turn = one user prompt + everything it produced, read top-to-bottom. Turns are
    prepended (newest first); older turns get a divider above them. */
