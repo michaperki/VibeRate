@@ -3845,11 +3845,19 @@ function driveScroll(force) {
 // `bodyText` is plain text (set via textContent so streamed deltas can append
 // safely); returns the element for live filling.
 // Flipped flow: each user turn is its own block, prepended so the newest turn sits
-// at the TOP (just under the composer); events still append in order *within* a
-// block, so a turn reads top-to-bottom chronologically. Pre-turn events (system
-// banner on connect) fall back to the transcript root and settle at the bottom.
+// at the TOP (just under the composer). Events are prepended *within* a block too
+// (drivePlace), so the live activity — the forming assistant reply, tool chips,
+// thinking — always lands right under the composer instead of streaming downward
+// off-screen. Both axes reversed ⇒ the whole transcript reads newest-first with the
+// oldest at the bottom. Streaming deltas and tool results fill their bubble in place
+// (only the moment of insertion is reversed), so any single bubble still reads
+// normally. Pre-turn events (system banner on connect) fall back to the transcript
+// root and, being oldest, settle at the bottom.
 function driveContainer() {
   return state._driveTurnBlock || el('#dv-transcript');
+}
+function drivePlace(t, node) {
+  t.insertBefore(node, t.firstChild); // prepend → newest event on top
 }
 function driveStartTurnBlock() {
   const t = el('#dv-transcript'); if (!t) return;
@@ -3873,7 +3881,7 @@ function driveAddEv(cls, who, bodyText) {
     else b.textContent = bodyText;
     div.appendChild(b);
   }
-  t.appendChild(div);
+  drivePlace(t, div);
   driveScroll();
   return div;
 }
@@ -3957,7 +3965,7 @@ function driveAddTool(ev) {
   detail.appendChild(pre);
   row.appendChild(detail);
   line.addEventListener('click', () => { detail.classList.toggle('hidden'); row.classList.toggle('open'); });
-  t.appendChild(row);
+  drivePlace(t, row);
   (state._drivePending || (state._drivePending = [])).push({ id: ev.id || null, row });
   driveScroll();
   return row;
@@ -3993,7 +4001,7 @@ function driveAddThink(text) {
   if (text != null) body.textContent = text;
   row.appendChild(line); row.appendChild(body);
   line.addEventListener('click', () => row.classList.toggle('open'));
-  t.appendChild(row);
+  drivePlace(t, row);
   driveScroll();
   return row;
 }
@@ -4048,7 +4056,7 @@ function driveRenderAsk(ev) {
       await drivePost('/sessions/' + state.drive.id + '/answer', { askId: ev.askId, selections });
     } catch (e) { driveBanner(e.message, 'bad'); btn.disabled = false; }
   });
-  t.appendChild(card);
+  drivePlace(t, card);
   driveScroll();
 }
 
