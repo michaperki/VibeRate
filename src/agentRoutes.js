@@ -12,13 +12,19 @@ import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from '.
 import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
 
-// Local guard: refuse any request whose TCP peer isn't loopback. We deliberately
-// read socket.remoteAddress (the real peer) rather than req.ip, so a spoofed
-// X-Forwarded-For can't pass even though the app trusts proxies for link minting.
-function loopbackOnly(req, res, next) {
+// Is the TCP peer loopback? We deliberately read socket.remoteAddress (the real
+// peer) rather than req.ip, so a spoofed X-Forwarded-For can't pass even though the
+// app trusts proxies for link minting. A loopback peer means the request originated
+// *inside this container* (e.g. the driven agent's own headless browser) — the
+// internet always arrives via Fly's proxy, which is not loopback.
+function isLoopbackPeer(req) {
   const addr = req.socket && req.socket.remoteAddress;
-  const ok = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
-  if (!ok) return res.status(403).json({ error: 'agent control plane is loopback-only' });
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+// Local guard: refuse any request whose TCP peer isn't loopback.
+function loopbackOnly(req, res, next) {
+  if (!isLoopbackPeer(req)) return res.status(403).json({ error: 'agent control plane is loopback-only' });
   next();
 }
 
@@ -46,7 +52,17 @@ function fail(res, err) {
 // page to serve here — only the JSON/SSE control plane.
 export function mountAgent(app, opts = {}) {
   const { hosted = false, adminEmails = [], defaultCwd = process.cwd() } = opts;
-  const guard = hosted ? makeAdminGuard(adminEmails) : loopbackOnly;
+  const adminGuard = makeAdminGuard(adminEmails);
+  const guard = hosted ? adminGuard : loopbackOnly;
+
+  // The preview route only serves static workspace files read-only (no RCE), so it can
+  // safely admit the in-container agent capturing its own preview (loopback peer) even
+  // in hosted mode, while the internet still needs admin. This is what unblocks
+  // `vbrt shot $VBRT_PREVIEW_BASE/...` headless — a headless browser carries no admin
+  // cookie, but it reaches the route over loopback (see childEnv's VBRT_PREVIEW_LOOPBACK).
+  const previewGuard = hosted
+    ? (req, res, next) => (isLoopbackPeer(req) ? next() : adminGuard(req, res, next))
+    : loopbackOnly;
 
   // Make sure the default working directory exists so the very first session can
   // start (on Fly this is a dir on the persistent volume, not the app source).
@@ -164,10 +180,11 @@ export function mountAgent(app, opts = {}) {
   // the shared volume — no commit→push→CI→redeploy. Closes the "I built it but can't
   // show you" gap (DOGFOODING.md / drive-preview-gap): the hosted server already
   // shares the Fly volume with /data/workspaces/<slug>, so a freshly-written file is
-  // viewable instantly. Guarded like the rest of the control plane (it exposes the
-  // checkout's files, scoped to the instance admin). `res.sendFile` with `root`
-  // rejects path traversal (../ escapes) and `dotfiles:'deny'` keeps `.git` out.
-  app.get('/preview/:slug/*', guard, (req, res) => {
+  // viewable instantly. Read-only static serve, so `previewGuard` admits the instance
+  // admin *or* a loopback peer (the in-container agent capturing its own preview); the
+  // internet still needs admin. `res.sendFile` with `root` rejects path traversal
+  // (../ escapes) and `dotfiles:'deny'` keeps `.git` out.
+  app.get('/preview/:slug/*', previewGuard, (req, res) => {
     const base = resolveProjectCwd(req.params.slug);
     if (!base) return res.status(404).json({ error: 'project workspace is not set up yet; clone it first' });
     const rel = req.params[0] || 'index.html';

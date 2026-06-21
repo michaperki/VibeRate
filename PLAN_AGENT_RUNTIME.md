@@ -11,9 +11,34 @@ instead of the terminal. Canonical frame: `PRODUCT_STRATEGY.md` and `ROADMAP.md`
 the *drive* surface. Adjacent live-mode work: `LIVE_ORCHESTRATION.md`. Current
 pipeline shape: `ARCHITECTURE.md`.
 
-> Status: **open spec** — the central fork below is undecided. Mock both before
-> committing (see `PROJECT_VIEW_PLAN.md` for the house decision style: build the
-> forks, let Mike choose; don't pick unilaterally).
+> Status: **shipped & live — this is now the product core.** The central fork was
+> resolved (**Fork A**, spawn the real `claude` binary) and the PoC, token streaming,
+> and inline `ask` picker all shipped. The "THE FORK" section below is kept as the
+> decision record, not an open question.
+
+> ### Post-pivot triage (2026-06-21)
+> Drive went from "the proposed write half" to **the thing VibeRate is**
+> (`PRODUCT_STRATEGY.md`). Re-reading the remaining phases against the now-priorities:
+> - **Promote — ownership lease + single-writer + read-only fallback** (under
+>   "Approvals + interrupt" below). The load-bearing piece of the
+>   **fleet/session-management** priority (`PRODUCT_STRATEGY.md` #2). *Partly mitigated
+>   today:* `agent.js` only resumes sessions **we** started (`sessions` Map, in-process),
+>   so the two-writer race "can't happen yet" — the gap is **adopting/driving foreign
+>   sessions** (a session started in a terminal, or by another instance), which the
+>   cross-device index (`a4c1e40`, `f32dd6f`) now makes reachable. So this is lower
+>   urgency than it reads until foreign-session adoption is turned on, but it gates it.
+> - **Finish — surface `apiKeySource`** (from "Pitfalls"). *Half done, code-verified:*
+>   `childEnv` already **strips a stale `ANTHROPIC_API_KEY`/`AUTH_TOKEN` when on the
+>   subscription** (`agent.js:230`). The remaining slice is just **forwarding
+>   `apiKeySource` from the `system/init` event to the UI** so the operator can see
+>   which auth won — tiny, sits on the **onboarding** path (`ONBOARDING.md`).
+> - **Defer — dual-provider (Codex) unified event model.** Claude-first is the daily
+>   driver and reuses the JSONL pipeline; nothing in the now-cluster needs Codex.
+>   Park it until a second provider is actually demanded.
+> - **Approvals UX** stays important (the control plane is RCE) but is **single-tenant
+>   today** — Mike is the only driver, admin-gated. It moves to genuinely-blocking only
+>   when onboarding opens Drive to non-operators; track the real-multi-user pieces under
+>   "Hosted control" and `ONBOARDING.md`.
 
 ## Where this came from
 
@@ -143,11 +168,17 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
         **CAVEAT to verify first:** MCP tool-call timeout must be generous enough
         for a human to answer. (Capture-only rendering of the built-in card works
         today; plain end-of-turn text questions already round-trip via resume.)
-- [ ] **Approvals + interrupt** on the owned session; ownership lease + read-only
-      fallback for terminal-driven sessions.
-- [ ] **Dual-provider** unified event model (the likeliest schedule overrun —
-      normalizing app-server JSON-RPC and CLI stream-json into one schema, plus
-      reconnect/process recovery).
+- [ ] **Ownership lease + single-writer + read-only fallback** *(fleet enabler — needed
+      before foreign-session adoption).* Today we only resume sessions we started, so the
+      race can't occur yet; the lease is what makes it safe to **adopt a session we
+      didn't start** (terminal-driven, or another instance via the cross-device index).
+      A resume racing a live writer must drop to read-only, not fork the JSONL.
+- [ ] **Approvals + interrupt** on the owned session. *(Important but single-tenant
+      today — Mike is the only admin-gated driver. Becomes blocking when onboarding
+      opens Drive to non-operators; see `ONBOARDING.md`.)*
+- [ ] ~~**Dual-provider** unified event model~~ *(deferred post-pivot — Claude-first;
+      no now-cluster item needs Codex. Normalizing app-server JSON-RPC + CLI
+      stream-json into one schema waits until a second provider is demanded.)*
 - [ ] **Hosted control** (weeks): authenticated command queue, nonces/idempotency,
       ownership leases, audit log + revocation, device-vs-view credential split.
 

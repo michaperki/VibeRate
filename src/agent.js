@@ -243,6 +243,12 @@ function childEnv(session) {
     env.VBRT_PROJECT_SLUG = session.projectSlug;
     const origin = process.env.VBRT_PUBLIC_URL;
     if (origin) env.VBRT_PREVIEW_BASE = `${origin.replace(/\/+$/, '')}/preview/${session.projectSlug}`;
+    // Loopback mirror of the preview base. The public route is admin-gated, and a
+    // headless browser carries no admin cookie — so `vbrt shot` rewrites a public
+    // preview URL to this loopback origin (which the preview route admits for in-box
+    // peers) before navigating. Same file, same shared volume, no 403.
+    const port = process.env.PORT || 8080;
+    env.VBRT_PREVIEW_LOOPBACK = `http://127.0.0.1:${port}/preview/${session.projectSlug}`;
   }
   return env;
 }

@@ -23,26 +23,39 @@ RUN apt-get update \
 # Headless-capture system libraries (chromium's shared .so deps + fonts) so `vbrt
 # shot` can screenshot/clip agent-built UI in Drive — the deepest gap for a tool
 # whose whole job is visual dashboards. node:20-slim lacks the libs a launched
-# chromium needs; this installs exactly them. The chromium *binary* and the
-# playwright npm package are installed per-workspace on demand by `vbrt doctor
-# --fix` (evidence.js resolves playwright from the workspace's own node_modules) —
-# we deliberately don't bake a ~150MB browser into every image layer here. Isolated
-# layer: drop it if the image must slim down (capture then falls back to having the
-# agent register a file with `vbrt shot ./shot.png`).
+# chromium needs; this installs exactly them. The chromium *binary* is baked below
+# (post-pivot: Drive is the core, so in-container capture must work out of the box —
+# we no longer defer the browser to a per-workspace `vbrt doctor --fix`, which can't
+# bootstrap in the sandboxed Drive shell anyway).
 RUN npx --yes playwright install-deps chromium \
   && rm -rf /var/lib/apt/lists/* /root/.npm
 
 WORKDIR /app
 
-# Install deps first so this layer is cached unless the lockfile changes.
+# Where the baked chromium lives (and where evidence.js's launched browser looks at
+# runtime — the ENV is inherited by the spawned agent's `vbrt shot`).
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# Install deps first so this layer is cached unless the lockfile changes. `playwright`
+# is a regular dependency now, so `evidence.js` resolves it from /app/node_modules.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
+
+# Bake the chromium binary into the image (pinned to the installed playwright), so the
+# first `vbrt shot` in any Drive workspace captures immediately — no download, no
+# per-turn cache wipe, no admin-gated bootstrap.
+RUN npx playwright install chromium
 
 # The Claude Code CLI, on PATH as `claude` — what src/agent.js spawns (Fork A).
 RUN npm install -g @anthropic-ai/claude-code
 
 # App source (see .dockerignore for what's excluded).
 COPY . .
+
+# Put `vbrt` on PATH so a driven agent runs `vbrt shot`/`vbrt doctor` as documented,
+# not `node bin/vbrt.js` (past Drive sessions burned turns on this). bin/vbrt.js
+# resolves its deps against /app/node_modules via the symlink target.
+RUN chmod +x /app/bin/vbrt.js && ln -sf /app/bin/vbrt.js /usr/local/bin/vbrt
 
 # Fly's proxy routes to this port; bin/vbrt.js reads PORT. VBRT_DATA_DIR points
 # at the mounted volume (see fly.toml) so pushed projects survive redeploys.

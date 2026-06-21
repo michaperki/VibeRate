@@ -222,6 +222,21 @@ async function applyInteractions(page, { click, wait } = {}) {
   }
 }
 
+// In a Drive container, the public preview route (VBRT_PREVIEW_BASE) is admin-gated,
+// and a headless browser carries no admin cookie → 403. The same route admits loopback
+// peers, so rewrite a target that points at this session's public preview base to the
+// loopback mirror the runtime injected (VBRT_PREVIEW_LOOPBACK). The bytes are identical
+// (both read the same workspace off the shared volume). No-op outside Drive, or for any
+// other URL (localhost, the deployed app, etc.).
+function toCaptureUrl(url) {
+  const base = process.env.VBRT_PREVIEW_BASE;
+  const loop = process.env.VBRT_PREVIEW_LOOPBACK;
+  if (base && loop && typeof url === 'string' && url.startsWith(base)) {
+    return loop + url.slice(base.length);
+  }
+  return url;
+}
+
 // Capture a URL with Playwright *if it's installed*; otherwise tell the caller to
 // pass --image with a screenshot the agent already took. The lazy import keeps the
 // pushed skill bundle dependency-free (same pattern as @inquirer/express).
@@ -232,7 +247,7 @@ async function captureUrl(url, viewport, cwd, interact = null) {
   const { browser } = await launchForCapture(pw);
   try {
     const page = await browser.newPage({ viewport: { width: w || 1280, height: h || 800 } });
-    await page.goto(url, { waitUntil: 'networkidle' });
+    await page.goto(toCaptureUrl(url), { waitUntil: 'networkidle' });
     if (interact) await applyInteractions(page, interact);
     const buf = await page.screenshot({ type: 'png' });
     return `data:image/png;base64,${buf.toString('base64')}`;
@@ -268,7 +283,7 @@ async function captureClip(url, { viewport, seconds = 8, fps = 12, cwd, click = 
       recordVideo: { dir: tmp, size: { width, height } },
     });
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: 'load' }); // start near first paint, not network-idle
+    await page.goto(toCaptureUrl(url), { waitUntil: 'load' }); // start near first paint, not network-idle
     if (click || wait) await applyInteractions(page, { click, wait }); // e.g. click "play", then record the motion it triggers
     const video = page.video();
     // Compare successive frames; a small fixed-quality JPEG is byte-identical for

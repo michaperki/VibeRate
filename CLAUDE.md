@@ -53,10 +53,12 @@ burned turns rediscovering these facts; don't.
   shared volume with **zero commit/push/redeploy**. Hand the human that URL for any
   prototype/mock/page. Only commit+push when the change is meant to ship.
 - **Screenshots/clips for evidence:** `vbrt shot "$VBRT_PREVIEW_BASE/<path>" --label
-  after`. Headless capture needs the chromium *binary* in this workspace — if `shot`
-  says it's missing, run `vbrt doctor --fix` once (the image already carries chromium's
-  system libs), then re-run the same `shot`. Last resort: register a file you produced
-  yourself with `vbrt shot ./shot.png`.
+  after` — works out of the box (fixed 2026-06-21): `vbrt` is on PATH, Playwright +
+  chromium are baked into the image, and `shot` auto-rewrites a `$VBRT_PREVIEW_BASE`
+  target to loopback so the admin-gated preview route doesn't 403 your headless capture.
+  No `vbrt doctor --fix` dance needed. (If you're in an *old* container from before that
+  redeploy, the prior workarounds in memory still apply.) Last resort: register a file
+  you produced yourself with `vbrt shot ./shot.png`.
 - **`prototypes/` is gitignored at any depth** — a prototype under `public/prototypes/`
   won't stage. Use a non-ignored path (e.g. `public/proto/`) if it must be committed,
   or just preview it (above) and skip the commit.

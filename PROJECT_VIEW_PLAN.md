@@ -25,6 +25,27 @@ history live, not just read it back.
 > writes." Where it says "VibeRate is not the git host, so no editing" — that's still
 > true of the hosted bundle, but Drive edits the bound **workspace checkout** directly.
 
+## Post-pivot triage (2026-06-21)
+
+This doc grew during the read-only era and is ~80% shipped. Re-ranked against the
+now-priorities in `PRODUCT_STRATEGY.md`:
+
+- **Promoted to now-work:**
+  - **§H Mobile** — *mostly shipped* (Slices 1–3 live, code-verified 2026-06-21);
+    only Slice 4 polish remains. Not the big item it was scoped as.
+  - **§I Context management as a feature** *(new section below)* — priority #4. The
+    gauge shipped; the *affordances* (compact / branch / fresh) never got tracked.
+  - **§J Brain that fits any repo** *(new section below)* — priority #5. Promotes the
+    prose note into concrete work.
+  - A thin slice of **§D** (search, deep-link state, progressive load) supports a
+    growing fleet — keep, but after the four above.
+- **Deprioritized to the later social/learning layer** (`PRODUCT_STRATEGY.md` "what to
+  delay"): the rest of **§C** (real per-edit diffs, follow-up classification,
+  prompt-quality-through-consequences, provenance) and **§G #2** session clustering.
+  These polish the *read/understand* surface, which is now the byproduct, not the core.
+  Left in place, marked, not active.
+- **Removed:** the §F "Tests" hygiene line (out of scope by direction).
+
 ## Core organizing principle
 
 Two tracks joined at the seam: the **prompt unit** (`before → prompt → after`) is
@@ -126,7 +147,7 @@ scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right me
   - [x] *Push skill bundle:* rebuilt with `build-skill.mjs --plugin` so hosted
     pushes capture history (the build copies all of `src/` + `bin/vbrt.js`).
 
-### C. Prompt reader / outcome rail (Slice 4)
+### C. Prompt reader / outcome rail (Slice 4) — *read-mode; remaining `[ ]` items deprioritized (see triage)*
 > Research: `PROMPT_GALLERY.md` — a pass over Mike's real prompts found **12
 > archetypes**, and the key product finding is that each needs a *different*
 > artifact (only ~3/12 are screenshot-shaped). So the outcome rail must be
@@ -278,7 +299,6 @@ scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right me
   curl output for backend; captured at push, viewed read-only. Needs `EVIDENCE.md`.
 
 ### F. Hygiene
-- [ ] **Tests** around parsers / prompt extraction / redaction / activity attribution.
 - [x] **Hosted ingest hardening** *(first pass shipped 2026-06-17)* — rate limiting, per-owner/project bundle limits,
   max evidence/image counts, server-side payload validation, admin/delete tools,
   backups/export/restore for `/data`. Shipped: JSON/session/message/evidence/image
@@ -315,15 +335,45 @@ scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right me
    "🧠 brain edits", "🧠 AI architecture", "🧠 Brain history", the context gauge,
    and the "glow = recency" key.
 
-### H. Mobile — responsive port → **`PLAN_MOBILE.md`**
-- [ ] Full read+drive port of the app to mobile, delivered **responsively in the one
-  codebase** (no separate route/SPA), centered on the **Variant A** unified screen
-  (chat-first + expandable **brain header strip**). Decided 2026-06-20 (Mike).
-  Prototype: `public/proto/mobile-unified.html`. The dashboard / timeline / side rails
-  / reader all get a mobile home as drill-ins off the Variant-A project screen. Signature
-  net-new feature: **brain ⇄ chat live link** (a Drive `tool_use` on a brain doc glows its
-  node — lands on desktop too). Full architecture, IA, component-porting table, and slicing
-  in `PLAN_MOBILE.md`.
+### H. Mobile — responsive port → **`PLAN_MOBILE.md`** *(mostly shipped — only Slice 4 polish open)*
+> Correction (2026-06-21, code-verified): **Slices 1–3 are live** in
+> `public/{index.html,style.css,app.js}` — not open. The Variant A core works:
+> - [x] **Slice 1** — fixed app bar, off-canvas projects drawer, sessions bottom sheet,
+>   single-column layout, all gated by `body.is-mobile` (`matchMedia(max-width:760px)`).
+> - [x] **Slice 2** — `.brainbar` header strip (a chip per brain doc) + brain expand
+>   overlay mounting the real SVG renderer.
+> - [x] **Slice 3** — the **brain ⇄ chat live link**: a Drive `tool_use` glows the doc's
+>   chip + node (`brainTouch()`); lands on desktop too.
+- [ ] **Slice 4 polish only** — on-screen-keyboard scroll behavior (`visualViewport` /
+  `dvh`, the classic mobile-chat bug), time-travel scrubber touch sizing, and the open
+  design call on whether to consolidate the rail into the conversation scroll. Small
+  remainder; not the big "port" it was scoped as. Slicing in `PLAN_MOBILE.md`.
+
+### I. Context management as a feature — *NOW-PRIORITY #4 (new)*
+> The context-fullness gauge shipped (§ Done, Slice 1) but it's still just a *gauge*.
+> `PRODUCT_STRATEGY.md` is explicit: surface dumb-zone risk **and offer the
+> affordances**, since context is the scarce resource in agentic-first coding. None of
+> the actions below are tracked anywhere else — this is the gap.
+- [ ] **Dumb-zone warning in Drive** — when the live session crosses ~75%, the
+  composer/header flags it (not just the static reader gauge), so the driver sees it
+  *before* sending the next prompt.
+- [ ] **Compact / branch / fresh affordances** — one-tap actions off that warning:
+  compact the running session, branch a fresh session that inherits the brain + a
+  summary, or start clean. These are Drive-runtime actions (`PLAN_AGENT_RUNTIME.md`),
+  not viewer chrome.
+- [ ] **Per-turn context trend** — show direction (filling fast vs. steady), not only
+  the absolute %, so "compact now vs. one more turn" is an informed call.
+
+### J. Brain that fits *any* repo — *NOW-PRIORITY #5 (new; promotes the prose note above)*
+> The brain visualizer was tuned on this repo's conventions (`SEED.md`, `DEVLOG.md`,
+> plan docs); most devs don't use those (see "Brain must fit any repo" above). Concrete
+> work to infer structure from whatever `.md` network a repo actually has:
+- [ ] **Filename-independent role inference** — classify constitution vs. plan vs. log
+  vs. memory from headings / links / size / recency, not from our filenames.
+- [ ] **Generalize clustering + completion** off inferred roles so the web/tree layouts
+  and rings work on a repo that never heard of our conventions.
+- [ ] **Backlog experiment** — load Mike's older vibe-coded projects, map their doc
+  structures into the brain, and generalize the heuristics from what breaks.
 
 ## 🎮 Experiment 2 feedback (Codex · 2026-06-17)
 

@@ -7,6 +7,22 @@
 > rail** (`PROJECT_VIEW_PLAN.md §C`). Mock of the per-archetype renderings:
 > `prototypes/outcome-artifacts.html`.
 
+> ### Post-pivot triage (2026-06-21)
+> The **capture engine for the terminal/`push` flow is done** and was hammered hard
+> across five experiments — leave it. After the Drive pivot (`PRODUCT_STRATEGY.md`),
+> the priorities here split cleanly:
+> - **✅ Fixed — capture inside the Drive container.** The doc assumed the agent runs
+>   in the user's own terminal; Drive runs it in a barebones `node:20-slim` clone where
+>   `vbrt shot` + the preview URL failed three ways (bin not on PATH, no Playwright/
+>   browser, admin-gated preview 403). All three are fixed at the root (`Dockerfile` +
+>   `agentRoutes.js`/`agent.js`/`evidence.js`); effective after redeploy. Detail in
+>   **§ Drive-container capture** below.
+> - **Deprioritized — the rest of the outcome rail** (provenance, follow-up
+>   classification, prompt-quality signals, multi-viewport, rail-row pill, rollup) is
+>   *read-mode* polish. It belongs to the later social/learning layer
+>   (`PRODUCT_STRATEGY.md` "what to delay"), not the now-cluster. Kept below for when
+>   that layer is picked back up; not active work.
+
 ## Why
 
 A prompt is more legible when you can *see what it produced*. `PROMPT_GALLERY.md`
@@ -148,7 +164,31 @@ side. (Lone shots stand alone.)
       polymorphic outcome rail (`PROJECT_VIEW_PLAN.md §C`, Stages 1–2, 2026-06-18). The
       "broader outcome rail" that's still open, exploded into concrete work:
 
-### Outcome rail — what's still open
+### Drive-container capture — ✅ fixed 2026-06-21 (effective after redeploy)
+
+The agent now usually runs inside Drive's host container, not the user's terminal, and
+the documented "show the human + screenshot" path did not work there. Fixed at the root
+in the `Dockerfile` + runtime so the core capture loop works where the core agent runs:
+
+- [x] **`vbrt` on PATH in the Drive image.** `Dockerfile` symlinks
+      `/app/bin/vbrt.js → /usr/local/bin/vbrt`, so `vbrt shot`/`vbrt doctor` run as
+      documented — no more `node bin/vbrt.js` detour.
+- [x] **Playwright + chromium baked into the image.** `playwright` is now a regular
+      dependency (`npm ci` installs it to `/app/node_modules`, where `evidence.js`
+      resolves it), and `npx playwright install chromium` bakes the browser at
+      `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`. No per-turn download, no sandboxed-`npm`
+      no-op, no `vbrt doctor --fix` bootstrap needed.
+- [x] **Preview route admits in-container capture without opening it to the internet.**
+      The route stays admin-gated for the public, but `previewGuard` also admits
+      **loopback peers** (`agentRoutes.js`); `childEnv` injects `VBRT_PREVIEW_LOOPBACK`
+      and `evidence.js`'s `toCaptureUrl` rewrites a public `$VBRT_PREVIEW_BASE` target to
+      that loopback origin before navigating — so the headless browser hits `127.0.0.1`
+      and gets the file instead of a 403.
+- [ ] **Verify end-to-end from inside a redeployed Drive session** — code-complete and
+      syntax-checked; the one remaining step is a live `vbrt shot $VBRT_PREVIEW_BASE/...`
+      from a real driven session once the host runs the new image.
+
+### Outcome rail — what's still open *(deprioritized — read-mode / later social layer)*
 
 Stages 1–2 already shipped a lot: the archetype→family router (`ARCH_FAMILY`/
 `FAMILY_PLACEMENT`), the `shot` + `diff` families, the bespoke `railExperiment`/
