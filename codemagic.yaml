@@ -22,7 +22,7 @@ workflows:
         BUNDLE_ID: "com.viberate.app"
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
-        APP_STORE_APPLE_ID: "0000000000"   # replace with the numeric App ID from App Store Connect
+        APP_STORE_APPLE_ID: "6782960153"   # VibeRate IDE, App Store Connect numeric Apple ID
       node: 22          # Capacitor 8 CLI requires Node >=22 (independent of the server's Node 20)
       xcode: latest
       cocoapods: default

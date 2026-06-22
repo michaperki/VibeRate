@@ -81,7 +81,9 @@ on your iPhone via the TestFlight app. Internal testers skip App Review.
 ## Status / next
 
 - [x] Capacitor + Codemagic scaffold committed-ready in the repo.
-- [ ] You: Apple App ID + App Store Connect API key + Codemagic connect (steps above).
+- [x] App registered: name **VibeRate IDE**, bundle `com.viberate.app`, App Store Connect
+      Apple ID `6782960153` (wired into `codemagic.yaml`).
+- [ ] You: App Store Connect API key → add to Codemagic as `VibeRateASC`; connect the repo.
 - [ ] You: add `assets/icon.png`.
 - [ ] First Codemagic build → TestFlight install.
 - [ ] Wire APNs push end to end (Fly server → device) — the "agent needs you" notification.
