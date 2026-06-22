@@ -1101,6 +1101,14 @@ body.public #feed { margin: 0 auto; }
 .dvb-legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 10.5px; }
 .dvb-legend > span { display: inline-flex; align-items: center; gap: 5px; }
 .dvb-legend i { width: 9px; height: 9px; border-radius: 50%; }
+/* The colour legend only decoded hue; size/brightness/halo/ring also carry meaning, so
+   spell those out (otherwise the big bright hub vs. a tiny dim starburst is a mystery). */
+.dvb-weight { display: flex; gap: 14px; flex-wrap: wrap; width: 100%; margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+.dvb-weight > span { display: inline-flex; align-items: center; gap: 5px; }
+.dvb-weight i { flex: 0 0 auto; border-radius: 50%; }
+.dvb-weight .lw-size { width: 12px; height: 12px; background: #767d8e; }
+.dvb-weight .lw-glow { width: 8px; height: 8px; background: #ff9d5c; box-shadow: 0 0 4px 2px rgba(255, 157, 92, .6); }
+.dvb-weight .lw-ring { width: 11px; height: 11px; background: transparent; border: 2px solid #3fb950; }
 .dvb-edge { stroke: #2b3340; stroke-width: 1; }
 .dvb-edge.transient { stroke: #ff9d5c; }
 .dvb-ripple { fill: none; pointer-events: none; }
@@ -1193,9 +1201,24 @@ body.is-mobile .dvb-stage { height: 320px; }
   padding: 10px 12px; overflow-x: auto; font-size: 12.5px; margin: 8px 0;
 }
 /* Markdown tables (renderMarkdown): scroll horizontally rather than blow out width. */
+/* Wide screens / desktop: a real grid, with horizontal scroll + a sane per-column
+   floor so columns don't collapse to one character wide before the table scrolls. */
 .md-table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; margin: 6px 0 10px; font-size: 13px; }
-.md-table th, .md-table td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; }
+.md-table th, .md-table td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; min-width: 90px; }
 .md-table th { background: rgba(255, 255, 255, .04); font-weight: 650; }
+/* Phone width: a 3-column grid can't fit, so restack each row as a labelled card —
+   one block per row, the column header (data-label) above each value. Beats both the
+   unreadable squeeze and a fiddly sideways scroll on touch. */
+@media (max-width: 640px) {
+  .md-table { display: block; overflow-x: visible; border: 0; font-size: 13.5px; }
+  .md-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+  .md-table tbody, .md-table tr, .md-table td { display: block; width: auto; }
+  .md-table tr { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 10px; padding: 2px 0; background: rgba(255, 255, 255, .02); }
+  .md-table td { border: 0; border-top: 1px solid var(--border); min-width: 0; padding: 7px 12px; }
+  .md-table tr td:first-child { border-top: 0; }
+  .md-table td::before { content: attr(data-label); display: block; margin-bottom: 2px; font: 600 10px ui-sans-serif, system-ui; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .md-table td[data-label=""]::before, .md-table td:empty { display: none; }
+}
 /* Copy button on code blocks — appears on hover (always-on for touch). */
 .dv-copy {
   position: absolute; top: 6px; right: 6px; padding: 2px 8px; cursor: pointer;
@@ -1329,9 +1352,14 @@ body.is-mobile .dv-copy { opacity: .75; }
 }
 .pb-drive:hover { background: var(--accent); color: #0a1020; }
 .pane-title .pb-drive { margin-left: 10px; }
-/* "Return to Drive" — a session is still live server-side; signal it in live-red. */
-.pb-drive.resume { color: #f85149; border-color: rgba(248, 81, 73, 0.7); }
-.pb-drive.resume:hover { background: #f85149; color: #0a1020; }
+/* "Return to Drive" — a session is still live server-side. This is a primary nav
+   action, so render it filled in brand purple (not red): red stays reserved for caution
+   (the ⚡ bypass danger pill + the live dot), so a nav button never reads as destructive.
+   The ✦ glyph + a subtle pulse carry the "still live" signal instead of a danger hue. */
+.pb-drive.resume { background: var(--accent); color: #0a1020; border-color: var(--accent); animation: pb-live 2s ease-in-out infinite; }
+.pb-drive.resume:hover { background: #6b4cf2; border-color: #6b4cf2; color: #fff; }
+@keyframes pb-live { 0%, 100% { box-shadow: 0 0 0 0 rgba(124, 92, 255, .45); } 50% { box-shadow: 0 0 0 4px rgba(124, 92, 255, 0); } }
+@media (prefers-reduced-motion: reduce) { .pb-drive.resume { animation: none; } }
 
 /* Drive workspace setup — cloning spinner */
 .dv-cloning { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13.5px; padding: 8px 0; }

@@ -236,7 +236,9 @@ function renderMarkdown(md) {
       i += 2; // consume header + delimiter
       let rows = '';
       while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
-        rows += `<tr>${cells(lines[i]).map((c) => `<td>${inlineMd(c)}</td>`).join('')}</tr>`;
+        // data-label carries the column header so a narrow viewport can stack each row
+        // into a labelled key/value card (CSS) instead of squeezing 3 columns onto a phone.
+        rows += `<tr>${cells(lines[i]).map((c, ci) => `<td data-label="${esc(heads[ci] || '')}">${inlineMd(c)}</td>`).join('')}</tr>`;
         i++;
       }
       html += `<table class="md-table"><thead><tr>${heads.map((h) => `<th>${inlineMd(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
@@ -4556,6 +4558,7 @@ const liveBrain = (() => {
   const els = new Map();          // key -> { g, dot, glow, ring, prog, label }
   let edges = [];
   let plans = {};                 // node id -> { done, total }
+  let selectedId = null;          // node tapped to pin its label (label policy lives in draw())
 
   const baseKey = (p) => String(p).split(/[\\/]/).pop().toLowerCase();
   const baseLabel = (p) => String(p).split(/[\\/]/).pop();
@@ -4587,9 +4590,19 @@ const liveBrain = (() => {
     return 'read';
   }
 
+  // Deterministic angle from the node id so the formation is *stable across reloads*
+  // (a fresh page has no prior positions to restore). Random spawn angles re-rolled the
+  // whole layout — and therefore the label collisions — on every open; a hash keeps a
+  // given doc in the same spot each time.
+  function hashAngle(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 3600) / 3600 * Math.PI * 2;
+  }
+
   function addNode(spec) {
     if (nodes.has(spec.id)) return nodes.get(spec.id);
-    const ang = Math.random() * Math.PI * 2;
+    const ang = hashAngle(spec.id);
     const spawnR = spec.core ? 28 : (spec.kind === 'code' ? 130 : 88);
     const n = { x: CX + Math.cos(ang) * spawnR, y: CY + Math.sin(ang) * spawnR, vx: 0, vy: 0, heat: 0, flash: 0, flashKind: 'read', fade: 0, ...spec };
     nodes.set(n.id, n);
@@ -4813,11 +4826,37 @@ const liveBrain = (() => {
       } else { rec.ring.style.display = 'none'; rec.prog.style.display = 'none'; }
       rec.label.setAttribute('x', n.x.toFixed(1));
       rec.label.setAttribute('y', (n.y + r + 11).toFixed(1));
-      // Floor raised 0.35 → 0.55 (UI_FEEDBACK P0 #1): idle non-core labels were
-      // landing ~0.42 opacity — the "too dark on mobile" complaint. Multiplier
-      // dropped to 0.45 so the heat/core boost still caps at 1.0 and core/active
-      // nodes keep popping; idle non-core now clears ~0.6.
-      rec.label.setAttribute('opacity', (0.55 + 0.45 * Math.min(1, n.heat * 1.5 + (n.core ? 0.6 : 0.1))).toFixed(2));
+    }
+    placeLabels();
+  }
+
+  // Label policy + de-collision (UI_FEEDBACK P0 #1, collision sub-item). Showing all
+  // ~20 labels at once guarantees overlap on a phone, so by default only the core docs,
+  // the currently active/edited nodes, and a tapped node carry a label. A greedy
+  // priority pass (selected > core > hottest first) then hides any remaining label whose
+  // box would overlap one already placed — labels never stack, and the hub stays legible.
+  function placeLabels() {
+    const wish = [];
+    for (const n of nodes.values()) {
+      const rec = els.get(n.id);
+      if (!rec) continue;
+      const active = n.heat > 0.2 || n.flash > 0.15;
+      const sel = n.id === selectedId;
+      if (!(n.core || active || sel)) { rec.label.setAttribute('opacity', '0'); continue; }
+      wish.push({ n, rec, pri: (sel ? 2 : n.core ? 1 : 0) + n.heat });
+    }
+    wish.sort((a, b) => b.pri - a.pri);
+    const placed = [];
+    for (const { n, rec } of wish) {
+      const r = n.r + n.heat * 5;
+      const cx = n.x, cy = n.y + r + 11;
+      const halfW = (n.label.length * 3 + 4), halfH = 7;
+      const box = { x1: cx - halfW, x2: cx + halfW, y1: cy - halfH, y2: cy + halfH };
+      const clash = placed.some((p) => box.x1 < p.x2 && box.x2 > p.x1 && box.y1 < p.y2 && box.y2 > p.y1);
+      if (clash) { rec.label.setAttribute('opacity', '0'); continue; }
+      placed.push(box);
+      const op = n.id === selectedId ? 1 : 0.6 + 0.4 * Math.min(1, n.heat * 1.5 + (n.core ? 0.6 : 0.1));
+      rec.label.setAttribute('opacity', op.toFixed(2));
     }
   }
 
@@ -4854,6 +4893,11 @@ const liveBrain = (() => {
           <span><i style="background:#5aa9e6"></i>code</span>
           <span><i style="background:#ff9d5c"></i>edited</span>
         </span>
+        <span class="dvb-weight" title="A node's size, brightness and halo all encode recency — not just its colour.">
+          <span><i class="lw-size"></i>bigger · brighter = recently touched</span>
+          <span><i class="lw-glow"></i>halo = live activity</span>
+          <span><i class="lw-ring"></i>ring = plan progress</span>
+        </span>
       </div>
     </section>`;
   }
@@ -4865,7 +4909,11 @@ const liveBrain = (() => {
     const g = ev.target.closest('.dvb-node');
     if (!g) return;
     const n = nodes.get(g.dataset.id);
-    if (!n || !n.path) return;
+    if (!n) return;
+    // Tap reveals a node's label even when it's cold (default policy only labels the
+    // core + active nodes — see draw()). Tapping again un-pins it.
+    selectedId = selectedId === n.id ? null : n.id;
+    if (!n.path) return;
     const doc = currentDocNode(n.path);
     if (doc) openDocLightbox(doc);
   }

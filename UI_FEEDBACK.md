@@ -17,9 +17,14 @@ inside). Frame is `PRODUCT_STRATEGY.md`.
 > hierarchy/legibility fix, not a restyle.
 
 > **Status (2026-06-22):** P0 (#1–#3) shipped, then the P1/P2/P3 sweep (#4, #5, #7,
-> #8, #9, #10) shipped — items marked **✅ shipped** below. **#6 (the bypassPermissions
-> gate) was rejected by the owner** and removed — see *What I'm explicitly not taking*.
-> Still open: #11 (red collision, minor), #12 (landing copy), #13 (positioning, Mike's call).
+> #8, #9, #10) shipped — items marked **✅ shipped** below. A later pass shipped the
+> deferred **#1 collision/de-collision** sub-item (label gating + de-collision +
+> deterministic layout) and the **#11 red collision** (resume button → brand-purple).
+> A mobile **markdown-table restack** (agent tables stacked into labelled cards at phone
+> width) + a **brain visual-weight legend** also landed (not originally numbered).
+> **#6 (the bypassPermissions gate) was rejected by the owner** and removed — see *What
+> I'm explicitly not taking*. Still open: #11 *naming* (kept on-brand), #12 (landing
+> copy), #13 (positioning, Mike's call).
 
 ## How to read the priority order
 
@@ -66,10 +71,13 @@ directly undercuts the product's core claim — "the brain is the control surfac
    so labels aren't hover-gated on a touch device (`style.css:778`). Add
    `body.is-mobile .gnode.on .glabel { opacity: 1 }` for the tapped node.
 3. **Collision** (R1's specific note — STORY.md over PRODUCT_STRATEGY.md): the live
-   force-sim already separates *dots* but not *label boxes*. Cheapest acceptable fix is
-   to **only render labels for core + heated nodes by default** and reveal the rest on
-   tap — R2 listed this as an option and it sidesteps collision entirely. A true
-   collision-aware label layout is more work; defer it unless tap-to-reveal tests badly.
+   force-sim already separates *dots* but not *label boxes*. ✅ **shipped (2026-06-22):**
+   `liveBrain` now (a) labels only the core docs + currently active/edited nodes by
+   default and reveals the rest on tap (`onPick` pins a `selectedId`), (b) runs a greedy
+   priority de-collision pass in `placeLabels()` that hides any label box overlapping one
+   already placed, and (c) spawns nodes at a **deterministic hash angle** instead of
+   `Math.random()`, so the formation — and therefore which labels are visible — is stable
+   across reloads instead of re-rolling every open.
 
 **Don't:** invent a third brain renderer. Both paths share the doc-graph data; fix them
 in place (the standing `PLAN_MOBILE.md` rule — relocate/adjust, never fork a renderer).
@@ -205,7 +213,7 @@ and the cards carry deliberately-rich outcome chips (a shipped feature, `ROADMAP
 Worth a compact/expanded toggle for `renderReaderCard` (`app.js:3072`) — `.pc-prompt`
 `max-height:280px` is already a clamp — but it's polish, not a first-contact blocker.
 
-### 11. "Return to Drive" — naming + red collision (both, minor)
+### 11. "Return to Drive" — naming + red collision (both, minor) — ✅ red resolved
 R2 #8: "Drive" is overloaded (page? mode? metaphor?) — suggests "Back to driving" /
 "Return to agent." R1: the button's red collides with the `bypass` danger pill.
 Reality check on R1: the button is **purple** normally (`var(--accent)`) and only red in
@@ -213,8 +221,11 @@ the **resume/live** state (`.pb-drive.resume { #f85149 }`, `app.js:1140`) — th
 our *live* convention, not an error. But the deeper point stands: **live-red and
 danger-red are the same red** doing two jobs. My call: keep the *naming* ("Return to
 Drive" is fine and on-brand), and resolve the red overlap by reserving danger-red for
-the permission/RCE pill (the `⚡ bypass` danger pill kept in the split status row, #4)
-and shifting the live accent to a distinct hue. Low effort, low urgency — still open.
+the permission/RCE pill (the `⚡ bypass` danger pill kept in the split status row, #4).
+✅ **shipped (2026-06-22):** `.pb-drive.resume` is now a **filled brand-purple** primary
+nav button (with a subtle accent pulse + the ✦ glyph carrying the "still live" signal)
+instead of a red outline — so red is reserved for caution (the bypass pill + the live
+dot) and a nav button no longer reads as destructive. *Naming* left as-is (on-brand).
 
 ### 12. Landing copy: concreteness + hero emphasis (both, partial)
 R2 #1/#5 wants the hero sub-copy to lead with the concrete mechanic ("Start a real
