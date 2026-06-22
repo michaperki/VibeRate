@@ -244,12 +244,44 @@ export function getSession(slug, sessionId) {
   return readJson(path.join(projectDir(slug), 'sessions', `${sessionId}.json`), null);
 }
 
-// Git history captured at add-time (commits for the timeline overlay).
+// Reconcile a fresh git capture against what we've already stored. Every push (and
+// every Drive turn-end ingest) re-runs `git log` from scratch, so a rewritten
+// history — git reset, rebase, squash, force-push, or two machines pushing one
+// slug — used to silently DROP commits that no longer sit on HEAD, losing work from
+// the very timeline we dogfood. Instead we UNION by hash: commits in the fresh
+// capture are authoritative (live, current HEAD); commits we'd captured before that
+// vanished from the log are kept and flagged `rewritten` so the timeline preserves
+// them (dimmed) rather than losing them. A rewritten commit that later reappears
+// (e.g. a reset forward, or the other machine re-pushing) is promoted back to live.
+// Bounded so preserved ghosts can't grow without limit across many rewrites.
+// Known limitation: two machines on one slug with divergent history will ping-pong
+// which set is "live" each push — but no commit is ever lost, which is the point.
+const GIT_COMMIT_CAP = 6000; // a little over extractGit's 4000, to leave room for ghosts
+export function reconcileGit(prev, next) {
+  if (!next || !Array.isArray(next.commits)) return next;
+  if (!prev || !Array.isArray(prev.commits) || !prev.commits.length) return next;
+  const live = new Set(next.commits.map((c) => c.hash));
+  const byHash = new Map();
+  // Carry forward prior commits the fresh log no longer reaches, marked rewritten.
+  for (const c of prev.commits) {
+    if (live.has(c.hash)) continue; // the fresh capture holds the authoritative copy
+    byHash.set(c.hash, c.rewritten ? c : { ...c, rewritten: true });
+  }
+  // Fresh capture wins for everything on current HEAD (clears any stale `rewritten`).
+  for (const c of next.commits) byHash.set(c.hash, c);
+  const commits = [...byHash.values()].sort((a, b) => b.t - a.t).slice(0, GIT_COMMIT_CAP);
+  const rewrittenCount = commits.reduce((n, c) => n + (c.rewritten ? 1 : 0), 0);
+  return { ...next, commits, ...(rewrittenCount ? { rewrittenCount } : {}) };
+}
+
+// Git history captured at add-time (commits for the timeline overlay). Merges with
+// any prior capture (see reconcileGit) so rewritten history doesn't lose commits.
 export function saveGit(cwd, git, slug = slugify(cwd)) {
   if (!git) return;
   const dir = projectDir(slug);
   ensureDir(dir);
-  fs.writeFileSync(path.join(dir, 'git.json'), JSON.stringify(git));
+  const prev = readJson(path.join(dir, 'git.json'), null);
+  fs.writeFileSync(path.join(dir, 'git.json'), JSON.stringify(reconcileGit(prev, git)));
 }
 
 export function getGit(slug) {

@@ -2463,7 +2463,7 @@ function renderRibbon(sessions) {
   const ctick = commits
     .map(
       (c) =>
-        `<span class="rib-c ${c.isRevert ? 'revert' : ''}${state._liveFreshCommits?.has(c.hash) ? ' rib-fresh' : ''}" data-commit="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · ${esc(c.hash)} · ${esc(c.subject)}"></span>`,
+        `<span class="rib-c ${c.isRevert ? 'revert' : ''}${c.rewritten ? ' rib-rewritten' : ''}${state._liveFreshCommits?.has(c.hash) ? ' rib-fresh' : ''}" data-commit="${esc(c.hash)}" style="left:${pct(c.t)}%" title="${esc(fmtShortDT(c.t))} · ${esc(c.hash)} · ${esc(c.subject)}${c.rewritten ? ' · rewritten away (no longer on HEAD)' : ''}"></span>`,
     )
     .join('');
 
@@ -2664,7 +2664,7 @@ function statusRow(d) {
 }
 function commitDetailHtml(c) {
   const bd = brainDocsOf(c);
-  const flags = [c.isMerge ? 'merge' : '', c.isRevert ? 'revert' : ''].filter(Boolean).join(' · ');
+  const flags = [c.isMerge ? 'merge' : '', c.isRevert ? 'revert' : '', c.rewritten ? 'rewritten' : ''].filter(Boolean).join(' · ');
   return `<div class="rp-head">commit <code>${esc(c.hash)}</code>${flags ? ` <span class="rp-flag">${esc(flags)}</span>` : ''}</div>
     <div class="rp-sub">${esc(c.subject || '(no subject)')}</div>
     <div class="rp-meta">${esc(fmtShortDT(c.t))}${c.files ? ` · ${c.files} file${c.files === 1 ? '' : 's'} changed` : ''}${bd.length ? ` · ${bd.length} 🧠` : ''}</div>
@@ -3498,6 +3498,87 @@ function forgetDriveSession(cid) {
   writeDriveSessions(readDriveSessions().filter((s) => s.claudeSessionId !== cid));
 }
 
+// ---- prompt chips (first-message shortcuts) ---------------------------------
+// Starting a Drive session almost always opens with the same boilerplate ("read
+// the codebase + .md docs, follow the plan, commit when done"), and the
+// first-message form has dead space below the textarea. Chips insert a saved
+// phrase at the cursor so it isn't retyped each time — a static seed list plus a
+// user-editable set persisted in localStorage (ROADMAP "prompt chips v1"; v2 —
+// mining your own history for openers — can follow). Mirrors the DRIVE_*_KEY
+// localStorage pattern above.
+const DRIVE_CHIPS_KEY = 'vbrt.drivePromptChips';
+const DRIVE_CHIP_DEFAULTS = [
+  { label: '📖 Read brain', text: 'Read the codebase and the .md brain docs before you start.' },
+  { label: '🧭 Follow the plan', text: 'Follow the relevant plan doc.' },
+  { label: '✅ Commit & push', text: 'Commit and push when you are done.' },
+  { label: '🔁 Full opener', text: 'Research the codebase and the .md brain docs, follow the plan doc, then commit and push when finished.' },
+];
+function readDriveChips() {
+  try { return JSON.parse(localStorage.getItem(DRIVE_CHIPS_KEY) || '[]') || []; }
+  catch { return []; }
+}
+function writeDriveChips(list) {
+  try { localStorage.setItem(DRIVE_CHIPS_KEY, JSON.stringify(list.slice(0, 20))); }
+  catch { /* private mode / quota — the static defaults still work this session */ }
+}
+// Insert a phrase into the composer at the cursor (or append if it isn't focused),
+// joining onto existing text with a space/newline so chips compose into a prompt.
+function driveInsertPhrase(ta, text) {
+  if (!ta) return;
+  if (document.activeElement === ta && ta.selectionStart != null) {
+    const s = ta.selectionStart, e = ta.selectionEnd, before = ta.value.slice(0, s);
+    const lead = before && !/\s$/.test(before) ? ' ' : '';
+    ta.value = before + lead + text + ta.value.slice(e);
+    const pos = (before + lead + text).length; ta.selectionStart = ta.selectionEnd = pos;
+  } else {
+    const sep = ta.value && !/\s$/.test(ta.value) ? '\n' : '';
+    ta.value = ta.value + sep + text;
+  }
+  ta.focus();
+}
+// Render the chip row: static defaults, then saved phrases (each removable), then a
+// "★ save" affordance that captures the current composer text as a new phrase.
+// Built as DOM nodes (not innerHTML) so arbitrary saved text can't inject markup.
+function renderDriveChips() {
+  const box = el('#dv-chips'); if (!box) return;
+  const ta = el('#dv-prompt');
+  box.textContent = '';
+  const mkChip = (label, text, opts = {}) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dv-chip' + (opts.saved ? ' saved' : '') + (opts.cls ? ' ' + opts.cls : '');
+    b.textContent = label;
+    b.title = opts.title || text;
+    if (text != null) b.addEventListener('click', () => driveInsertPhrase(ta, text));
+    if (opts.onClick) b.addEventListener('click', opts.onClick);
+    if (opts.onRemove) {
+      const x = document.createElement('span');
+      x.className = 'dv-chip-x'; x.textContent = '×'; x.title = 'Remove this phrase';
+      x.addEventListener('click', (e) => { e.stopPropagation(); opts.onRemove(); });
+      b.appendChild(x);
+    }
+    return b;
+  };
+  for (const c of DRIVE_CHIP_DEFAULTS) box.appendChild(mkChip(c.label, c.text));
+  const saved = readDriveChips();
+  saved.forEach((text, i) => {
+    const label = text.length > 28 ? text.slice(0, 27) + '…' : text;
+    box.appendChild(mkChip(label, text, {
+      saved: true,
+      onRemove: () => { const list = readDriveChips(); list.splice(i, 1); writeDriveChips(list); renderDriveChips(); },
+    }));
+  });
+  box.appendChild(mkChip('★ save', null, {
+    cls: 'dv-chip-save', title: 'Save the current message as a reusable phrase',
+    onClick: () => {
+      const text = (ta && ta.value || '').trim();
+      if (!text) return;
+      const list = readDriveChips().filter((t) => t !== text); // de-dup, move to front
+      list.unshift(text); writeDriveChips(list); renderDriveChips();
+    },
+  }));
+}
+
 // Cross-device session index (server-side). The localStorage log above only knows
 // sessions this browser drove; the server reads the durable on-disk transcripts in
 // the project's workspace, so a session started on a phone is listed here too.
@@ -3708,6 +3789,7 @@ function renderDrivePrompt(slug, st) {
        <div class="dv-warn" id="dv-permwarn"></div>
        <label for="dv-prompt">First message</label>
        <textarea id="dv-prompt" placeholder="What should the agent do?"></textarea>
+       <div class="dv-chips" id="dv-chips" aria-label="Prompt shortcuts"></div>
        <div class="dv-actions"><button id="dv-start">Start session</button>${syncBtn}</div>
        ${driveHistoryHtml(slug)}
      </div>`,
@@ -3723,6 +3805,7 @@ function renderDrivePrompt(slug, st) {
       ? '⚠ The agent can run any shell command and edit any file with no confirmation.' : '';
   });
   el('#dv-perm').dispatchEvent(new Event('change')); // surface the warning for the pre-selected mode
+  renderDriveChips();
   const start = async () => {
     const prompt = el('#dv-prompt').value.trim();
     if (!prompt) return;
@@ -3752,6 +3835,7 @@ function enterDrive(s) {
   // Starting a new session here supersedes any prior active handle for this project.
   setDriveActive({ id: s.id, project: state.driveProject || null, claudeSessionId: s.claudeSessionId || null, cwd: s.cwd, status: s.status, permissionMode: s.permissionMode || null });
   state._driveLive = { text: null, thinking: null };
+  state._driveTurnStart = null; // re-derived from the replayed user_prompt's `.t`
   renderDriveView();
   driveOpenStream(s.id, 0);
 }
@@ -4093,6 +4177,7 @@ async function resumeDrive(slug) {
   setDriveActive({ id: s.id, project: state.driveProject, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, status: s.status, permissionMode: s.permissionMode || da.permissionMode || null });
   state.drive = { id: s.id, status: s.status, claudeSessionId: s.claudeSessionId || da.claudeSessionId || null, cwd: s.cwd || da.cwd, permissionMode: s.permissionMode || da.permissionMode || null, es: null };
   state._driveLive = { text: null, thinking: null };
+  state._driveTurnStart = null; // re-derived from the replayed user_prompt's `.t`
   renderDriveView();
   driveOpenStream(s.id, 0); // after=0 → replay the buffered transcript, then live
 }
@@ -4109,7 +4194,7 @@ function driveSetStatus(status) {
   if (send) { send.disabled = false; send.textContent = busy ? 'Queue' : 'Send'; }
   if (stop) stop.disabled = !busy;
   // The composer footer carries the "Claude is working…" indicator (spinner +
-  // live activity label + elapsed + token estimate). Show it while a turn is in
+  // live activity label + elapsed time on task). Show it while a turn is in
   // flight; hide it the moment the turn settles.
   if (busy) { driveStartTurn(); driveStatusLabel(status === 'starting' ? 'Starting…' : 'Working…'); }
   else driveEndTurn();
@@ -4117,11 +4202,14 @@ function driveSetStatus(status) {
   if (status === 'idle') driveFlushQueue();
 }
 
-// ---- working indicator (elapsed + live token estimate) ----
+// ---- working indicator (elapsed time on task) ----
 function driveStartTurn() {
   const f = el('#dv-status'); if (f) f.classList.remove('hidden');
   if (state._driveTurn) return; // already counting this turn
-  state._driveTurn = { start: Date.now(), outChars: 0, timer: setInterval(driveTickStatus, 1000) };
+  // Anchor the clock to the server-stamped start of the current turn (the latest
+  // user_prompt's `.t`, captured in driveRender) so it shows total time on task and
+  // survives a page nav / stream replay. Fall back to now before that event is seen.
+  state._driveTurn = { start: state._driveTurnStart || Date.now(), timer: setInterval(driveTickStatus, 1000) };
   driveTickStatus();
 }
 function driveEndTurn() {
@@ -4130,22 +4218,25 @@ function driveEndTurn() {
   state._driveTurn = null;
   const f = el('#dv-status'); if (f) f.classList.add('hidden');
 }
+// Status-bar meta is just the elapsed clock now: the rough chars/4 token guess was
+// removed in favour of the header's accurate context-window pill (driveUpdateCtx,
+// fed by real usage tokens) — two estimates of the same thing, one of them wrong.
 function driveTickStatus() {
   const tn = state._driveTurn; const meta = el('#dv-status-meta');
   if (!tn || !meta) return;
-  const secs = Math.round((Date.now() - tn.start) / 1000);
-  const tok = tn.outChars ? ' · ≈' + driveFmtTok(Math.round(tn.outChars / 4)) + ' tok' : '';
-  meta.textContent = driveFmtElapsed(secs) + tok;
+  meta.textContent = driveFmtElapsed(Math.round((Date.now() - tn.start) / 1000));
 }
 function driveStatusLabel(text) { const l = el('#dv-status-label'); if (l) l.textContent = text; }
-function driveBumpOut(n) { if (state._driveTurn) state._driveTurn.outChars += n; }
 
 function driveFmtTok(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n); }
 function driveFmtElapsed(s) { return s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's'; }
 
-// Context-window meter: the input side of the turn's usage (fresh + cache) is the
-// context the model saw; show it as tokens + % of the window (mirrors the convos
-// live pill / src/parsers.js). The window is 200k, or 1M for a [1m] model.
+// Context-window meter: the input side of usage (fresh + cache) is the context the
+// model saw; show it as tokens + % of the window (mirrors the convos live pill /
+// src/parsers.js). The window is 200k, or 1M for a [1m] model. Driven live now —
+// fed by interim `message_start` usage during the turn (each tool-loop call) and
+// finalized by the end-of-turn `result` — so it climbs as context fills instead of
+// only snapping at turn's end. Idempotent: safe to call on every usage event.
 function driveCtxWindow(model) {
   const m = String(model || '').toLowerCase();
   return (m.includes('[1m]') || m.includes('-1m')) ? 1_000_000 : 200_000;
@@ -4452,17 +4543,23 @@ function driveResetLive() {
 function driveRender(ev) {
   const L = state._driveLive;
   switch (ev.kind) {
-    case 'user_prompt': driveResetLive(); driveStartTurnBlock(); driveAddEv('user', 'you', ev.text); driveScroll(true); driveBumpOut(0); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
-    case 'assistant_text': driveBumpOut((ev.text || '').length); driveAddEv('assistant', 'claude', ev.text); break;
+    case 'user_prompt':
+      // Each turn's opening prompt is server-stamped with `.t`; anchor the elapsed
+      // clock to it (re-anchoring a timer already started by the initial render) so
+      // the time-on-task is real and replay-stable — not reset to 0 on every revisit.
+      state._driveTurnStart = ev.t || Date.now();
+      if (state._driveTurn) state._driveTurn.start = state._driveTurnStart;
+      driveResetLive(); driveStartTurnBlock(); driveAddEv('user', 'you', ev.text); driveScroll(true); setDriveProvisional({ prompt: ev.text, status: 'working' }); break;
+    case 'assistant_text': driveAddEv('assistant', 'claude', ev.text); break;
     case 'thinking': { if (L.thinking) L.thinking.remove(); L.thinking = driveAddThink(ev.text); break; } // ephemeral: cleared at the next turn boundary
     case 'assistant_text_start': driveStatusLabel('Writing…'); L.text = driveAddEv('assistant', 'claude', ''); break;
     case 'assistant_text_delta':
       if (!L.text) L.text = driveAddEv('assistant', 'claude', '');
-      driveBumpOut((ev.text || '').length); driveAppend(L.text, ev.text); break;
+      driveAppend(L.text, ev.text); break;
     case 'thinking_start': driveStatusLabel('Thinking…'); L.thinking = driveAddThink(''); break;
     case 'thinking_delta':
       if (!L.thinking) L.thinking = driveAddThink('');
-      driveBumpOut((ev.text || '').length); driveAppendThink(L.thinking, ev.text); break;
+      driveAppendThink(L.thinking, ev.text); break;
     case 'block_stop': driveResetLive(); break;
     case 'tool_use':
       driveResetLive();
@@ -4482,6 +4579,7 @@ function driveRender(ev) {
       driveAddEv('result', ev.isError ? 'turn failed' : 'turn complete', driveResultMeta(ev));
       driveUpdateCtx(ev);
       driveCoolProvisional(); break;
+    case 'usage': driveUpdateCtx(ev); break; // live context-window fill, from interim message_start mid-turn
     case 'system':
       if (state.drive && ev.model) state.drive.model = ev.model;
       driveAddEv('sys', 'session', 'model ' + (ev.model || '?') + (ev.tools != null ? ' · ' + ev.tools + ' tools' : ''));

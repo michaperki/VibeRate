@@ -1143,6 +1143,25 @@ body.is-mobile .dvb-stage { height: 320px; }
 .dv-banner.ok { background: #10221a; color: #5bd6a0; border: 1px solid #1d3a2c; }
 .dv-banner.hidden { display: none; }
 
+/* Prompt chips — clickable preset phrases that fill the dead space under the
+   composer (ROADMAP "prompt chips v1"). Static defaults + saved phrases + ★ save. */
+.dv-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.dv-chip {
+  font: 600 11px/1.2 inherit; padding: 5px 10px; border-radius: 99px; cursor: pointer;
+  background: var(--panel-2, var(--panel)); color: var(--text);
+  border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px;
+}
+.dv-chip:hover { border-color: var(--accent); }
+.dv-chip.saved { color: var(--accent); border-color: rgba(124, 146, 255, 0.4); }
+.dv-chip-save { color: var(--muted); border-style: dashed; }
+.dv-chip-x { opacity: .55; font-weight: 700; margin-left: 1px; }
+.dv-chip-x:hover { opacity: 1; color: var(--live, #ef6f6f); }
+
+/* A commit preserved in storage but no longer on HEAD (history rewritten by
+   reset/rebase/squash/force-push) — kept so the timeline doesn't lose work, dimmed
+   so it reads as a ghost rather than a live commit. See src/storage.js reconcileGit. */
+.rib-c.rib-rewritten { opacity: .4; }
+
 /* Past-sessions log under the new-session form — any prior Drive session, resumable. */
 .dv-history { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 14px; }
 .dv-history-h { font-size: 12px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }

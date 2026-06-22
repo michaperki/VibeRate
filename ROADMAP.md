@@ -81,6 +81,18 @@ Social features all require a shared backend, so a thin deploy gates most of wha
    resumed sessions, deleted/renamed brain docs, watch left running across reboots,
    pushing the same project from two machines. Capture each failure mode as a fix or a
    documented limitation.
+   - **Rewritten-history capture** ✅ (2026-06-22) — first failure mode closed. Every
+     push (and Drive turn-end ingest) re-ran `git log` from scratch and `saveGit`
+     *overwrote* `git.json`, so `git reset` / rebase / squash / force-push silently
+     **dropped** commits that no longer sat on HEAD — the dogfood timeline lost work.
+     `saveGit` now reconciles via `reconcileGit` (`src/storage.js`): a union by hash
+     where the fresh capture is authoritative for current HEAD and prior commits that
+     vanished from the log are *kept* and flagged `rewritten` (the timeline dims them as
+     ghosts rather than losing them); a rewritten commit that reappears is promoted back
+     to live. Bounded at 6000 commits. Known limitation, documented in code: two
+     machines on one slug with divergent history ping-pong which set is "live" each
+     push, but no commit is ever lost. Remaining edge cases above (branch switches,
+     renamed-doc history, two-machine reconciliation proper) still open.
 6. **Live orchestration + timeline legibility** *(now-priority)* — make the dashboard
    feel real-time and coherent while an agent is actively working. Full breakdown +
    code root-causes in `archive/LIVE_ORCHESTRATION.md`. ✅ First pass shipped (2026-06-18):
@@ -242,6 +254,15 @@ and largely shipped — they're the read/understand half of the loop.
   (`57db9bd`) prepends events *within* a turn too (`drivePlace`), so the live
   activity always lands directly under the composer. Scroll/"new activity" logic and
   the mobile sticky offset track the top.
+  - **Live context-% pill** ✅ (2026-06-22) — the gauge used to update only on the
+    end-of-turn `result`, so mid-turn (exactly when you're deciding "am I in the dumb
+    zone?") the one accurate number was stale. The runtime now forwards interim usage:
+    `handleRawEvent` emits a `usage` event off each `message_start` in the turn's tool
+    loop (`src/agent.js`), whose input-side usage (fresh + cache) is the context that
+    call actually saw. The front-end's `driveUpdateCtx` runs on `usage` as well as
+    `result`, so the pill climbs as context fills and settles at the exact turn-end
+    figure. Ground truth, not a delta approximation; no transcript/ingest bloat (the
+    events are SSE-only, in-memory).
 - **Prompt-unit rail** — `Sessions | Prompts` toggle, default Prompts; prompt rows
   show source, session color, timestamp, and outcome chips; live mode
   slides new prompt-units into the rail. ✅ Shipped first pass. (Intent auto-tagging
@@ -383,16 +404,19 @@ and largely shipped — they're the read/understand half of the loop.
     `agent.adoptSession` + `setTranscriptLoader`, `driveIngest.loadDriveTranscript`,
     server wires the loader. The durable handle now also carries `permissionMode` so a
     resumed session keeps its mode (e.g. `bypassPermissions` for a push-capable drive).
-- **Prompt chips / "frequently used phrases" on the first-message page** *(idea — documented, not built)*.
+- **Prompt chips / "frequently used phrases" on the first-message page** *(v1 shipped 2026-06-22)*.
   Motivation: starting a Drive session almost always opens with the same boilerplate
   ("read the codebase and the .md files, then follow the plan doc, commit and push when
   finished"). Retyping it is friction, and the first-message page (`renderDrivePrompt`)
   has lots of unused real estate below the textarea. Proposal:
-  - **v1 (cheap, ship-anytime):** clickable chips above/below the `#dv-prompt` textarea
-    that insert a saved phrase at the cursor. Seed from a small static list + a
-    user-editable "saved phrases" list persisted in `localStorage` (mirrors the
-    `vbrt_drive_active` handle pattern). A "★ save this as a phrase" affordance on the
-    composer captures the current text.
+  - **v1 (cheap, ship-anytime):** ✅ — a `.dv-chips` row sits in the dead space between
+    the `#dv-prompt` textarea and the Start button. Four static seed phrases (read brain
+    / follow the plan / commit & push / a full opener) insert at the cursor on click;
+    `renderDriveChips`/`driveInsertPhrase` in `app.js`. A "★ save" chip captures the
+    current composer text as a reusable phrase, persisted in `localStorage`
+    (`vbrt.drivePromptChips`, ≤20, de-duped) and rendered with a removable ×, mirroring
+    the `DRIVE_*_KEY` pattern. Chips are built as DOM nodes (not innerHTML) so saved text
+    can't inject markup.
   - **v2 (suggested phrases):** mine the user's own history for recurring openers. We
     already parse every session's first user message (`parsers.peekClaude` →
     `firstUserText`, and prompt-unit data per project). A cheap pass — cluster/rank

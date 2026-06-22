@@ -370,6 +370,15 @@ function handleRawEvent(session, obj) {
       }
     } else if (e.type === 'content_block_stop') {
       emit(session, { kind: 'block_stop' });
+    } else if (e.type === 'message_start' && e.message && e.message.usage) {
+      // Interim usage: every model call in a turn's tool loop opens a fresh
+      // `message_start` whose input-side usage (fresh + cache) is the context that
+      // call actually saw — i.e. the live context-window fill, growing as the turn
+      // accretes tool output. Surface it so the gauge climbs mid-turn instead of
+      // only snapping at the end-of-turn `result` (the staleness we were chasing).
+      // Output tokens are still a placeholder at message_start; the context meter
+      // only reads the input side, so that's fine.
+      emit(session, { kind: 'usage', usage: e.message.usage });
     }
     return;
   }
