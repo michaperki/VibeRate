@@ -1152,7 +1152,9 @@ body.is-mobile .dvb-stage { height: 320px; }
   border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px;
 }
 .dv-chip:hover { border-color: var(--accent); }
+.dv-chip.on { background: var(--accent); color: #0a1020; border-color: var(--accent); } /* inserted — tap again to remove */
 .dv-chip.saved { color: var(--accent); border-color: rgba(124, 146, 255, 0.4); }
+.dv-chip.saved.on { color: #0a1020; }
 .dv-chip-save { color: var(--muted); border-style: dashed; }
 .dv-chip-x { opacity: .55; font-weight: 700; margin-left: 1px; }
 .dv-chip-x:hover { opacity: 1; color: var(--live, #ef6f6f); }

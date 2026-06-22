@@ -3507,11 +3507,18 @@ function forgetDriveSession(cid) {
 // mining your own history for openers — can follow). Mirrors the DRIVE_*_KEY
 // localStorage pattern above.
 const DRIVE_CHIPS_KEY = 'vbrt.drivePromptChips';
+// Seeds mined from the project's own driven-session history (51 real openers): the
+// recurring phrasings, in frequency order. "Get up to speed" (codebase + MD network
+// + git history) opens almost every working session; "add commit & push to main" is
+// the standing closer; the rest are the next-most-common habits. Phrased the way they
+// actually get typed — MD network not "brain docs", "to main", "to completion".
 const DRIVE_CHIP_DEFAULTS = [
-  { label: '📖 Read brain', text: 'Read the codebase and the .md brain docs before you start.' },
-  { label: '🧭 Follow the plan', text: 'Follow the relevant plan doc.' },
-  { label: '✅ Commit & push', text: 'Commit and push when you are done.' },
-  { label: '🔁 Full opener', text: 'Research the codebase and the .md brain docs, follow the plan doc, then commit and push when finished.' },
+  { label: '📖 Get up to speed', text: 'Review the codebase, the MD network, and git history to get up to speed.' },
+  { label: '🧭 Follow the plan', text: 'Follow the plan doc and implement to completion.' },
+  { label: '✅ Commit & push', text: 'Add, commit, and push to main when finished.' },
+  { label: '📝 Update the MDs', text: 'Update any relevant MD files before you finish.' },
+  { label: '🔧 Investigate & fix', text: 'Investigate the issue, then fix it and push to main.' },
+  { label: '❓ Ask if unsure', text: 'Let me know if you have any questions.' },
 ];
 function readDriveChips() {
   try { return JSON.parse(localStorage.getItem(DRIVE_CHIPS_KEY) || '[]') || []; }
@@ -3536,12 +3543,30 @@ function driveInsertPhrase(ta, text) {
   }
   ta.focus();
 }
+// Toggle-off: remove a previously-inserted phrase (its last occurrence) plus one
+// adjacent separator, so tapping an active chip a second time undoes it cleanly.
+// Returns false if the text isn't present (user edited it away) — caller just
+// clears the active flag in that case.
+function driveRemovePhrase(ta, text) {
+  if (!ta) return false;
+  const v = ta.value;
+  const i = v.lastIndexOf(text);
+  if (i < 0) return false;
+  let start = i, end = i + text.length;
+  if (start > 0 && /\s/.test(v[start - 1])) start--;      // eat the leading separator we added
+  else if (end < v.length && /\s/.test(v[end])) end++;    // or a trailing one
+  ta.value = v.slice(0, start) + v.slice(end);
+  ta.selectionStart = ta.selectionEnd = start;
+  ta.focus();
+  return true;
+}
 // Render the chip row: static defaults, then saved phrases (each removable), then a
 // "★ save" affordance that captures the current composer text as a new phrase.
 // Built as DOM nodes (not innerHTML) so arbitrary saved text can't inject markup.
 function renderDriveChips() {
   const box = el('#dv-chips'); if (!box) return;
   const ta = el('#dv-prompt');
+  const active = state._driveChipsActive || (state._driveChipsActive = new Set());
   box.textContent = '';
   const mkChip = (label, text, opts = {}) => {
     const b = document.createElement('button');
@@ -3549,7 +3574,16 @@ function renderDriveChips() {
     b.className = 'dv-chip' + (opts.saved ? ' saved' : '') + (opts.cls ? ' ' + opts.cls : '');
     b.textContent = label;
     b.title = opts.title || text;
-    if (text != null) b.addEventListener('click', () => driveInsertPhrase(ta, text));
+    // Phrase chips toggle: first tap inserts, second tap removes what it inserted.
+    // Active state is keyed by phrase text so the highlight survives a chip re-render
+    // (save/remove rebuilds the row) and a manual edit just resets it on next tap.
+    if (text != null) {
+      if (active.has(text)) b.classList.add('on');
+      b.addEventListener('click', () => {
+        if (active.has(text)) { driveRemovePhrase(ta, text); active.delete(text); b.classList.remove('on'); }
+        else { driveInsertPhrase(ta, text); active.add(text); b.classList.add('on'); }
+      });
+    }
     if (opts.onClick) b.addEventListener('click', opts.onClick);
     if (opts.onRemove) {
       const x = document.createElement('span');
@@ -3805,6 +3839,7 @@ function renderDrivePrompt(slug, st) {
       ? '⚠ The agent can run any shell command and edit any file with no confirmation.' : '';
   });
   el('#dv-perm').dispatchEvent(new Event('change')); // surface the warning for the pre-selected mode
+  state._driveChipsActive = new Set(); // fresh composer → no chip is inserted yet
   renderDriveChips();
   const start = async () => {
     const prompt = el('#dv-prompt').value.trim();

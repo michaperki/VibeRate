@@ -410,13 +410,21 @@ and largely shipped — they're the read/understand half of the loop.
   finished"). Retyping it is friction, and the first-message page (`renderDrivePrompt`)
   has lots of unused real estate below the textarea. Proposal:
   - **v1 (cheap, ship-anytime):** ✅ — a `.dv-chips` row sits in the dead space between
-    the `#dv-prompt` textarea and the Start button. Four static seed phrases (read brain
-    / follow the plan / commit & push / a full opener) insert at the cursor on click;
-    `renderDriveChips`/`driveInsertPhrase` in `app.js`. A "★ save" chip captures the
-    current composer text as a reusable phrase, persisted in `localStorage`
-    (`vbrt.drivePromptChips`, ≤20, de-duped) and rendered with a removable ×, mirroring
-    the `DRIVE_*_KEY` pattern. Chips are built as DOM nodes (not innerHTML) so saved text
-    can't inject markup.
+    the `#dv-prompt` textarea and the Start button. Chips insert their phrase at the
+    cursor (composing into a prompt) and **toggle**: a second tap on an active chip
+    removes exactly what it inserted (`driveInsertPhrase`/`driveRemovePhrase`, active
+    state keyed by phrase text in `state._driveChipsActive`, `.dv-chip.on` highlight).
+    A "★ save" chip captures the current composer text as a reusable phrase, persisted
+    in `localStorage` (`vbrt.drivePromptChips`, ≤20, de-duped) and rendered with a
+    removable ×, mirroring the `DRIVE_*_KEY` pattern. Chips are built as DOM nodes (not
+    innerHTML) so saved text can't inject markup.
+  - **Seed phrases are data-grounded, not guessed** (2026-06-22): mined the project's
+    own 51 driven-session openers (`/data/claude/projects/*viberate*/*.jsonl`,
+    first-user-message per session) and seeded the six most frequent real habits —
+    *get up to speed (codebase + MD network + git history)*, *follow the plan / implement
+    to completion*, *add commit & push to main*, *update the MDs*, *investigate & fix*,
+    *ask if unsure* — phrased the way they actually get typed. This is a one-off manual
+    pass of what v2 automates.
   - **v2 (suggested phrases):** mine the user's own history for recurring openers. We
     already parse every session's first user message (`parsers.peekClaude` →
     `firstUserText`, and prompt-unit data per project). A cheap pass — cluster/rank
