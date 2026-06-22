@@ -24,7 +24,8 @@ test fixture.
 - `PLAN_AGENT_RUNTIME.md` — Drive: the local agent runtime (the "drive" half)
 - `PLAN_DRIVE_WORKSPACES.md` — binding a project to a real checkout on the host
 - `PLAN_MOBILE.md` — the mobile-unified plan (responsive port; Variant A chat + brain header)
-- `PROJECT_VIEW_PLAN.md` — detailed viewer/brain planning
+- `PROJECT_VIEW_PLAN.md` — detailed viewer/brain planning (§G holds the earlier 2026-06 legibility pass)
+- `UI_FEEDBACK.md` — synthesis of two external UI reviews (2026-06-22), prioritized by reviewer agreement + prescriptive fixes; feeds `PLAN_MOBILE.md`
 - `DEMO_PLAN.md` — demo & trial plan (the "steering" story; how we show/trial the tool)
 - `AUTH.md` — web-account sign-in (separate from Claude credentials)
 - `SEED.md` — the original genesis prompt (a brain node, kept as history)

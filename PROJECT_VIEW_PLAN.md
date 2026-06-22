@@ -314,6 +314,11 @@ scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right me
 > An outside review (2026-06) of the live UI. The bones are strong; these are the
 > first-contact legibility gaps. Ranked by the reviewer's impact order.
 > **All shipped 2026-06** except the near-identical session clustering (noted in #2).
+>
+> **Follow-up:** a second, broader pair of external reviews (2026-06-22) is
+> synthesized in `UI_FEEDBACK.md` — same genre, whole-app scope, prioritized by where
+> the two reviewers agreed. The open brain-label readability + nav-overflow items there
+> extend this pass into the mobile surface (`PLAN_MOBILE.md`).
 
 1. [x] **Color/dot legend.** Wired a real Activity-timeline legend under the ribbon
    (claude/codex, commit, 🧠 brain-doc change, code +/−, click/drag hint) +
