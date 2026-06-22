@@ -15,9 +15,6 @@ workflows:
     integrations:
       app_store_connect: VibeRateASC   # name of the API key you add in the Codemagic UI
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.viberate.app
       vars:
         BUNDLE_ID: "com.viberate.app"
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
@@ -37,8 +34,17 @@ workflows:
       - name: Generate app icons & splash (only if you've added assets/icon.png)
         script: |
           if [ -f "assets/icon.png" ]; then npx capacitor-assets generate --ios; else echo "No assets/icon.png yet — using default icon. See PLAN_CAPACITOR.md."; fi
-      - name: Set up code signing
-        script: xcode-project use-profiles
+      - name: Set up code signing (creates distribution cert + profile if missing)
+        script: |
+          # The app_store_connect integration injects APP_STORE_CONNECT_* env vars
+          # that these CLI tools read automatically. --create makes the cert/profile
+          # on first run instead of expecting them to already exist.
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Build signed IPA
         script: |
           xcode-project build-ipa \
