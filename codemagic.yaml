@@ -15,6 +15,8 @@ workflows:
     integrations:
       app_store_connect: VibeRateASC   # name of the API key you add in the Codemagic UI
     environment:
+      groups:
+        - ios_signing   # holds the secure CERTIFICATE_PRIVATE_KEY var (added in Codemagic UI)
       vars:
         BUNDLE_ID: "com.viberate.app"
         XCODE_PROJECT: "ios/App/App.xcodeproj"   # Capacitor 8 = SPM, no .xcworkspace
