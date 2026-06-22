@@ -47,6 +47,11 @@ workflows:
           # The app_store_connect integration injects APP_STORE_CONNECT_* env vars
           # that these CLI tools read automatically. --create makes the cert/profile
           # on first run instead of expecting them to already exist.
+          # Diagnostic: confirm the integration actually injected API credentials.
+          # Prints presence + lengths only — never the secret values.
+          echo "ISSUER_ID:  present=${APP_STORE_CONNECT_ISSUER_ID:+yes} len=${#APP_STORE_CONNECT_ISSUER_ID}"
+          echo "KEY_ID:     present=${APP_STORE_CONNECT_KEY_IDENTIFIER:+yes} len=${#APP_STORE_CONNECT_KEY_IDENTIFIER}"
+          echo "API_KEY:    present=${APP_STORE_CONNECT_PRIVATE_KEY:+yes} len=${#APP_STORE_CONNECT_PRIVATE_KEY}"
           keychain initialize
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
