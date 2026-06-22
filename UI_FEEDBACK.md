@@ -16,6 +16,11 @@ inside). Frame is `PRODUCT_STRATEGY.md`.
 > information hierarchy and first-time comprehension.** Every P0/P1 below is a
 > hierarchy/legibility fix, not a restyle.
 
+> **Status (2026-06-22):** P0 (#1–#3) shipped, then the P1/P2/P3 sweep (#4, #5, #7,
+> #8, #9, #10) shipped — items marked **✅ shipped** below. **#6 (the bypassPermissions
+> gate) was rejected by the owner** and removed — see *What I'm explicitly not taking*.
+> Still open: #11 (red collision, minor), #12 (landing copy), #13 (positioning, Mike's call).
+
 ## How to read the priority order
 
 The signal I trust most is **agreement** — where two strangers independently flagged
@@ -34,7 +39,7 @@ reviewers' worst complaints came *anyway*) and total failures on the primary sur
 
 ## P0 — consensus + mobile-thesis-breaking
 
-### 1. Brain-graph labels are unreadable (collision + low contrast)
+### 1. Brain-graph labels are unreadable (collision + low contrast) — ✅ shipped
 **Both** (R1 #2 "labels collide, unreadable at phone width"; R2 #6 "too dark/low
 contrast, hard to read on mobile"). This is the strongest consensus item and it
 directly undercuts the product's core claim — "the brain is the control surface."
@@ -69,7 +74,7 @@ directly undercuts the product's core claim — "the brain is the control surfac
 **Don't:** invent a third brain renderer. Both paths share the doc-graph data; fix them
 in place (the standing `PLAN_MOBILE.md` rule — relocate/adjust, never fork a renderer).
 
-### 2. Workspace home is empty — surface recent projects on the page
+### 2. Workspace home is empty — surface recent projects on the page — ✅ shipped
 **Both** (R1 #4 "stats at top, bottom ~60% empty — surface recent projects or live
 activity"; R2 #3 "should show top 3 recent projects immediately, before opening the
 drawer"). Near-identical suggestion.
@@ -86,7 +91,7 @@ data is already loaded (same array `loadProjects` maps); this is a second, conde
 render of it on the home pane, not a new fetch. Keep the full list in the drawer.
 Matches R2's exact mock (viberate 74 sessions · active 9h ago, …).
 
-### 3. Nav rows clip / read as broken
+### 3. Nav rows clip / read as broken — ✅ shipped
 **Both** (R1 #1 "right edge cuts off mid-word — 'expa al', 'brain ▾' crowding — add a
 fade/scroll cue"; R2 #11 "'expand all' is cut off; that row needs horizontal scrolling
 or fewer buttons").
@@ -109,7 +114,7 @@ same treatment.
 
 ## P1 — consensus or single-reviewer + real stakes
 
-### 4. Driving status row is overloaded — split primary vs advanced
+### 4. Driving status row is overloaded — split primary vs advanced — ✅ shipped
 **Both** (R2 #9 spells it out: `idle · bypass · 189k · 95% · viberate claude: 46ce40bf`
 is "useful for power users, scary for new users"; R1 #3 overlaps via "one percentage,
 several meanings"). 
@@ -124,7 +129,7 @@ behind a tap (a `⋯` or a tap on the row that expands the detail). R2's split i
 primary `idle · Claude · 95% context`; advanced `bypassPermissions · 189k tokens ·
 46ce40bf`. The session id especially is operator-debug noise for a first-timer.
 
-### 5. One percentage, several meanings — give context-full its own alarming treatment
+### 5. One percentage, several meanings — give context-full its own alarming treatment — ✅ shipped
 **R1 #3** (R2 #9 touches it). 60% tasks-done, 95% context-full, and 47%/12% context all
 share ring/bar treatments but mean opposite things — a full context bar is *bad*, a full
 completion ring is *good*.
@@ -142,30 +147,17 @@ ring). This also sets up the "compact / branch / start fresh" affordance that's 
 now-priority in `ROADMAP.md` (Context management as a feature) — the alarm is the entry
 point to that action.
 
-### 6. bypassPermissions needs a real safety gate
-**R2 #10** only — but I'm *raising* it, not demoting it, because it aligns with our own
-stated risk: **"Driving is an RCE control plane"** (`PRODUCT_STRATEGY.md`). A purple,
-inviting **Start session** button next to a one-line amber warning is too easy to fly
-past for a mode that runs arbitrary shell with no approval.
-
-**Root cause:** `renderDrivePrompt` (`app.js:3648`) shows the warning as `.dv-warn`
-text (`#dv-permwarn`, copy at `app.js:3680`) while `#dv-start` stays the standard accent
-button regardless of mode.
-
-**Prescriptive fix:** when mode is `bypassPermissions`, (a) expand the warning to name
-the concrete capability — "The agent can run shell commands, edit files, and push to
-this repo **without asking**." — and (b) gate `#dv-start` behind an explicit checkbox
-("I understand this agent can modify this repo") that enables the button. Consider
-de-emphasizing the Start button's fill in this mode so the checkbox is the deliberate
-act. Note R1's adjacent observation: the live-red **Return to Drive** and the red
-`bypass` **danger** pill share a red — keep *danger* red exclusive to permission/RCE so
-the safety signal isn't diluted (see #11).
+### 6. bypassPermissions safety gate — ❌ rejected (see *What I'm explicitly not taking*)
+Originally proposed an explicit checkbox gate on `#dv-start` for `bypassPermissions`.
+The owner rejected it: a per-session confirm tap is friction for someone who knows the
+risk, and the existing session-start warning is sufficient. Removed. (R1's adjacent
+red-collision point survives in #11.)
 
 ---
 
 ## P2 — agreed polish (do in one sweep)
 
-### 7. Project cards: de-clutter + format big numbers
+### 7. Project cards: de-clutter + format big numbers — ✅ shipped
 **Both** (R1 polish: "repeats a publish button under every item — noise; only viberate
 shows a timestamp — inconsistent"; R2 #4: "too many separate small elements; simplify").
 
@@ -181,7 +173,7 @@ shows a timestamp — inconsistent"; R2 #4: "too many separate small elements; s
   project/session/commit/message counts. (`fmtTokens` already does k-notation for
   tokens; keep that for the dense token pills, separators for the human-readable totals.)
 
-### 8. Define "brain" once, near first use
+### 8. Define "brain" once, near first use — ✅ shipped
 **R2 #2** — "brain" appears everywhere (live brain, brain edits, brain history, project
 brain) and risks reading as internal jargon to a newcomer. Cheap, high-clarity.
 
@@ -192,7 +184,7 @@ pass); extend that same `jargon`/`title` mechanism to the live-brain card header
 than inventing new UI. Also rename the bare metric "brain edits" → **"brain-doc edits"**
 (R2's copy note) for self-evidence.
 
-### 9. Reader header: compact-on-scroll
+### 9. Reader header: compact-on-scroll — ✅ shipped
 **R2 #11** (R1 touches via the clipped reader nav, #3 above). The reader's
 `.conv-toolbar` (title + meta + tool-count chips + full nav row) is **sticky at full
 height** with no compaction (`style.css` `.conv-toolbar { position: sticky }`), eating
@@ -206,7 +198,7 @@ Pairs naturally with the #3 nav-row reduction; do them together.
 
 ## P3 — single reviewer, copy, or not-my-call
 
-### 10. Prompt/session cards too tall (R2 #7 only)
+### 10. Prompt/session cards too tall (R2 #7 only) — ✅ shipped
 R2 wants 4–5 prompt cards per screen vs ~2.5 today, compressing the collapsed card to a
 one-line summary + outcome chips, expanding on tap. Reasonable, but **single-reviewer**
 and the cards carry deliberately-rich outcome chips (a shipped feature, `ROADMAP.md`).
@@ -220,9 +212,9 @@ Reality check on R1: the button is **purple** normally (`var(--accent)`) and onl
 the **resume/live** state (`.pb-drive.resume { #f85149 }`, `app.js:1140`) — that red is
 our *live* convention, not an error. But the deeper point stands: **live-red and
 danger-red are the same red** doing two jobs. My call: keep the *naming* ("Return to
-Drive" is fine and on-brand), but resolve the red overlap from the safety side (#6) —
-reserve danger-red for permission/RCE, and consider shifting the live accent. Low effort,
-low urgency.
+Drive" is fine and on-brand), and resolve the red overlap by reserving danger-red for
+the permission/RCE pill (the `⚡ bypass` danger pill kept in the split status row, #4)
+and shifting the live accent to a distinct hue. Low effort, low urgency — still open.
 
 ### 12. Landing copy: concreteness + hero emphasis (both, partial)
 R2 #1/#5 wants the hero sub-copy to lead with the concrete mechanic ("Start a real
@@ -254,16 +246,23 @@ landing gets a copy pass under #12.)
   work largely shipped (`ROADMAP.md` legibility pass) and touch-target sizing is already
   owned by `PLAN_MOBILE.md` Slice 4 (polish). Folded there, not duplicated here.
 - **R2: per-card "publish" everywhere is fine** — covered by #7; no separate item.
+- **#6 bypassPermissions safety gate** — *rejected by the owner (2026-06-22).* He knows
+  driving is an RCE control plane and doesn't want a per-session "I understand" confirm
+  tap every time. The existing session-start warning is the acknowledgement; keep it,
+  do **not** add a checkbox/gate. (Don't re-propose this.) The one durable piece — keep
+  danger-red exclusive to the permission/RCE pill so the safety signal isn't diluted —
+  is folded into #11.
 - Nothing here proposes new capture or agent tokens — every fix reads data the UI
   already has (the standing "make capture boring" rule, `ROADMAP.md`).
 
 ## Suggested execution order
 
-1. **P0 sweep** (#1 label opacity floor + tap-reveal, #2 recent-projects on home, #3
-   nav overflow) — three small, independent changes that kill the worst first-contact
-   failures and all land inside the `PLAN_MOBILE.md` work.
-2. **P1 hierarchy** (#4 status split, #5 context-vs-completion divergence, #6 bypass
-   gate) — the "scary for new users / unsafe for everyone" cluster.
-3. **P2 polish pass** (#7 cards, #8 brain definition, #9 compact reader header) in one
-   commit.
-4. **P3** as copy/strategy bandwidth allows; #13 needs Mike.
+1. ✅ **P0 sweep** (#1 label opacity floor + tap-reveal, #2 recent-projects on home, #3
+   nav overflow) — shipped. Three small, independent changes that killed the worst
+   first-contact failures, all inside the `PLAN_MOBILE.md` work.
+2. ✅ **P1 hierarchy** (#4 status split, #5 context-vs-completion divergence) — shipped.
+   #6 (bypass gate) was dropped — see above.
+3. ✅ **P2/P3 polish** (#7 cards, #8 brain definition, #9 compact reader header, #10
+   prompt-card clamp) — shipped.
+4. **Still open:** #11 (red collision, minor), #12 (landing copy), #13 (positioning —
+   needs Mike).

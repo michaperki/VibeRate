@@ -396,13 +396,10 @@ async function loadProjects() {
     return projects;
   }
   const dash = document.body.classList.contains('workspace');
-  // Disambiguate identically-named projects (a real navigation hazard) with a
-  // path tail — only shown when a name actually collides.
-  const nameCounts = {};
-  for (const p of projects) {
-    const k = (p.name || p.slug).toLowerCase();
-    nameCounts[k] = (nameCounts[k] || 0) + 1;
-  }
+  // De-cluttered card (UI_FEEDBACK P2 #7): title on line 1; `path · N sessions ·
+  // Xago` on line 2 (the path now shows for EVERY project — it both disambiguates
+  // name collisions and kills R1's "only viberate shows a timestamp"
+  // inconsistency); visibility + publish collapse into one quiet action row.
   box.innerHTML = projects
     .map((p) => {
       const vis = p.visibility || 'public';
@@ -410,16 +407,13 @@ async function loadProjects() {
       const toggle = dash
         ? `<button class="vis-toggle" data-slug="${esc(p.slug)}" data-to="${vis === 'public' ? 'private' : 'public'}">${vis === 'public' ? 'unpublish' : 'publish'}</button>`
         : '';
-      const collides = nameCounts[(p.name || p.slug).toLowerCase()] > 1;
-      const disambig = collides
-        ? `<div class="proj-path" title="${esc(p.cwd || '')}">${esc(pathTail(p.cwd))}${p.updatedAt ? ` · ${fmtAgo(Date.parse(p.updatedAt))}` : ''}</div>`
-        : '';
+      const pathTxt = p.cwd ? `<span class="pmono">${esc(pathTail(p.cwd))}</span> · ` : '';
+      const ago = p.updatedAt ? ` · ${fmtAgo(Date.parse(p.updatedAt))}` : '';
       return `
       <div class="proj" data-slug="${esc(p.slug)}">
-        <div class="name">${esc(p.name || p.slug)}</div>
-        ${disambig}
-        <div class="meta">${plural(p.sessions.length, 'session')} ${pill}</div>
-        ${toggle}
+        <div class="name" title="${esc(p.cwd || '')}">${esc(p.name || p.slug)}</div>
+        <div class="meta">${pathTxt}${plural(p.sessions.length, 'session')}${ago}</div>
+        ${dash ? `<div class="proj-actions">${pill}${toggle}</div>` : ''}
       </div>`;
     })
     .join('');
@@ -774,6 +768,10 @@ async function fetchTicker() {
 }
 
 const fmtTokens = (n) => (n == null ? '' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+// Human-readable thousands separators for the big totals (UI_FEEDBACK P2 #7):
+// +122,345 parses far faster than +122345. fmtTokens keeps k-notation for the
+// dense token pills; fmtN is for the readable project/session/commit/line counts.
+const fmtN = (n) => (n == null ? '0' : Number(n).toLocaleString());
 
 // The agent ticker under the brain (live only). The server merges Claude hook
 // agents with Codex rollout agents; old servers still degrade to one log-tail row.
@@ -1247,7 +1245,7 @@ const colorForIndex = (i) => `hsl(${Math.round((i * 137.508) % 360)} 62% 62%)`;
 // "5 files · +210/−45" — the agent's edit footprint for a conversation.
 function diffLabel(s) {
   if (!s.fileCount && !s.added && !s.removed) return '';
-  return `${s.fileCount} file${s.fileCount === 1 ? '' : 's'} · +${s.added}/−${s.removed}`;
+  return `${s.fileCount} file${s.fileCount === 1 ? '' : 's'} · +${fmtN(s.added)}/−${fmtN(s.removed)}`;
 }
 
 const fmtShort = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -2433,12 +2431,12 @@ function overviewHeader(sessions) {
   const codex = sessions.filter((s) => s.source === 'codex').length;
   const added = sessions.reduce((a, s) => a + (s.added || 0), 0);
   const removed = sessions.reduce((a, s) => a + (s.removed || 0), 0);
-  const lines = added || removed ? ` · <b class="diff-add">+${added}</b>/<b class="diff-del">−${removed}</b> lines` : '';
+  const lines = added || removed ? ` · <b class="diff-add">+${fmtN(added)}</b>/<b class="diff-del">−${fmtN(removed)}</b> lines` : '';
   const pulse = state._liveDigest; state._liveDigest = null; // one-shot
   return `
     <div class="ov-stats">
       ${pulse ? `<div class="live-pulse">↑ just now · ${pulse}</div>` : ''}
-      <div class="ov-line1"><b>${convos}</b> ${plw(convos, 'conversation')} · <b>${messages}</b> ${plw(messages, 'message')}${state.git.ok ? ` · <b>${commits}</b> ${plw(commits, 'commit')}` : ''}${brain ? ` · <span class="jargon" title="commits that changed a brain doc — SOUL / AGENTS / CLAUDE / ROADMAP / etc."><b>${brain}</b> 🧠 ${plw(brain, 'brain edit')}</span>` : ''}${lines}</div>
+      <div class="ov-line1"><b>${fmtN(convos)}</b> ${plw(convos, 'conversation')} · <b>${fmtN(messages)}</b> ${plw(messages, 'message')}${state.git.ok ? ` · <b>${fmtN(commits)}</b> ${plw(commits, 'commit')}` : ''}${brain ? ` · <span class="jargon" title="Brain = the markdown docs, plans, and memory that steer the agent. This counts commits that changed one — SOUL / AGENTS / CLAUDE / ROADMAP / etc."><b>${fmtN(brain)}</b> 🧠 ${plw(brain, 'brain-doc edit')}</span>` : ''}${lines}</div>
       <div class="ov-line2">${fmtShort(firstT)} – ${fmtShort(lastT)} · last active <b>${fmtAgo(lastT)}</b>
         <span class="ov-split"><span class="sw2" style="background:var(--claude)"></span>${claude}
         <span class="sw2" style="background:var(--codex)"></span>${codex}</span>
@@ -2765,6 +2763,8 @@ function renderSessionReader() {
 
   el('#conversation').scrollTop = 0;
   wireConversation(units.length);
+  wireReaderScroll();
+  clampReaderCards();
   if (Number.isFinite(pendingTurn)) {
     requestAnimationFrame(() => {
       const node = document.getElementById(`turn-${state.currentTurn}`);
@@ -2775,6 +2775,40 @@ function renderSessionReader() {
   const lt = el('#conversation [data-live-toggle]');
   if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderSessionReader(); };
   updateLiveReadout();
+}
+
+// Reader header compacts on scroll (UI_FEEDBACK P2 #9). On a phone the document
+// scrolls (the pane is overflow:visible under body.is-mobile), so we watch window
+// scroll and toggle .compact on the reader toolbar past a small threshold — the
+// CSS then hides the date range + secondary nav, leaving title · chips · prev/next.
+// Wired once; a no-op on desktop and in the Drive toolbar.
+function wireReaderScroll() {
+  if (window.__vbrtReaderScroll) return;
+  window.__vbrtReaderScroll = true;
+  window.addEventListener('scroll', () => {
+    if (!document.body.classList.contains('is-mobile')) return;
+    const tb = document.querySelector('#conversation .conv-toolbar:not(.dv-toolbar)');
+    if (tb) tb.classList.toggle('compact', window.scrollY > 72);
+  }, { passive: true });
+}
+
+// Tall prompt cards clamp to a few lines on mobile and expand on tap (P3 #10), so
+// ~4–5 cards fit per screen instead of ~2.5. Only cards that actually overflow the
+// clamp get the affordance — short cards keep their natural height.
+function clampReaderCards() {
+  if (!document.body.classList.contains('is-mobile')) return;
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#conversation .pcard .pc-prompt').forEach((p) => {
+      const card = p.closest('.pcard');
+      if (!card) return;
+      card.classList.add('pc-clampable');         // applying the class clamps height…
+      if (p.scrollHeight <= p.clientHeight + 4) {  // …if it still fits, drop the gate
+        card.classList.remove('pc-clampable');
+        return;
+      }
+      if (!p._clampWired) { p._clampWired = true; p.addEventListener('click', () => card.classList.toggle('pc-open')); }
+    });
+  });
 }
 
 function readerUnitSignature(u) {
@@ -2924,9 +2958,14 @@ async function refreshLiveSession() {
 function contextGauge(ctx) {
   if (!ctx || !ctx.tokens) return '';
   const k = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+  // ≥90% is the alarming "nearly full" zone (red), distinct from the ≥75% amber
+  // "dumb zone" — context-fullness must read as bad, not almost-done (P1 #5).
+  const danger = ctx.pct >= 90;
   const hot = ctx.pct >= 75;
-  const title = `context window ${ctx.pct}% full when this prompt was sent — ${k(ctx.tokens)} / ${k(ctx.window)} tokens${hot ? ' · dumb zone' : ''}`;
-  return `<span class="ctx-gauge${hot ? ' hot' : ''}" title="${esc(title)}">
+  const cls = danger ? ' danger' : hot ? ' hot' : '';
+  const note = danger ? ' · nearly full' : hot ? ' · dumb zone' : '';
+  const title = `context window ${ctx.pct}% full when this prompt was sent — ${k(ctx.tokens)} / ${k(ctx.window)} tokens${note}`;
+  return `<span class="ctx-gauge${cls}" title="${esc(title)}">
     <span class="ctx-bar"><span class="ctx-fill" style="width:${ctx.pct}%"></span></span>
     <span class="ctx-pct">${ctx.pct}%${hot ? ' ⚠' : ''}</span>
   </span>`;
@@ -3731,13 +3770,32 @@ function renderDriveView() {
           <div class="conv-head">
             <button class="back-dash" data-back-dash title="Back to dashboard">← dashboard</button>
             <h2>✦ Driving</h2>
+            ${(() => {
+              // Status row split into a calm PRIMARY line and a tap-to-reveal
+              // ADVANCED line (UI_FEEDBACK P1 #4). Primary = status · which repo ·
+              // context%; advanced = full permission label, exact token count, and
+              // the Claude session id (operator-debug noise for a first-timer). The
+              // compact ⚡ bypass danger pill stays primary as an at-a-glance safety
+              // signal; the verbose mode label lives in advanced.
+              const mode = d.permissionMode || (state.driveActive && state.driveActive.permissionMode) || null;
+              const p = d.cwd || ''; const base = p.split('/').filter(Boolean).pop() || p;
+              const bypassPill = mode === 'bypassPermissions'
+                ? `<span class="dv-mode danger" title="Permission mode — bypassPermissions: the agent runs shell commands and edits files without asking">${esc(driveModeLabel(mode))}</span>`
+                : '';
+              return `
             <div class="meta">
               <span class="dv-pill" id="dv-pill">—</span>
-              ${(() => { const m = d.permissionMode || (state.driveActive && state.driveActive.permissionMode) || null; return m ? `<span class="dv-mode${m === 'bypassPermissions' ? ' danger' : ''}" title="Permission mode — ${esc(m)}">${esc(driveModeLabel(m))}</span>` : ''; })()}
+              ${bypassPill}
+              <code class="dv-cwd" title="${esc(p)}">${esc(base)}</code>
               <span class="dv-ctx hidden" id="dv-ctx" title="context window used"></span>
-              ${(() => { const p = d.cwd || ''; const base = p.split('/').filter(Boolean).pop() || p; return `<code class="dv-cwd" title="${esc(p)}">${esc(base)}</code>`; })()}
-              <span class="dim-note">claude: <code id="dv-cid" title="${esc(d.claudeSessionId || '')}">${esc((d.claudeSessionId || '…').slice(0, 8))}</code></span>
+              <button class="dv-more" id="dv-more" type="button" aria-expanded="false" title="Session details">⋯</button>
             </div>
+            <div class="dv-adv hidden" id="dv-adv">
+              ${mode ? `<span class="dv-adv-item">permission · <code>${esc(mode)}</code></span>` : ''}
+              <span class="dv-adv-item hidden" id="dv-adv-tok">tokens · <code id="dv-adv-tokv">—</code></span>
+              <span class="dv-adv-item">session · <code id="dv-cid" title="${esc(d.claudeSessionId || '')}">${esc((d.claudeSessionId || '…').slice(0, 8))}</code></span>
+            </div>`;
+            })()}
           </div>
         </div>
         <div id="dv-banner" class="dv-banner hidden"></div>
@@ -3767,6 +3825,12 @@ function renderDriveView() {
   el('#dv-new').addEventListener('click', () => openDriveForProject(state.driveProject || state.project));
   el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
   el('#dv-jump').addEventListener('click', () => driveScroll(true));
+  const dvMore = el('#dv-more'), dvAdv = el('#dv-adv');
+  if (dvMore && dvAdv) dvMore.addEventListener('click', () => {
+    const nowHidden = dvAdv.classList.toggle('hidden');
+    dvMore.setAttribute('aria-expanded', nowHidden ? 'false' : 'true');
+    dvMore.classList.toggle('on', !nowHidden);
+  });
   // Sticky-TOP intent (flipped flow): the newest turn is at the top, so we stay glued
   // to the top only while the reader is parked there. Once they scroll down to read
   // history, new activity no longer yanks them up — it surfaces the "new activity" pill
@@ -4092,10 +4156,18 @@ function driveUpdateCtx(ev) {
   const model = (state.drive && state.drive.model) || null;
   const win = driveCtxWindow(model);
   const pct = Math.min(100, Math.round((ctx / win) * 100));
-  c.textContent = `◔ ${driveFmtTok(ctx)} · ${pct}%`;
-  c.title = `context window used — ${ctx.toLocaleString()} / ${win.toLocaleString()} tokens${model ? ' · ' + model : ''}${pct >= 75 ? ' · getting full' : ''}`;
-  c.classList.toggle('hot', pct >= 75);
+  // Context-fullness diverges from completion (UI_FEEDBACK P1 #5): ≥75% amber,
+  // ≥90% red+⚠. A full context is *bad* (the "dumb zone"), unlike a full
+  // completion ring — so it must not share the almost-done green/amber language.
+  // Primary pill stays compact (just %); exact tokens move to the advanced row (#4).
+  const danger = pct >= 90, hot = pct >= 75;
+  c.textContent = `◔ ${pct}%${danger ? ' ⚠' : ''}`;
+  c.title = `context window ${pct}% full — ${ctx.toLocaleString()} / ${win.toLocaleString()} tokens${model ? ' · ' + model : ''}${danger ? ' · nearly full — expect worse output; compact or start fresh' : hot ? ' · getting full' : ''}`;
+  c.classList.toggle('hot', hot && !danger);
+  c.classList.toggle('danger', danger);
   c.classList.remove('hidden');
+  const tokWrap = el('#dv-adv-tok'), tokV = el('#dv-adv-tokv');
+  if (tokWrap && tokV) { tokV.textContent = `${ctx.toLocaleString()} / ${win.toLocaleString()}`; tokWrap.classList.remove('hidden'); }
 }
 
 // Turn-complete summary line: duration + token usage (exact, from the result event)
@@ -4766,7 +4838,7 @@ const liveBrain = (() => {
           <span class="dvb-pct">0%</span>
         </div>
         <div class="dvb-meta">
-          <div class="dvb-title">🧠 live brain</div>
+          <div class="dvb-title"><span class="jargon" title="Brain = the markdown docs, plans, and memory that steer the agent. The graph below is those docs and how they reference each other.">🧠 live brain</span></div>
           <div class="dvb-subline">no plan checklists</div>
         </div>
         <span class="dvb-livedot"><i></i>live</span>
@@ -5025,8 +5097,8 @@ async function bootDashboard() {
 // the owner's projects, each note tagged with the projects it came from.
 function renderWorkspaceSection(ws, projects = []) {
   const s = (ws && ws.stats) || {};
-  const lines = s.added || s.removed ? ` · <b class="diff-add">+${s.added}</b>/<b class="diff-del">−${s.removed}</b> lines` : '';
-  const statLine = `<div class="ov-line1"><b>${s.projects || 0}</b> projects · <b>${s.sessions || 0}</b> sessions · <b>${s.messages || 0}</b> messages${s.commits ? ` · <b>${s.commits}</b> commits` : ''}${lines}</div>`;
+  const lines = s.added || s.removed ? ` · <b class="diff-add">+${fmtN(s.added)}</b>/<b class="diff-del">−${fmtN(s.removed)}</b> lines` : '';
+  const statLine = `<div class="ov-line1"><b>${fmtN(s.projects || 0)}</b> projects · <b>${fmtN(s.sessions || 0)}</b> sessions · <b>${fmtN(s.messages || 0)}</b> messages${s.commits ? ` · <b>${fmtN(s.commits)}</b> commits` : ''}${lines}</div>`;
 
   // Recent projects, surfaced on the home page itself (UI_FEEDBACK P0 #2). The
   // useful content used to live only in the off-canvas drawer, so on mobile the

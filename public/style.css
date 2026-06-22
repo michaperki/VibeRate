@@ -62,8 +62,11 @@ body {
 .proj.active { background: var(--accent); color: #fff; }
 .proj .name { font-weight: 600; }
 .proj .proj-path { font-size: 10.5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.proj .meta { font-size: 11px; color: var(--muted); }
+.proj .meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.proj .meta .pmono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .proj.active .meta, .proj.active .proj-path { color: rgba(255, 255, 255, 0.8); }
+/* one quiet action row (vis badge + publish toggle) instead of scattered elements */
+.proj-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 
 #main { flex: 1; display: flex; min-width: 0; }
 
@@ -482,9 +485,10 @@ pre.code {
 .vis.public { color: var(--codex); border-color: rgba(46,207,143,0.4); }
 .vis.private { color: var(--muted); }
 .vis-toggle {
-  margin-top: 6px; font-size: 11px; background: none; color: var(--accent);
+  font-size: 11px; background: none; color: var(--accent);
   border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer;
 }
+.proj-actions .vis { margin-left: 0; }
 .vis-toggle:hover { border-color: var(--accent); }
 .vis-toggle:disabled { opacity: 0.5; cursor: default; }
 /* selected project = accent background; force the pill + toggle to white so they
@@ -641,6 +645,9 @@ pre.code {
 .ctx-gauge .ctx-pct { font-variant-numeric: tabular-nums; }
 .ctx-gauge.hot .ctx-fill { background: #f0a93b; }
 .ctx-gauge.hot .ctx-pct { color: #f0a93b; }
+/* ≥90% context = alarming, NOT almost-done (UI_FEEDBACK P1 #5) */
+.ctx-gauge.danger .ctx-fill { background: var(--live); }
+.ctx-gauge.danger .ctx-pct { color: var(--live); font-weight: 700; }
 .rcard-ack .ctx-gauge { margin-left: auto; }
 
 /* dashboard: Connect CLI box */
@@ -1202,9 +1209,21 @@ body.is-mobile .dv-copy { opacity: .75; }
 /* Context-window meter in the Drive header. */
 .dv-ctx { padding: 2px 8px; border-radius: 99px; font: 600 11px ui-monospace, Menlo, monospace; background: #15202e; color: var(--accent); }
 .dv-ctx.hot { background: #2a2410; color: #e7b85b; }
+.dv-ctx.danger { background: #2a1416; color: var(--live); }
 .dv-ctx.hidden { display: none; }
 /* Just the workspace basename in the header; full path on hover. */
 .dv-cwd { cursor: default; }
+/* Primary/advanced status split (UI_FEEDBACK P1 #4): the ⋯ toggle + the tucked-away
+   detail row (full permission label · exact tokens · session id). */
+.dv-more {
+  font: inherit; font-size: 13px; line-height: 1; color: var(--muted); cursor: pointer;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 99px; padding: 2px 7px;
+}
+.dv-more:hover, .dv-more.on { color: var(--text); border-color: var(--accent); }
+.dv-adv { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+.dv-adv.hidden { display: none; }
+.dv-adv .dv-adv-item.hidden { display: none; }
+.dv-adv code { color: var(--text); }
 /* Pending follow-ups, held mid-turn and delivered when the turn settles. */
 .dv-queued { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .dv-queued.hidden { display: none; }
@@ -1452,12 +1471,37 @@ body.is-mobile .nav button { flex: 0 0 auto; white-space: nowrap; }
 body.is-mobile .nav .counter { flex: 0 0 auto; min-width: 0; }
 body.is-mobile .nav .spacer { display: none; }
 
+/* Reader header compacts on scroll (UI_FEEDBACK P2 #9): past the threshold the JS
+   adds .compact; we drop the date range, the files list and the back button, shrink
+   the title, and hide the secondary nav (final / expand / collapse) — leaving
+   title · stat-chips · prev/next as a slim sticky bar that gives the phone its
+   vertical space back. */
+body.is-mobile .conv-toolbar.compact { padding-top: 8px; padding-bottom: 6px; }
+body.is-mobile .conv-toolbar.compact .conv-head .meta,
+body.is-mobile .conv-toolbar.compact .conv-head .back-dash,
+body.is-mobile .conv-toolbar.compact .files-list { display: none; }
+body.is-mobile .conv-toolbar.compact .conv-head h2 { font-size: 14px; margin-bottom: 4px; }
+body.is-mobile .conv-toolbar.compact .chips { margin-top: 4px; }
+body.is-mobile .conv-toolbar.compact .nav { margin-top: 6px; }
+body.is-mobile .conv-toolbar.compact #nav-final,
+body.is-mobile .conv-toolbar.compact #expand-all,
+body.is-mobile .conv-toolbar.compact #collapse-all { display: none; }
+
 /* tighten desktop-fixed paddings that overflow a phone */
 body.is-mobile .conv-toolbar { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .conv-body { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .dashboard { padding: clamp(12px, 4vw, 28px); gap: 16px; }
 body.is-mobile .dv-composer { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .reader-card, body.is-mobile .pc-prompt { max-width: 100%; }
+/* Tall prompt cards clamp + tap-to-expand on mobile (UI_FEEDBACK P3 #10) so more
+   cards fit per screen. JS adds .pc-clampable only to cards that actually overflow. */
+body.is-mobile .pcard.pc-clampable .pc-prompt { position: relative; cursor: pointer; }
+body.is-mobile .pcard.pc-clampable:not(.pc-open) .pc-prompt { max-height: 7em; overflow: hidden; }
+body.is-mobile .pcard.pc-clampable:not(.pc-open) .pc-prompt::after {
+  content: "tap to expand"; position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 1.4em 13px 4px; font-size: 11px; color: var(--muted); text-align: right;
+  background: linear-gradient(transparent, #12151c 60%); pointer-events: none;
+}
 /* hover-only peek is useless on touch and 248px overflows narrow screens */
 body.is-mobile .brain-peek { display: none !important; }
 body.is-mobile .brain-ticker { white-space: normal; }
