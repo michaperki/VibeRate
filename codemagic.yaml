@@ -1,0 +1,56 @@
+# Codemagic CI/CD — builds the Capacitor iOS shell on a cloud Mac and ships to TestFlight.
+# You never need your own Mac: this runs on Codemagic's macOS M2 instances.
+#
+# BEFORE THIS WILL BUILD, do the one-time setup in PLAN_CAPACITOR.md ("What only you can do"):
+#   1. Register the bundle id  com.viberate.app  in your Apple Developer account.
+#   2. In Codemagic: Teams > Integrations > App Store Connect, add an API key named `VibeRateASC`.
+#   3. Connect this repo in Codemagic and run the `ios-release` workflow.
+# The free tier (500 macOS min/mo) covers ~25-50 builds — far more than you'll use.
+
+workflows:
+  ios-release:
+    name: VibeRate iOS (Capacitor → TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: VibeRateASC   # name of the API key you add in the Codemagic UI
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.viberate.app
+      vars:
+        BUNDLE_ID: "com.viberate.app"
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+        APP_STORE_APPLE_ID: "0000000000"   # replace with the numeric App ID from App Store Connect
+      node: 22          # Capacitor 8 CLI requires Node >=22 (independent of the server's Node 20)
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install JS dependencies
+        script: npm ci
+      - name: Generate the native iOS project (Capacitor)
+        script: |
+          # cap add ios scaffolds ios/App and runs pod install on the Mac.
+          # Idempotent: sync if it already exists, otherwise add it.
+          if [ -d "ios/App" ]; then npx cap sync ios; else npx cap add ios; fi
+      - name: Generate app icons & splash (only if you've added assets/icon.png)
+        script: |
+          if [ -f "assets/icon.png" ]; then npx capacitor-assets generate --ios; else echo "No assets/icon.png yet — using default icon. See PLAN_CAPACITOR.md."; fi
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build signed IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Internal testers get the build right after Apple finishes processing (no review wait).
+        beta_groups:
+          - "Internal Testers"

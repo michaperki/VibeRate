@@ -1,0 +1,88 @@
+# PLAN_CAPACITOR — VibeRate as a native iOS app
+
+The cheapest, lowest-friction path to a real App-Store iOS app, chosen because it keeps
+the existing dev loop intact and never requires owning a Mac. Decided & scaffolded
+2026-06-22.
+
+## The decision
+
+Wrap the existing web SPA in a **Capacitor** native shell and build it on a **cloud Mac
+(Codemagic)** — not a native rewrite, not a cloud-Mac desktop.
+
+Why this over the alternatives we weighed:
+
+- **vs. native Swift / React Native rewrite** — the phone is a pure control surface; the
+  agent runs on the Fly server, not the device. A rewrite re-implements 5,700 lines of
+  working UI to point at the same backend, and (for Swift) reintroduces a Mac dependency
+  for the dev loop. Capacitor reuses the SPA verbatim.
+- **vs. PWA** — Capacitor gives a real App-Store listing + proper APNs push; a PWA can't
+  list and has weaker iOS push. We already pay the $99/yr Apple fee, so the store path is
+  worth taking.
+- **vs. owning / renting a Mac** — Codemagic compiles + signs on its macOS instances,
+  triggered by a git push, just like Fly autodeploys the web app. No Mac, ever.
+
+## How it preserves the existing loop
+
+The Capacitor webview loads **`https://vbrt.fly.dev/app`** directly (`server.url` in
+`capacitor.config.json`). So the loop is unchanged:
+
+> prompt → Drive edits + pushes → Fly autodeploys → refresh inside the native app
+
+Feature work needs **no iOS rebuild**. A Codemagic build is only run when you want a fresh
+store/TestFlight build (e.g. after changing native config, icons, or push handling). The
+agent keeps working in the Drive Linux container exactly as today — it never touches a Mac.
+
+Trade-off accepted: the app is online-only (no offline shell) and reflects whatever is
+live on Fly. Fine for now; revisit with bundled assets + live-updates if offline matters.
+
+## The App Store 4.2 guardrail
+
+Apple can reject an app that is *purely* a remote website. The mitigation is built in from
+the start: ship **native push notifications** (`@capacitor/push-notifications`, wired for
+"your agent is asking a question / finished") plus native integration. Lead with that in
+the review notes; don't ship a bare webview.
+
+## What's already scaffolded (in this repo)
+
+- `package.json` — Capacitor deps (`@capacitor/core`, `/ios`, `/push-notifications`) +
+  dev (`/cli`, `/assets`); scripts `ios:add`, `ios:sync`, `ios:assets`.
+- `capacitor.config.json` — appId `com.viberate.app`, webview → `vbrt.fly.dev/app`, push
+  presentation options.
+- `codemagic.yaml` — `ios-release` workflow: generates the Xcode project on the Mac
+  (`cap add ios`), signs, builds the IPA, publishes to TestFlight. The `ios/` Xcode
+  project is intentionally **not committed** — CI regenerates it (it can't be built or
+  verified from the Linux Drive container anyway). Note: Capacitor 8's CLI needs **Node
+  ≥22**, so the CI workflow pins Node 22 — this is independent of the server, which stays
+  on Node 20.
+
+## What only you can do (one-time, ~30–45 min, all from Windows + browser)
+
+These need your Apple identity / secrets, so they can't be scaffolded by the agent:
+
+1. **Register the app** — in [Apple Developer](https://developer.apple.com/account) create
+   an App ID for bundle `com.viberate.app`; in
+   [App Store Connect](https://appstoreconnect.apple.com) create the app record. Note its
+   numeric **Apple ID** and put it in `codemagic.yaml` (`APP_STORE_APPLE_ID`).
+2. **App Store Connect API key** — App Store Connect → Users and Access → Integrations →
+   create an API key (App Manager role). Download the `.p8`.
+3. **Codemagic** — sign up (free tier), connect this GitHub repo, then Teams →
+   Integrations → **App Store Connect** → add the key, naming it **`VibeRateASC`** (the
+   name `codemagic.yaml` references). Codemagic manages signing certs/profiles for you.
+4. **Push key (APNs)** — in Apple Developer → Keys, create an APNs Auth Key (`.p8`) for
+   push. You'll feed it to whatever sends pushes (your Fly server) when wiring the
+   notification backend — separate task, not needed for the first build.
+5. **App icon** — drop a 1024×1024 `assets/icon.png` (and optional `assets/splash.png`)
+   in the repo; CI auto-generates all sizes via `@capacitor/assets`. Until then it builds
+   with the default icon.
+
+Then run the `ios-release` workflow in Codemagic → build lands in **TestFlight** → install
+on your iPhone via the TestFlight app. Internal testers skip App Review.
+
+## Status / next
+
+- [x] Capacitor + Codemagic scaffold committed-ready in the repo.
+- [ ] You: Apple App ID + App Store Connect API key + Codemagic connect (steps above).
+- [ ] You: add `assets/icon.png`.
+- [ ] First Codemagic build → TestFlight install.
+- [ ] Wire APNs push end to end (Fly server → device) — the "agent needs you" notification.
+- [ ] Submit for App Review (lead with push/native value for the 4.2 guardrail).

@@ -8,18 +8,26 @@
   },
   "scripts": {
     "start": "node bin/vbrt.js serve",
-    "serve": "node bin/vbrt.js serve"
+    "serve": "node bin/vbrt.js serve",
+    "ios:add": "cap add ios",
+    "ios:sync": "cap sync ios",
+    "ios:assets": "capacitor-assets generate --ios"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
+    "@capacitor/push-notifications": "^8.1.1",
     "@inquirer/prompts": "^7.2.0",
     "express": "^4.21.2",
     "playwright": "^1.61.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.4.1",
     "jsdom": "^29.1.1"
   }
 }

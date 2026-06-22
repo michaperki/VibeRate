@@ -1,0 +1,19 @@
+{
+  "appId": "com.viberate.app",
+  "appName": "VibeRate",
+  "webDir": "public",
+  "server": {
+    "url": "https://vbrt.fly.dev/app",
+    "cleartext": false,
+    "allowNavigation": ["vbrt.fly.dev"]
+  },
+  "ios": {
+    "contentInset": "always",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}
