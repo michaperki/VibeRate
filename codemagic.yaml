@@ -28,9 +28,17 @@ workflows:
         script: npm ci
       - name: Generate the native iOS project (Capacitor)
         script: |
-          # cap add ios scaffolds ios/App and runs pod install on the Mac.
-          # Idempotent: sync if it already exists, otherwise add it.
-          if [ -d "ios/App" ]; then npx cap sync ios; else npx cap add ios; fi
+          set -e
+          npx cap add ios
+          npx cap sync ios
+          # App.xcworkspace is produced by CocoaPods, not the bare template —
+          # run pod install explicitly so the workspace exists for the build step.
+          # (Codemagic puts `pod` on PATH; letting cap spawn it can silently skip.)
+          cd ios/App
+          pod install
+          cd ../..
+          echo "=== ios/App contents (expect App.xcworkspace) ==="
+          ls -la ios/App
       - name: Generate app icons & splash (only if you've added assets/icon.png)
         script: |
           if [ -f "assets/icon.png" ]; then npx capacitor-assets generate --ios; else echo "No assets/icon.png yet — using default icon. See PLAN_CAPACITOR.md."; fi
