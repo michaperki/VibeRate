@@ -779,6 +779,11 @@ pre.code {
 .gsub { fill: var(--muted); font-size: 9px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0; transition: opacity 0.1s; pointer-events: none; }
 .gnode:hover .glabel, .gnode.on .glabel { fill: var(--text); opacity: 1; }
 .gnode:hover .gsub, .gnode.on .gsub { opacity: 0.8; }
+/* Mobile has no hover (UI_FEEDBACK P0 #1): give legacy-layout labels a non-zero
+   floor so they're legible at rest, not invisible until a node is tapped. The
+   tapped node still goes to full opacity via the .gnode.on rule above. */
+body.is-mobile .glabel { opacity: 0.55; }
+body.is-mobile .gsub { opacity: 0.4; }
 
 /* layout-mode toggle */
 .lay-toggle { display: inline-flex; gap: 2px; margin-left: auto; padding: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; }
@@ -995,6 +1000,18 @@ body.public #feed { margin: 0 auto; }
 .home-section { margin-top: 30px; }
 .home-section h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; display: flex; align-items: baseline; gap: 8px; }
 .home-section .dim-note { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+/* Recent projects on the home page (UI_FEEDBACK P0 #2) */
+.recent-projects { display: flex; flex-direction: column; gap: 6px; }
+.recent-proj {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
+  font: inherit; padding: 10px 12px; border-radius: 9px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--border);
+}
+.recent-proj:hover { border-color: var(--accent); }
+.recent-proj .rp-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.recent-proj .rp-meta { font-size: 11.5px; color: var(--muted); }
+.recent-proj .rp-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* memory badges (shared by global + project memory rows) */
 .mem-type { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px; background: var(--border); color: var(--text); }
@@ -1418,6 +1435,22 @@ body.is-mobile .dv-toolbar .back-dash { display: none; }
 body.is-mobile.m-driving .dv-head-stack {
   top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px));
 }
+
+/* Reader nav row clipped at phone width (UI_FEEDBACK P0 #3): the controls used to
+   wrap/clip mid-word ("expa al"). Scroll the row horizontally instead, mirroring
+   the .m-chips treatment, with a right-edge fade mask so the scroll reads as
+   intentional. The desktop spacer (which pushes Follow left, nav right) is dropped
+   so the controls pack into one scrollable line. */
+body.is-mobile .nav {
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+}
+body.is-mobile .nav::-webkit-scrollbar { display: none; }
+body.is-mobile .nav button { flex: 0 0 auto; white-space: nowrap; }
+body.is-mobile .nav .counter { flex: 0 0 auto; min-width: 0; }
+body.is-mobile .nav .spacer { display: none; }
 
 /* tighten desktop-fixed paddings that overflow a phone */
 body.is-mobile .conv-toolbar { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }

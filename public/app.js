@@ -393,7 +393,7 @@ async function loadProjects() {
   const box = el('#projects');
   if (projects.length === 0) {
     box.innerHTML = '<div class="empty">No projects yet.<br>Run <code>vbrt add</code> in a folder.</div>';
-    return;
+    return projects;
   }
   const dash = document.body.classList.contains('workspace');
   // Disambiguate identically-named projects (a real navigation hazard) with a
@@ -441,6 +441,7 @@ async function loadProjects() {
       }
     });
   });
+  return projects;
 }
 
 // --- Tier 1: Workspace / Home (agent memory + projects rollup) ---
@@ -4740,7 +4741,11 @@ const liveBrain = (() => {
       } else { rec.ring.style.display = 'none'; rec.prog.style.display = 'none'; }
       rec.label.setAttribute('x', n.x.toFixed(1));
       rec.label.setAttribute('y', (n.y + r + 11).toFixed(1));
-      rec.label.setAttribute('opacity', (0.35 + 0.65 * Math.min(1, n.heat * 1.5 + (n.core ? 0.6 : 0.1))).toFixed(2));
+      // Floor raised 0.35 → 0.55 (UI_FEEDBACK P0 #1): idle non-core labels were
+      // landing ~0.42 opacity — the "too dark on mobile" complaint. Multiplier
+      // dropped to 0.45 so the heat/core boost still caps at 1.0 and core/active
+      // nodes keep popping; idle non-core now clears ~0.6.
+      rec.label.setAttribute('opacity', (0.55 + 0.45 * Math.min(1, n.heat * 1.5 + (n.core ? 0.6 : 0.1))).toFixed(2));
     }
   }
 
@@ -4996,10 +5001,15 @@ async function bootDashboard() {
       }
     };
   try {
-    await loadProjects(); // sidebar; throws '401' if not authorized
+    const projects = await loadProjects(); // sidebar; throws '401' if not authorized
     const ws = await api('/api/workspace');
     const node = el('#ws-overview');
-    if (node) node.innerHTML = renderWorkspaceSection(ws);
+    if (node) {
+      node.innerHTML = renderWorkspaceSection(ws, projects || []);
+      node.querySelectorAll('.recent-proj').forEach((b) => {
+        b.onclick = () => selectProject(b.dataset.slug);
+      });
+    }
   } catch (e) {
     if (String(e.message) === '401') {
       localStorage.removeItem('vbrt_token');
@@ -5013,10 +5023,33 @@ async function bootDashboard() {
 
 // The "overarching" view: activity stats + agent memory aggregated across all of
 // the owner's projects, each note tagged with the projects it came from.
-function renderWorkspaceSection(ws) {
+function renderWorkspaceSection(ws, projects = []) {
   const s = (ws && ws.stats) || {};
   const lines = s.added || s.removed ? ` · <b class="diff-add">+${s.added}</b>/<b class="diff-del">−${s.removed}</b> lines` : '';
   const statLine = `<div class="ov-line1"><b>${s.projects || 0}</b> projects · <b>${s.sessions || 0}</b> sessions · <b>${s.messages || 0}</b> messages${s.commits ? ` · <b>${s.commits}</b> commits` : ''}${lines}</div>`;
+
+  // Recent projects, surfaced on the home page itself (UI_FEEDBACK P0 #2). The
+  // useful content used to live only in the off-canvas drawer, so on mobile the
+  // home screen was a stat line over a blank page. This is a second, condensed
+  // render of the already-loaded project array — no new fetch.
+  const recent = [...projects]
+    .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))
+    .slice(0, 5)
+    .map((p) => {
+      const ago = p.updatedAt ? ` · ${fmtAgo(Date.parse(p.updatedAt))}` : '';
+      const path = p.cwd ? `<span class="rp-path">${esc(pathTail(p.cwd))}</span> · ` : '';
+      return `<button class="recent-proj" data-slug="${esc(p.slug)}">
+        <span class="rp-name">${esc(p.name || p.slug)}</span>
+        <span class="rp-meta">${path}${plural(p.sessions.length, 'session')}${ago}</span>
+      </button>`;
+    })
+    .join('');
+  const recentBlock = recent
+    ? `<section class="home-section recent-section">
+         <h2>🕘 Recent projects <span class="dim-note">jump back in</span></h2>
+         <div class="recent-projects">${recent}</div>
+       </section>`
+    : '';
 
   // Note: we deliberately do NOT aggregate per-project agent memory here. Saved
   // memory is project-scoped — repo B's notes aren't relevant in repo A's workspace,
@@ -5029,7 +5062,8 @@ function renderWorkspaceSection(ws) {
     <section class="home-section">
       <h2>📊 Across your projects <span class="dim-note">activity from everything you've pushed</span></h2>
       <div class="ov-stats">${statLine}</div>
-    </section>`;
+    </section>
+    ${recentBlock}`;
 }
 
 // A prompt card: the before-context (collapsed), the prompt (the atom), and a
