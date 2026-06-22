@@ -17,7 +17,7 @@ workflows:
     environment:
       vars:
         BUNDLE_ID: "com.viberate.app"
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_PROJECT: "ios/App/App.xcodeproj"   # Capacitor 8 = SPM, no .xcworkspace
         XCODE_SCHEME: "App"
         APP_STORE_APPLE_ID: "6782960153"   # VibeRate IDE, App Store Connect numeric Apple ID
       node: 22          # Capacitor 8 CLI requires Node >=22 (independent of the server's Node 20)
@@ -31,13 +31,10 @@ workflows:
           set -e
           npx cap add ios
           npx cap sync ios
-          # App.xcworkspace is produced by CocoaPods, not the bare template —
-          # run pod install explicitly so the workspace exists for the build step.
-          # (Codemagic puts `pod` on PATH; letting cap spawn it can silently skip.)
-          cd ios/App
-          pod install
-          cd ../..
-          echo "=== ios/App contents (expect App.xcworkspace) ==="
+          # Capacitor 8 uses Swift Package Manager, not CocoaPods: plugins are
+          # wired via Package.swift, so there is no Podfile or .xcworkspace.
+          # We build App.xcodeproj directly; xcodebuild resolves SPM deps itself.
+          echo "=== ios/App contents (expect App.xcodeproj, no workspace) ==="
           ls -la ios/App
       - name: Generate app icons & splash (only if you've added assets/icon.png)
         script: |
@@ -56,7 +53,7 @@ workflows:
       - name: Build signed IPA
         script: |
           xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
+            --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
