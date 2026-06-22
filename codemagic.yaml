@@ -41,6 +41,7 @@ workflows:
           if [ -f "assets/icon.png" ]; then npx capacitor-assets generate --ios; else echo "No assets/icon.png yet — using default icon. See PLAN_CAPACITOR.md."; fi
       - name: Set up code signing (creates distribution cert + profile if missing)
         script: |
+          set -e
           # The app_store_connect integration injects APP_STORE_CONNECT_* env vars
           # that these CLI tools read automatically. --create makes the cert/profile
           # on first run instead of expecting them to already exist.
@@ -49,6 +50,16 @@ workflows:
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
+          # Capacitor doesn't reliably stamp the bundle id from appId, so the target
+          # may still be a default (com.example.app). Force it to match the profile
+          # we just created, otherwise use-profiles has nothing to map -> archive
+          # fails with "requires a provisioning profile". (BSD sed needs -i '').
+          echo "=== bundle id before fix ==="
+          grep -m3 PRODUCT_BUNDLE_IDENTIFIER ios/App/App.xcodeproj/project.pbxproj || true
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = [^;]*;/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/g" \
+            ios/App/App.xcodeproj/project.pbxproj
+          echo "=== bundle id after fix ==="
+          grep -m3 PRODUCT_BUNDLE_IDENTIFIER ios/App/App.xcodeproj/project.pbxproj || true
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
