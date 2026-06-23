@@ -79,7 +79,21 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
-        # Internal testers get the build right after Apple finishes processing (no review wait).
+        # Publish DIRECTLY to an internal beta group — no TestFlight beta review.
+        #
+        # Do NOT set `submit_to_testflight: true` here. Combining it with beta_groups
+        # routes the build through *external* beta review, which Apple gates on
+        # "complete test information" (Beta App Information feedback email + Beta App
+        # Review contact name/phone/email). That is what failed the first publish.
+        # Omitting it uses the direct internal-group assignment path (Codemagic CLI,
+        # June 2024+), which needs none of that. Internal testers get the build as
+        # soon as Apple finishes processing — no review wait, no test info.
+        #
+        # ONE-TIME, on your side (the agent can't touch App Store Connect): in
+        # App Store Connect > your app > TestFlight, create an **internal** group
+        # named EXACTLY "Internal Testers", set its distribution to **Manual**
+        # (turn OFF "Automatically distribute builds" — automatic groups reject the
+        # manual assignment Codemagic does), and add yourself as a tester. Until that
+        # group exists this step fails with "Cannot find Beta group". See PLAN_CAPACITOR.md.
         beta_groups:
           - "Internal Testers"

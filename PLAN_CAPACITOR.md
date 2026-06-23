@@ -68,6 +68,16 @@ These need your Apple identity / secrets, so they can't be scaffolded by the age
 3. **Codemagic** — sign up (free tier), connect this GitHub repo, then Teams →
    Integrations → **App Store Connect** → add the key, naming it **`VibeRateASC`** (the
    name `codemagic.yaml` references). Codemagic manages signing certs/profiles for you.
+3a. **TestFlight internal group** — in App Store Connect → your app → **TestFlight**,
+   create an **internal** beta group named EXACTLY **`Internal Testers`**, set its
+   distribution to **Manual** (toggle OFF "Automatically distribute builds" — automatic
+   groups can't accept the manual build assignment Codemagic does), and add yourself as a
+   tester. `codemagic.yaml` publishes the build straight to this group with no beta
+   review. If the group is missing the publish step fails with *"Cannot find Beta group
+   with the name 'Internal Testers'"*; if you instead route through external review (by
+   adding `submit_to_testflight: true`) Apple additionally demands a feedback email +
+   reviewer contact info under TestFlight → Test Information. Internal direct-publish
+   needs none of that.
 4. **Push key (APNs)** — in Apple Developer → Keys, create an APNs Auth Key (`.p8`) for
    push. You'll feed it to whatever sends pushes (your Fly server) when wiring the
    notification backend — separate task, not needed for the first build.
@@ -83,7 +93,11 @@ on your iPhone via the TestFlight app. Internal testers skip App Review.
 - [x] Capacitor + Codemagic scaffold committed-ready in the repo.
 - [x] App registered: name **VibeRate IDE**, bundle `com.viberate.app`, App Store Connect
       Apple ID `6782960153` (wired into `codemagic.yaml`).
-- [ ] You: App Store Connect API key → add to Codemagic as `VibeRateASC`; connect the repo.
+- [x] You: App Store Connect API key → added to Codemagic as `VibeRateASC`; repo connected.
+- [x] Build compiles, signs, uploads to App Store Connect, and finishes processing.
+- [ ] You: create internal TestFlight group `Internal Testers` (Manual distribution) — see
+      step 3a; the publish step can't find it until you do. Build & signing already work;
+      this is the last gate before the build lands on your phone.
 - [ ] You: add `assets/icon.png`.
 - [ ] First Codemagic build → TestFlight install.
 - [ ] Wire APNs push end to end (Fly server → device) — the "agent needs you" notification.
