@@ -355,6 +355,38 @@ function now() {
   return Date.now();
 }
 
+// Roster-level subscribers (PLAN_COCKPIT.md §3.1c — the project-scoped aggregate
+// stream that replaces the cockpit's 2.5 s poll). One channel fans every session's
+// roster-relevant change into the cockpit "Now" zone, so its timers/ctx meters tick
+// live without re-fetching the whole list. Only roster-shaped events fire it
+// (status, action, usage, plan, lifecycle) — the chatty per-token text/thinking
+// deltas are deliberately excluded so a turn doesn't spam a frame per token.
+const rosterSubs = new Set();
+const ROSTER_KINDS = new Set([
+  'status', 'tool_use', 'usage', 'report', 'user_prompt', 'result', 'turn_end', 'system', 'error', 'stopped',
+]);
+export function subscribeRoster(onMsg) {
+  rosterSubs.add(onMsg);
+  return () => rosterSubs.delete(onMsg);
+}
+function notifyRoster(session) {
+  if (!rosterSubs.size) return;
+  // A session ended mid-turn (endSession deleted it) still has a live child whose
+  // close handler emits trailing status events through the captured reference. Those
+  // must not resurrect the agent on the roster, so push only for the *registered*
+  // session — a deleted/replaced one is silent.
+  if (sessions.get(session.id) !== session) return;
+  const view = publicView(session); // hoisted function declaration
+  for (const fn of rosterSubs) {
+    try { fn({ kind: 'agent', session: view }); } catch { /* a broken roster sub must not break emit */ }
+  }
+}
+function notifyRosterRemoved(id) {
+  for (const fn of rosterSubs) {
+    try { fn({ kind: 'removed', id }); } catch { /* ignore */ }
+  }
+}
+
 // One driven session: a stable local id, the claude session id once we learn it,
 // a capped event log for SSE backfill, and a set of live subscribers.
 function createSession({ cwd, permissionMode, projectSlug = null }) {
@@ -392,6 +424,7 @@ function createSession({ cwd, permissionMode, projectSlug = null }) {
     child: null,
   };
   sessions.set(id, session);
+  notifyRoster(session); // a brand-new agent shows on the cockpit roster immediately
   return session;
 }
 
@@ -410,6 +443,8 @@ function emit(session, evt) {
       /* a broken subscriber must not take down the session */
     }
   }
+  // Push a fresh roster view to the aggregate stream on roster-shaped events only.
+  if (ROSTER_KINDS.has(event.kind)) notifyRoster(session);
   return event;
 }
 
@@ -813,6 +848,23 @@ export function stopSession({ id }) {
     emit(session, { kind: 'stopped' });
   }
   return publicView(session);
+}
+
+// End a session for good and drop it from the live roster — the cockpit's "swipe to
+// end" (there's no terminal ctrl-c / `/exit` on a phone, so without this the roster
+// just accretes idle agents until a redeploy wipes the Map). Non-destructive to
+// history: the claude transcript stays on disk (re-adoptable) and the conversation
+// is already ingested into the project rail; this only removes the live handle. Kills
+// any in-flight turn first. Unknown id is a no-op ack so a double-swipe can't error.
+export function endSession({ id }) {
+  const session = sessions.get(id);
+  if (!session) return { ok: true, id, ended: false };
+  if (session.child) {
+    try { session.child.kill('SIGTERM'); } catch { /* already gone */ }
+  }
+  sessions.delete(id);
+  notifyRosterRemoved(id);
+  return { ok: true, id, ended: true };
 }
 
 // Subscribe to live events. `afterSeq` backfills everything the caller missed

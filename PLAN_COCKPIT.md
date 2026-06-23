@@ -8,10 +8,19 @@ the design rationale. What landed against the sequencing in §7:
   now carry `type`, `model`, `promptStartedAt`, `lastAction:{verb,label,file}`, `ctxTokens`,
   `ctxPct`; `setStatus` gained the **`waiting`** lifecycle state, set from the MCP-ask
   round-trip (`registerAsk`/`resolveAsk`) and cleared back to `working` on answer/timeout.
-- **§7.2 transport — MVP poll, not a new aggregate SSE.** The roster polls
-  `/api/agent/sessions` every 2.5 s (`refreshRoster`), with a 1 s client tick advancing the
-  elapsed timers off the cached roster (`cockpitTick`). The dedicated project-scoped SSE
-  (§3.1c) remains the future optimization.
+- **§7.2 transport — aggregate SSE shipped (2026-06-23), poll kept as fallback.** The
+  dedicated project-scoped stream from §3.1c is now the primary transport: a module-level
+  roster subscriber set in `agent.js` (`subscribeRoster`/`notifyRoster`/`notifyRosterRemoved`),
+  fired from `emit()` on roster-shaped event kinds only (`ROSTER_KINDS` — status/action/usage/
+  plan/lifecycle; the chatty text/thinking token deltas are excluded) plus on create/end.
+  `GET /api/agent/roster/stream?project=<slug>` (`agentRoutes.js`) sends a `snapshot` frame on
+  connect, then `agent`/`removed` frames as state changes. The client (`openRosterStream`,
+  `app.js`) merges frames into `state.roster`, coalesces re-renders to one per animation frame
+  (`scheduleNowRender`), and **falls back to the old 2.5 s poll** (`startRosterPoll`) only when
+  the stream hard-closes (a 403 for a non-admin); transient drops ride the browser's native
+  EventSource reconnect (which re-snapshots). The 1 s `cockpitTick` still advances the elapsed
+  timers locally. Guard: `notifyRoster` pushes only for the *registered* session, so a killed
+  child's trailing close-handler events can't resurrect an ended agent on the roster.
 - **§7.3–6 Now / Latest / Next / sparkline / route cutover — done** in `public/app.js`
   (`renderCockpit` and friends, ~`:1294`) + cockpit CSS in `public/style.css`.
 - **§3.2 commit→agent attribution — done (2026-06-23, client-side).** "Latest" rows now
@@ -38,11 +47,28 @@ the design rationale. What landed against the sequencing in §7:
   call it when it starts/switches a plan (the "skill" half — instruction, no separate file).
   The roster chip **prefers `declaredPlan` over the inferred `currentPlan`** and renders it
   brighter (a filled pill) to mark ground truth; the declared note rides in the tooltip.
-  Belt-and-suspenders: declared when the agent reports, inferred otherwise. *Still open:*
-  per-plan progress **attribution** (which checkbox an agent ticked).
+  Belt-and-suspenders: declared when the agent reports, inferred otherwise.
+- **§3.3 per-plan checkbox attribution — done (2026-06-23, client-side).** "Latest" now carries
+  `✓ N items checked in PLAN_X.md` rows with an agent badge: `planTickEvents()` (`app.js`) walks
+  each PLAN doc's `docHistory` content, counts boxes that flipped to checked between consecutive
+  versions, and attributes each batch via the same `commitSource()` time heuristic Latest uses
+  for commits. Honest about granularity — it reports a *count* of newly-ticked boxes per version,
+  not a per-line identity (lines reorder across edits, and a count is what "Next" already shows).
+  No server/data-model change.
+- **End a session from the cockpit — done (2026-06-23).** There was no way to "end" an agent
+  (no terminal ctrl-c/`/exit` on a phone) — `stopSession` only killed the current turn, so the
+  roster accreted idle sessions until a redeploy wiped the in-memory Map. New `endSession()`
+  (`agent.js`) + `POST /api/agent/sessions/:id/end` kill any running turn and drop the session
+  from the live roster (broadcast as a `removed` roster frame); it's **non-destructive** — the
+  claude transcript stays on disk (re-adoptable) and the convo is already ingested into the rail.
+  The cockpit surfaces it as a swipe-left-to-reveal-✕ on each roster row (Gmail/Spotify style;
+  desktop reveals on hover), wired in `wireRoster` with `state._revealedAgent` preserved across
+  re-renders so an SSE frame doesn't snap an open row shut.
 - **Still open (as flagged in §3 / §6):** live **agent type** is hardcoded `claude` (Drive
-  only spawns claude); the two-worlds clock skew (live runtime vs 2 s ingest poll) is
-  unresolved.
+  only spawns claude); the two-worlds clock skew (live SSE runtime vs 2 s ingest poll) is
+  unresolved. Everything else from the original gap list has shipped — §3.1 tiers 1+2,
+  §3.2 commit→agent, §3.3 checkbox attribution, §3.1c aggregate SSE transport, plus the
+  end-session capability.
 
 The target design was the mockup `viberate-cockpit.jsx`. Every current-state claim below
 cites a real file/symbol; inferences are marked **[assume]**.
@@ -284,20 +310,21 @@ Mockup pieces are React; the work is to author equivalent **render functions** i
 - **Scale at 10+ agents.** `listSessions()` is unbounded; the mockup already handles overflow
   ("+N more" with dots). Flat list vs. **group by `projectSlug`/plan** is an open call once
   rosters get large.
-- **Real-time transport & cost.** Ticking timers + live context meters across many agents:
+- **Real-time transport & cost.** ~~Ticking timers + live context meters across many agents:
   poll `/api/agent/sessions` (cheap, coarse) vs N SSE (rich, heavy) vs **one aggregate SSE**
-  (new surface). Cadence/cost trade-off is unresolved (see §3.1c).
+  (new surface). Cadence/cost trade-off is unresolved.~~ **RESOLVED (2026-06-23):** the one
+  aggregate SSE shipped (§3.1c / top-of-doc §7.2), with the coarse poll retained only as a
+  hard-failure fallback. One channel per project, server-pushed on roster-shaped events only.
 - **The two-worlds reconciliation (biggest risk).** "Now" is live-runtime; "Latest"/"Next"
   are ingested-history. They update on different clocks (SSE vs 2 s bundle poll) and can
   disagree (a commit exists in git.json only after ingest; an agent is "working" in the
   runtime before any commit lands). The cockpit header ("active 13m ago" next to live
   tickers) must define which clock wins.
 - **Not currently captured (upstream work):** live-session **agent type** (Drive only spawns
-  `claude`); **per-plan progress attribution** (which checkbox an agent ticked). (Shipped
-  2026-06-23: the **`waiting`** status; **commit→agent** attribution, §3.2; **session↔plan
-  tier 1** inferred from touched files and **tier 2** self-reported via the MCP `report`
-  tool, §3.1.) What's left is mostly the live agent-type capture; session↔plan is now
-  covered both inferred and declared.
+  `claude`) — the one real gap left. (Shipped 2026-06-23: the **`waiting`** status; **commit→
+  agent** attribution, §3.2; **session↔plan tier 1** inferred + **tier 2** self-reported, §3.1;
+  **per-plan checkbox attribution**, §3.3; the **aggregate SSE** transport, §3.1c; and the
+  **end-session** capability.) Session↔plan is covered both inferred and declared.
 
 ## 7. Suggested sequencing
 1. **Unblock the roster data (runtime work).** Enrich `publicView`/`listSessions`

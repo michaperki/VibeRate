@@ -7,7 +7,7 @@
 //     — an empty/missing allowlist locks the control plane entirely.
 
 import fs from 'node:fs';
-import { startSession, adoptSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk, recordReport } from './agent.js';
+import { startSession, adoptSession, sendMessage, stopSession, endSession, subscribe, subscribeRoster, getSession, listSessions, registerAsk, resolveAsk, recordReport } from './agent.js';
 import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
@@ -107,6 +107,34 @@ export function mountAgent(app, opts = {}) {
 
   app.get('/api/agent/sessions', guard, (_req, res) => {
     res.json(listSessions());
+  });
+
+  // Aggregate roster stream (PLAN_COCKPIT.md §3.1c): one project-scoped SSE that
+  // sends a snapshot then every roster-relevant change — so the cockpit "Now" zone
+  // ticks live instead of polling /api/agent/sessions every 2.5 s. `?project=slug`
+  // scopes it; omitted → all sessions. Token rides the query like the per-session
+  // stream (EventSource carries no Authorization header).
+  app.get('/api/agent/roster/stream', streamGuard, (req, res) => {
+    const project = req.query.project ? String(req.query.project) : null;
+    const matches = (s) => !project || s.projectSlug === project;
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+    // Snapshot first, so a fresh/reconnecting client paints the whole roster at once.
+    res.write(`data: ${JSON.stringify({ kind: 'snapshot', sessions: listSessions().filter(matches) })}\n\n`);
+    const unsub = subscribeRoster((msg) => {
+      // 'agent' frames carry a full view we can filter by project; 'removed' carries
+      // only an id (the session is already gone), so we forward it unfiltered — the
+      // client harmlessly ignores an id it never had.
+      if (msg.kind === 'agent' && !matches(msg.session)) return;
+      res.write(`data: ${JSON.stringify(msg)}\n\n`);
+    });
+    const ping = setInterval(() => res.write(': ping\n\n'), 15000);
+    req.on('close', () => { clearInterval(ping); unsub(); });
   });
 
   // Start a new driven session (spawns the real claude binary for turn 1). When a
@@ -243,6 +271,16 @@ export function mountAgent(app, opts = {}) {
   app.post('/api/agent/sessions/:id/stop', guard, (req, res) => {
     try {
       res.json(stopSession({ id: req.params.id }));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // End a session and remove it from the live roster (cockpit "swipe to end"). Kills
+  // any running turn; the transcript survives on disk, so this is non-destructive.
+  app.post('/api/agent/sessions/:id/end', guard, (req, res) => {
+    try {
+      res.json(endSession({ id: req.params.id }));
     } catch (err) {
       fail(res, err);
     }

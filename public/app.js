@@ -31,12 +31,15 @@ const state = {
   docLayout: 'web', // 'web' | 'tree' | 'recent'
   // Cockpit (PLAN_COCKPIT.md): the calm Now/Latest/Next home is the default; this
   // flips to the dense Activity+ribbon+brain stack ("Full timeline →"). The roster is
-  // the live per-agent list (enriched /api/agent/sessions), polled while the cockpit
-  // is mounted; _cockpitTick/_rosterPoll are its interval handles.
+  // the live per-agent list (enriched /api/agent/sessions), driven by an aggregate SSE
+  // (_rosterEs) while the cockpit is mounted, with a poll fallback (_rosterPoll).
+  // _cockpitTick advances the elapsed timers; _revealedAgent is the swiped-open row.
   fullTimeline: false,
   roster: [], // enriched agent-runtime sessions for the open project
   _cockpitTick: null,
   _rosterPoll: null,
+  _rosterEs: null,
+  _revealedAgent: null,
   sourceFilter: 'all',
   colorById: {},
   selectedConvo: null,
@@ -1388,13 +1391,19 @@ function agentRowHtml(a) {
     ? `advancing ${plan} (self-reported by the agent)${a.declaredNote ? ' — ' + a.declaredNote : ''}`
     : `advancing ${plan} (inferred from the files it touched)`;
   const planChip = plan ? `<span class="ck-agent-plan${declared ? ' declared' : ''}" title="${esc(planTitle)}">◆ ${esc(plan)}</span>` : '';
-  return `<div class="ck-agent" data-agent="${esc(a.id)}" tabindex="0" title="Open this agent in Drive">
-      <span class="ck-dot ${esc(st)}"></span>
-      <div class="ck-agent-main">
-        <div class="ck-agent-top"><span class="ck-agent-title">${esc(a.title || 'session')}</span><span class="ck-type ${esc(a.type)}">${esc(a.type)}</span></div>
-        <div class="ck-agent-sub">${esc(task)}${planChip}</div>
+  // The row is a swipe container: an end (✕) action sits behind a sliding face. On
+  // touch you pull the face left to reveal ✕ (Gmail/Spotify style); on desktop the
+  // ✕ reveals on hover. Tapping the face opens the agent in Drive (see wireRoster).
+  return `<div class="ck-agent" data-agent="${esc(a.id)}">
+      <button class="ck-agent-end" data-end="${esc(a.id)}" title="End this agent" aria-label="End this agent">✕</button>
+      <div class="ck-agent-slide" tabindex="0" title="Open this agent in Drive">
+        <span class="ck-dot ${esc(st)}"></span>
+        <div class="ck-agent-main">
+          <div class="ck-agent-top"><span class="ck-agent-title">${esc(a.title || 'session')}</span><span class="ck-type ${esc(a.type)}">${esc(a.type)}</span></div>
+          <div class="ck-agent-sub">${esc(task)}${planChip}</div>
+        </div>
+        <div class="ck-agent-meta">${elapsed}${ctx}</div>
       </div>
-      <div class="ck-agent-meta">${elapsed}${ctx}</div>
     </div>`;
 }
 
@@ -1422,7 +1431,7 @@ function renderNowCard() {
           <div class="ck-now-line1">${esc(line1)}</div>
           <div class="ck-now-line2">${esc(line2)}</div>
         </div>
-        <span class="ck-live${state.driveable === false ? ' off' : ''}" title="The roster polls the live agent runtime"><i></i>live</span>
+        <span class="ck-live${state.driveable === false ? ' off' : ''}" title="The roster streams live from the agent runtime"><i></i>live</span>
       </div>
       ${cockpitSparkline(sessions)}
       <div class="ck-roster">${body}</div>
@@ -1466,11 +1475,40 @@ function agentBadge(source, mixed) {
   return `<span class="ck-ev-agent" style="color:${color}" title="attributed to ${esc(label)} by commit timing"><i style="background:${color}"></i>${esc(label)}</span>`;
 }
 
+// Per-plan checkbox attribution (PLAN_COCKPIT.md #2): walk each PLAN doc's content
+// history and count the boxes that flipped to checked between consecutive versions,
+// attributing each batch to the agent active at that version's timestamp (the same
+// commit-timing heuristic Latest uses for commits). Honest about granularity — we
+// report a *count* of newly-ticked boxes per version, not a per-line identity: lines
+// reorder across edits, and a count is exactly what the "Next" progress already shows.
+function planTickEvents(sessions) {
+  const h = state.docHistory;
+  if (!h) return [];
+  const events = [];
+  for (const path of Object.keys(h)) {
+    const base = path.split('/').pop();
+    if (!/plan/i.test(base) || !/\.md$/i.test(base)) continue;
+    const versions = [...h[path]].filter((v) => v.content != null).sort((a, b) => a.t - b.t);
+    let prevDone = null;
+    for (const v of versions) {
+      const c = completionOf(v.content);
+      const done = c ? c.done : 0;
+      if (prevDone != null && done > prevDone) {
+        events.push({ t: v.t, kind: 'ticks', plan: base, count: done - prevDone, source: commitSource({ t: v.t }, sessions) });
+      }
+      prevDone = done;
+    }
+  }
+  return events;
+}
+
 // Build the calm "Latest" event list from ingested history: brain-doc changes,
-// commit bursts (≥2 commits within a window), lone non-brain commits, and convos.
+// commit bursts (≥2 commits within a window), lone non-brain commits, convos, and
+// checkbox-tick batches attributed to the agent that ticked them.
 function cockpitEvents(sessions) {
   const events = [];
   for (const s of sessions) events.push({ t: s.end, kind: 'convo', count: s.userCount, title: s.title, source: s.source, id: s.id });
+  for (const e of planTickEvents(sessions)) events.push(e);
   if (state.git.ok) {
     const commits = windowCommits(sessions);
     const brainSet = brainNodeSet();
@@ -1500,6 +1538,11 @@ function cockpitEvents(sessions) {
 }
 
 function eventRowHtml(e) {
+  if (e.kind === 'ticks')
+    return `<div class="ck-ev ticks" data-bh-doc="${esc(e.plan)}" title="Open ${esc(e.plan)} in the reader">
+        <span class="ck-ev-icon ticks">✓</span>
+        <div class="ck-ev-main"><div class="ck-ev-title">${e.count} ${plw(e.count, 'item')} checked</div><div class="ck-ev-sub">${esc(e.plan)}</div></div>
+        ${agentBadge(e.source)}<span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
   if (e.kind === 'brain')
     return `<div class="ck-ev brain" data-bh-doc="${esc(e.docs[0])}" title="Open ${esc(e.docs[0])} in the reader">
         <span class="ck-ev-icon brain">◆</span>
@@ -1578,11 +1621,58 @@ function wireCockpit() {
 }
 
 function wireRoster(root) {
-  root.querySelectorAll('[data-agent]').forEach((n) => {
-    const open = () => openRosterAgent(n.dataset.agent);
-    n.onclick = open;
-    n.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  root.querySelectorAll('.ck-agent').forEach((row) => {
+    const id = row.dataset.agent;
+    const slide = row.querySelector('.ck-agent-slide');
+    const endBtn = row.querySelector('.ck-agent-end');
+    if (!slide) return;
+    // Re-applied across re-renders: an SSE frame rebuilds the Now card, so we restore
+    // the row the user had swiped open instead of snapping it shut under them.
+    if (state._revealedAgent === id) row.classList.add('revealed');
+    const open = () => { if (!row.classList.contains('revealed')) openRosterAgent(id); };
+
+    // Touch swipe: pull the face left past a threshold to reveal ✕. A small move is
+    // treated as a tap (opens); a real drag suppresses the click.
+    let x0 = null, dx = 0, dragging = false;
+    const REVEAL = 64;
+    slide.addEventListener('touchstart', (e) => {
+      x0 = e.touches[0].clientX; dx = 0; dragging = false; slide.style.transition = 'none';
+    }, { passive: true });
+    slide.addEventListener('touchmove', (e) => {
+      if (x0 == null) return;
+      dx = e.touches[0].clientX - x0;
+      if (Math.abs(dx) > 6) dragging = true;
+      if (dragging) {
+        const base = row.classList.contains('revealed') ? -REVEAL : 0;
+        slide.style.transform = `translateX(${Math.max(-REVEAL, Math.min(0, base + dx))}px)`;
+        if (e.cancelable && Math.abs(dx) > 8) e.preventDefault(); // claim the horizontal gesture
+      }
+    }, { passive: false });
+    slide.addEventListener('touchend', () => {
+      if (x0 == null) return;
+      x0 = null; slide.style.transition = ''; slide.style.transform = '';
+      if (!dragging) return; // a tap — the click handler opens the agent
+      const reveal = row.classList.contains('revealed') ? dx < REVEAL / 2 : dx < -24;
+      row.classList.toggle('revealed', reveal);
+      state._revealedAgent = reveal ? id : (state._revealedAgent === id ? null : state._revealedAgent);
+    });
+
+    slide.onclick = () => { if (!dragging) open(); };
+    slide.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+    if (endBtn) endBtn.onclick = (e) => { e.stopPropagation(); endRosterAgent(id); };
   });
+}
+
+// End an agent from the roster (the swipe-revealed ✕). Non-destructive — the
+// conversation is saved and stays in the rail; this just clears the live handle.
+async function endRosterAgent(id) {
+  const a = (state.roster || []).find((x) => x.id === id);
+  const name = a && a.title ? a.title : 'this agent';
+  if (!confirm(`End "${name}"?\n\nIts conversation is saved and stays in the rail — this only removes it from the live roster.`)) return;
+  try { await drivePost('/sessions/' + encodeURIComponent(id) + '/end'); } catch { /* the SSE 'removed' frame, or the next poll, reconciles either way */ }
+  state._revealedAgent = null;
+  state.roster = (state.roster || []).filter((x) => x.id !== id);
+  renderNowInPlace();
 }
 
 function wireCockpitFeeds(root) {
@@ -1602,10 +1692,12 @@ function openRosterAgent(id) {
 }
 
 // --- cockpit live loops -----------------------------------------------------
-// Two cadences: a 1 s tick advances the elapsed timers (cheap, off cached roster),
-// and a 2.5 s poll refetches the roster from the agent runtime (the only live
-// transport — the MVP from PLAN_COCKPIT.md §3.1, no new aggregate SSE). The poll is
-// gated on the Drive probe so a public /p/:slug viewer (403) never polls. The
+// Live transport (PLAN_COCKPIT.md §3.1c / #4): a project-scoped aggregate SSE pushes
+// every roster change as it happens, so status/ctx/action update without polling. A
+// 1 s tick still advances the elapsed timers locally (the server doesn't push once a
+// second). If the stream hard-fails (403 for a non-admin, or a closed socket), we
+// fall back to the coarse 2.5 s poll so the roster never goes fully stale. All of it
+// is gated on the Drive probe so a public /p/:slug viewer never connects. The
 // ingested Latest/Next zones refresh through the existing Follow poll (refreshLive).
 function cockpitAttach() {
   cockpitDetach();
@@ -1613,14 +1705,63 @@ function cockpitAttach() {
   ensureDriveProbe().then((ok) => {
     if (state.fullTimeline || state._driveOpen || !state.project) return;
     if (!ok) { renderNowInPlace(); return; } // reflect the unavailable empty state
-    refreshRoster();
-    if (!state._rosterPoll) state._rosterPoll = setInterval(refreshRoster, 2500);
+    refreshRoster();    // immediate paint via the list endpoint
+    openRosterStream(); // then live updates (with poll fallback baked in)
   });
 }
 
 function cockpitDetach() {
   if (state._cockpitTick) { clearInterval(state._cockpitTick); state._cockpitTick = null; }
   if (state._rosterPoll) { clearInterval(state._rosterPoll); state._rosterPoll = null; }
+  if (state._rosterEs) { try { state._rosterEs.close(); } catch { /* already closed */ } state._rosterEs = null; }
+}
+
+// Open the aggregate roster SSE for the current project. Merges snapshot/agent/removed
+// frames into state.roster and coalesces re-renders to one per frame. On a hard close
+// (e.g. 403) it stops relying on the stream and starts the poll fallback; transient
+// drops are left to the browser's native EventSource reconnect.
+function openRosterStream() {
+  if (state._rosterEs) { try { state._rosterEs.close(); } catch { /* noop */ } state._rosterEs = null; }
+  const tok = state.token ? '&access_token=' + encodeURIComponent(state.token) : '';
+  let es;
+  try { es = new EventSource('/api/agent/roster/stream?project=' + encodeURIComponent(state.project) + tok); }
+  catch { startRosterPoll(); return; }
+  state._rosterEs = es;
+  es.onmessage = (m) => {
+    if (state.fullTimeline || state._driveOpen || !state.project) return;
+    let msg; try { msg = JSON.parse(m.data); } catch { return; }
+    if (msg.kind === 'snapshot') {
+      state.roster = (Array.isArray(msg.sessions) ? msg.sessions : []).filter((s) => s.projectSlug === state.project);
+    } else if (msg.kind === 'agent' && msg.session) {
+      if (msg.session.projectSlug !== state.project) return;
+      const r = state.roster || (state.roster = []);
+      const i = r.findIndex((s) => s.id === msg.session.id);
+      if (i >= 0) r[i] = msg.session; else r.push(msg.session);
+    } else if (msg.kind === 'removed') {
+      state.roster = (state.roster || []).filter((s) => s.id !== msg.id);
+      if (state._revealedAgent === msg.id) state._revealedAgent = null;
+    } else return;
+    scheduleNowRender();
+  };
+  es.addEventListener('error', () => {
+    // CLOSED = a permanent failure the browser won't retry (e.g. a 403). Fall back to
+    // the poll. A transient drop leaves readyState CONNECTING — let the native
+    // reconnect handle it (it resumes with a fresh snapshot).
+    if (es.readyState === EventSource.CLOSED) { state._rosterEs = null; startRosterPoll(); }
+  });
+}
+
+function startRosterPoll() {
+  if (state._rosterPoll) return;
+  refreshRoster();
+  state._rosterPoll = setInterval(refreshRoster, 2500);
+}
+
+// Coalesce a burst of roster frames into a single Now re-render on the next frame.
+function scheduleNowRender() {
+  if (state._nowRenderQueued) return;
+  state._nowRenderQueued = true;
+  requestAnimationFrame(() => { state._nowRenderQueued = false; renderNowInPlace(); });
 }
 
 async function refreshRoster() {

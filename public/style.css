@@ -1729,9 +1729,15 @@ body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-
 .ck-spark { display: block; width: 100%; height: 26px; }
 
 .ck-roster { display: flex; flex-direction: column; gap: 2px; }
-.ck-agent { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 9px; cursor: pointer; transition: background 0.12s; outline: none; }
-.ck-agent:hover, .ck-agent:focus-visible { background: var(--panel-2); }
-.ck-agent:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+/* Each roster row is a swipe container: a sliding face (.ck-agent-slide) over an end
+   (✕) action revealed by swiping left on touch, or hovering on desktop. */
+.ck-agent { position: relative; border-radius: 9px; overflow: hidden; }
+.ck-agent-slide { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 9px; cursor: pointer; outline: none; background: var(--panel); transition: transform 0.18s ease, background 0.12s; touch-action: pan-y; }
+.ck-agent-slide:hover, .ck-agent-slide:focus-visible { background: var(--panel-2); }
+.ck-agent-slide:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.ck-agent-end { position: absolute; top: 0; right: 0; bottom: 0; z-index: 0; width: 64px; border: 0; border-radius: 9px; background: var(--live); color: #fff; font-size: 15px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.ck-agent.revealed .ck-agent-slide { transform: translateX(-64px); }
+@media (hover: hover) { .ck-agent:hover .ck-agent-slide { transform: translateX(-64px); } }
 .ck-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .ck-dot.working, .ck-dot.starting { background: var(--codex); box-shadow: 0 0 6px var(--codex); animation: livepulse 1.4s ease-in-out infinite; }
 .ck-dot.waiting { background: #d29922; box-shadow: 0 0 6px rgba(210, 153, 34, 0.7); }
@@ -1759,6 +1765,7 @@ body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-
 .ck-ev[data-open]:hover, .ck-ev[data-bh-doc]:hover, .ck-ev[data-burst]:hover { background: var(--panel-2); }
 .ck-ev-icon { flex: 0 0 auto; width: 18px; text-align: center; font-size: 13px; color: var(--muted); }
 .ck-ev-icon.brain { color: var(--doc); }
+.ck-ev-icon.ticks { color: #3fb950; }
 .ck-ev-main { flex: 1 1 auto; min-width: 0; }
 .ck-ev-title { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ck-ev-sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
