@@ -5692,6 +5692,11 @@ async function boot() {
     if (e.target.closest('#m-brain-overlay') || e.target.closest('#m-brainbar')) return;
     closeBrain(); syncGrip();
   });
+  document.addEventListener('click', (e) => {
+    if (!body.classList.contains('m-sheet-open')) return;
+    if (e.target.closest('#sessions') || e.target.closest('#m-rail')) return;
+    closeSheet();
+  });
   if (byId('m-brainbar')) byId('m-brainbar').onclick = (e) => {
     // The leading "← dashboard" pill leaves Drive for the project dashboard (the
     // strip is fixed chrome, so this back affordance never scrolls out of reach).

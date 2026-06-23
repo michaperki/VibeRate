@@ -1622,12 +1622,17 @@ body.is-mobile.view-project #sessions {
 body.is-mobile.m-sheet-open #sessions { transform: translateY(0); }
 body.is-mobile #sessions::before { content: ""; display: block; width: 38px; height: 4px; border-radius: 4px; background: var(--border); margin: 8px auto 6px; }
 
-/* Shared backdrop for drawer + sheet. */
+/* Shared backdrop for drawer.
+   The conversations sheet lives inside #app, which is now the mobile scrollport.
+   In WKWebView, pairing that sheet with a body-level modal backdrop can leave the
+   rail visually dimmed and input-blocked. Keep the sheet non-modal; JS closes it
+   on outside taps instead. */
 body.is-mobile #m-backdrop {
   position: fixed; inset: 0; z-index: 400; background: rgba(7,8,11,.55);
   opacity: 0; pointer-events: none; transition: opacity .22s;
 }
-body.is-mobile.m-drawer-open #m-backdrop, body.is-mobile.m-sheet-open #m-backdrop { display: block; opacity: 1; pointer-events: auto; }
+body.is-mobile.m-drawer-open #m-backdrop { display: block; opacity: 1; pointer-events: auto; }
+body.is-mobile.m-sheet-open #m-backdrop { display: none; opacity: 0; pointer-events: none; }
 
 /* Brain expand overlay — mounts the real centerpiece SVG (renderCenterpiece). */
 body.is-mobile.m-brain-open #m-brain-overlay {
