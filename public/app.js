@@ -5550,35 +5550,27 @@ async function boot() {
   const isMobile = () => body.classList.contains('is-mobile');
   const brainOpen = () => body.classList.contains('m-brain-open');
 
-  // --- freeze the safe-area insets into CSS vars (WKWebView keyboard fix) ---
-  // The fixed app bar's height/padding (and #app's padding-top) are driven by
-  // env(safe-area-inset-top). In the wrapped WKWebView, focusing the Drive composer
-  // raises the keyboard, which scrolls/insets the native scroll view; on dismiss
-  // WebKit leaves env(safe-area-inset-top) reading ~2x until the next reflow — so
-  // *closing* the text box double-tall'd the header (the bug Mike pinned). We freeze
-  // the real inset into --sat/--sab and size the chrome off the frozen var, not live
-  // env(): a keyboard-close resize can't re-inflate a constant px value.
+  // --- compensate for WKWebView's native safe-area double-counting (the keyboard bug) ---
+  // The fixed app bar's height/padding (and #app's padding-top) are --sat-driven, falling
+  // back to env(safe-area-inset-top). DIAGNOSED ON DEVICE (?satdebug): env()/the probe is
+  // a rock-steady 47px the whole time — it never inflates. The two prior fixes chased a
+  // value that wasn't moving. What actually changes is window.innerHeight: it drops by
+  // exactly the top inset (810→763) after the composer keyboard CLOSES and stays there
+  // until the app restarts. WKWebView begins applying the top safe area as a *native*
+  // content inset (pushing our content down ~47px); our env()-driven padding then stacks a
+  // SECOND 47px on top, so the header gains a ~47px empty band and reads "tall". It's
+  // safe-area DOUBLE-COUNTING, not env() inflation.
   //
-  // The whole difficulty is capturing the TRUE inset, because env() lies in two ways:
-  //   - at *boot* WKWebView reports 0 (the insets populate a tick after the webview
-  //     enters the view hierarchy; mobile Safari has them ready immediately). Freezing
-  //     that 0 hard-zeroed the header's top padding, sliding it under the status bar and
-  //     killing its tap targets — the TestFlight brick.
-  //   - while the keyboard is up/closing env() reads inflated (up to ~2x).
-  // The prior version froze the FIRST plausible reading and never re-read (except on
-  // rotation). On the initiate-Drive screen you land and type immediately, so the
-  // keyboard is up during the boot window; if its inflated reading happened to land
-  // under the cap it got frozen *tall*, with no way back but an app restart — the bug.
-  //
-  // Key insight: the real inset is a device constant per orientation, and every lie is
-  // an *inflation* (0 aside) — strictly LARGER than the truth. So we track the running
-  // MINIMUM of every sane reading and freeze that. 0 → ignore (not populated). > cap →
-  // ignore (keyboard inflation). In (0, cap] → lower the min. We re-read on every
-  // keyboard close (visualViewport), so the min converges down to the truth and can
-  // never be re-inflated. Orientation genuinely changes the inset, so it resets the min.
-  const SAT_MAX = 70, SAB_MAX = 50; // largest real iOS portrait insets are ~59/34px;
-                                    // a keyboard inflation lands above these.
-  let minTop = null, minBot = null;
+  // Fix: subtract whatever the native view is already insetting, so the visible offset is
+  // always exactly one safe area. nativeTop = screenFull − innerHeight (measured with the
+  // keyboard DOWN, where innerHeight reflects the native inset and nothing else); our
+  // padding = realTop − nativeTop. Native inset off (full height) → pad the full 47; native
+  // inset on → pad 0 and let the native inset do the job. screenFull is the largest
+  // keyboard-down innerHeight seen = the un-inset, full-coverage height (810 at boot).
+  // realTop/realBot come from the (here reliable) env() probe; 0-at-boot is rejected and we
+  // poll until it populates, so we never freeze the header to a hard 0 (the old brick).
+  const SAT_MAX = 70, SAB_MAX = 50; // largest real iOS portrait insets are ~59/34px.
+  let realTop = null, realBot = null, screenFull = 0;
   function readInset(edge) {
     const probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;left:0;width:0;visibility:hidden;pointer-events:none;'
@@ -5590,58 +5582,60 @@ async function boot() {
     probe.remove();
     return Math.round(h);
   }
-  // Fold one reading into the running minimum for that edge and write the var. A value in
-  // (0, cap] lowers (or sets) the min; 0 and >cap readings are lies → ignored, leaving
-  // the prior min (or, if none yet, the var UNSET so CSS falls back to live env() until a
-  // real reading lands). Returns the (possibly unchanged) min.
-  function foldEdge(prop, edge, cap, cur) {
-    const v = readInset(edge);
-    if (v > 0 && v <= cap) {
-      const m = cur == null ? v : Math.min(cur, v);
-      document.documentElement.style.setProperty(prop, m + 'px');
-      return m;
-    }
-    return cur;
+  // Learn the true device insets from a sane probe reading. min() guards against a
+  // transient over-read latching too high; 0 (not yet populated) and > cap are rejected.
+  function learnInsets() {
+    const t = readInset('top'), b = readInset('bottom');
+    if (t > 0 && t <= SAT_MAX) realTop = realTop == null ? t : Math.min(realTop, t);
+    if (b > 0 && b <= SAB_MAX) realBot = realBot == null ? b : Math.min(realBot, b);
+    return realTop != null;
   }
-  function refreshInsets() {
-    minTop = foldEdge('--sat', 'top', SAT_MAX, minTop);
-    minBot = foldEdge('--sab', 'bottom', SAB_MAX, minBot);
-    return minTop != null; // gate boot retries on top — it's the one that bricks the header.
+  // Write the safe-area vars, compensating --sat for the native top inset. --sab isn't
+  // double-counted (the bug is top-only), so it just takes the learned bottom inset.
+  function applyInsets() {
+    const root = document.documentElement.style;
+    if (realBot != null) root.setProperty('--sab', realBot + 'px');
+    if (realTop == null) return; // not learned yet → CSS keeps the live env() fallback
+    const nativeTop = Math.max(0, screenFull - window.innerHeight);
+    const pad = Math.max(0, Math.min(realTop, realTop - nativeTop));
+    root.setProperty('--sat', pad + 'px');
   }
-  // Boot: poll until the inset populates. Generous window — a real notch always reports
-  // within a second or two; a no-notch device never will and the env()=0 fallback is
-  // correct for it. Once a value lands we keep polling no further: min() handles any
-  // later inflation, and keyboard-close re-reads (below) lower it if this first reading
-  // was itself mildly inflated.
-  if (!refreshInsets()) {
+  // Keyboard up → innerHeight is dominated by the keyboard, not the inset, so the formula
+  // is meaningless; only sample geometry when it's down.
+  function kbDown() {
+    const vv = window.visualViewport;
+    return !vv || (window.innerHeight - vv.height) <= 120;
+  }
+  function syncSafeArea() {
+    learnInsets();
+    if (!kbDown()) return;
+    if (window.innerHeight > screenFull) screenFull = window.innerHeight; // full (un-inset) coverage
+    applyInsets();
+  }
+  // Boot: poll until env() populates (WKWebView reports 0 for a tick), then sync.
+  syncSafeArea();
+  if (realTop == null) {
     let tries = 0;
-    const tick = setInterval(() => { if (refreshInsets() || ++tries >= 20) clearInterval(tick); }, 250);
+    const tick = setInterval(() => { syncSafeArea(); if (realTop != null || ++tries >= 20) clearInterval(tick); }, 250);
   }
-  // Every keyboard close is a fresh chance to read the honest inset. The visual viewport
-  // shrinks when the keyboard opens and grows back when it closes; on the grow-back,
-  // re-read after a beat (env() needs a tick to settle) and fold into the min — lowering
-  // it to the truth if an early inflated reading had latched too high. Because we fold by
-  // min(), a still-inflated post-close reading can only be ignored, never re-inflate the
-  // frozen value. (This replaces the old "no resize listener" stance: a resize-driven
-  // re-read was dangerous only because it overwrote; folding by min() makes it safe.)
+  // Re-sync after every keyboard close — that's when WKWebView toggles the native inset
+  // and innerHeight settles to its new (reduced) value. A beat lets it settle first.
   if (window.visualViewport) {
     let kbWasUp = false;
     window.visualViewport.addEventListener('resize', () => {
-      const kbUp = (window.innerHeight - window.visualViewport.height) > 120;
-      if (kbWasUp && !kbUp) setTimeout(refreshInsets, 300); // just closed → re-read
-      kbWasUp = kbUp;
+      const up = (window.innerHeight - window.visualViewport.height) > 120;
+      if (kbWasUp && !up) setTimeout(syncSafeArea, 300); // keyboard just closed
+      kbWasUp = up;
     });
   }
-  // A rotation genuinely changes the insets (portrait ~47px ↔ landscape 0), so the
-  // running min from the old orientation is stale — reset it and re-establish. Clearing
-  // the vars first hands back to live env() for the instant before a fresh reading lands,
-  // which correctly yields 0 in landscape.
+  // Orientation genuinely changes the insets and the full-coverage height; reset and
+  // re-establish. Clear --sat first so CSS falls back to live env() until a value lands.
   window.addEventListener('orientationchange', () => setTimeout(() => {
-    minTop = minBot = null;
+    realTop = realBot = null; screenFull = 0;
     document.documentElement.style.removeProperty('--sat');
     document.documentElement.style.removeProperty('--sab');
-    setTimeout(refreshInsets, 250);
-  }, 300));
+    setTimeout(syncSafeArea, 250);
+  }, 350));
 
   // --- TEMP on-device safe-area diagnostic ---
   // The env()/probe-frozen approach has now failed twice on Mike's TestFlight device,
@@ -5681,7 +5675,9 @@ async function boot() {
         + '\nappbar h ' + (barRect ? Math.round(barRect.height) : '—')
         + '  top ' + (barRect ? Math.round(barRect.top) : '—')
         + '   kbUp ' + kbUp + '   kbCloses ' + kbCloses
-        + '\nminTop ' + minTop + '   minBot ' + minBot + '   (tap to hide; 3-tap title to toggle)';
+        + '\nrealTop ' + realTop + '   realBot ' + realBot + '   screenFull ' + screenFull
+        + '   nativeTop ' + Math.max(0, screenFull - window.innerHeight)
+        + '\n(tap to hide; 3-tap title to toggle)';
     };
     paint();
     satDbgTimer = setInterval(paint, 250);
