@@ -257,6 +257,26 @@ combination) driven by a scripted event stream, compare, then decide.
 > **polymorphic**. Mock of all 12 artifact renderings: `prototypes/outcome-artifacts.html`.
 > First family shipped: author-captured **screenshots** via `vbrt shot` — spec +
 > checklist in `ARTIFACTS.md` (before/after on the prompt card, concurrency-safe binding).
+- [x] **Reader legibility + mobile pass** *(shipped 2026-06-23, Mike: "feels rigid /
+  not helpful").* The headline complaint was the **verdict** (the agent's final message)
+  being chopped to 400 chars **destructively in `src/prompts.js`** — the full text never
+  reached the client, so no expand could recover it — and then **buried inside the
+  collapsed "how it played out" `<details>`**. Fixes:
+  - **Verdict ships in full** (`clip(verdict, 8000)` safety cap, was 400) and is **pulled
+    out into an always-visible `answer` block above the step log** — the step log keeps
+    only the reasoning/tool actions. The answer is the headline of an archived turn.
+  - **Unified `.clampable` block** (`clampBlock` + `wireReaderBlocks` in `app.js`,
+    `.clampable` CSS): prompt / answer / earlier-context all clamp to a height with a
+    **visible "show more / show less" toggle that only appears on overflow** + a fade
+    mask — replaces the old destructive char-clips and the mobile-only invisible
+    tap-to-expand. **Nothing is cut without a visible, tappable way to open it.**
+  - **Copy button** (`.pc-copy`) on the prompt and the answer (hover on desktop, always
+    semi-visible on touch).
+  - **Mobile jump-to-top pill** (`#reader-jump`, Drive `#dv-jump` parity) floats once
+    you've scrolled into a long archive. `before`-context clips eased 200/320 → 1000/1400.
+  - Verified: extraction returns full verdicts (longest 7965 ch across 496 in our own
+    project, vs the old 400 cap); desktop + mobile (390px) screenshots confirm the
+    surfaced answer, show-more clamp, copy buttons, and jump pill.
 - [x] **Screenshot artifacts** (`ARTIFACTS.md`) — `vbrt shot <url|img>` binds a
   before/after shot to the prompt that produced it; renders in the reader. *(first
   outcome-rail family; diff/test/provenance families still below.)*

@@ -128,7 +128,12 @@ function summarizeAfter(items, cap = 6) {
       steps.push({ kind: 'action', text: `${m.name || 'tool'}${f ? ': ' + f : c ? ': ' + clip(c, 100) : ''}` });
     }
   }
-  return { steps: steps.slice(0, cap), stepCount: steps.length, verdict: verdict ? clip(verdict, 400) : null };
+  // Send the agent's final message (the "answer") in full — it's the thing you most
+  // want to re-read in the archive, and clipping it to 400 here was destructive (the
+  // client never saw the rest, so no expand could recover it). The reader surfaces it
+  // by default with a show-more clamp. Keep a generous safety cap so a pathological
+  // wall-of-text turn can't bloat the payload; a normal final reply never hits it.
+  return { steps: steps.slice(0, cap), stepCount: steps.length, verdict: verdict ? clip(verdict, 8000) : null };
 }
 
 function deriveOutcomes(items, prompt, ctx) {
@@ -357,7 +362,10 @@ export function extractPromptUnits(session, sessionId, slug = null, { evidence =
     if (prev) {
       const agent = lastAssistantText(prev.items);
       const pu = prev.user ? prev.user.text : null;
-      if (agent || pu) before = { prompt: pu ? clip(pu, 200) : null, agent: agent ? clip(agent, 320, true) : null };
+      // "Earlier in this session" context. Collapsed by default, so it can be roomier
+      // than the old 200/320 squeeze without weighing on first paint — the reader clamps
+      // it with a show-more toggle once opened.
+      if (agent || pu) before = { prompt: pu ? clip(pu, 1000) : null, agent: agent ? clip(agent, 1400, true) : null };
     }
     const context = contextAt(t.items);
     // Images bound to this prompt: ones the user pasted *in* (input), and ones the

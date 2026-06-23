@@ -2761,7 +2761,8 @@ function renderSessionReader() {
         <button id="collapse-all">collapse all</button>
       </div>
     </div>
-    <div class="conv-body">${body}</div>`;
+    <div class="conv-body">${body}</div>
+    <button id="reader-jump" class="reader-jump hidden" type="button" title="Back to top">↑ top</button>`;
 
   {
     const sp = document.body.classList.contains('is-mobile') ? el('#app') : el('#conversation');
@@ -2769,7 +2770,15 @@ function renderSessionReader() {
   }
   wireConversation(units.length);
   wireReaderScroll();
-  clampReaderCards();
+  wireReaderBlocks();
+  {
+    const jump = el('#reader-jump');
+    if (jump) jump.onclick = () => {
+      const sp = document.body.classList.contains('is-mobile') ? el('#app') : el('#conversation');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (sp) sp.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+  }
   if (Number.isFinite(pendingTurn)) {
     requestAnimationFrame(() => {
       const node = document.getElementById(`turn-${state.currentTurn}`);
@@ -2794,25 +2803,47 @@ function wireReaderScroll() {
     if (!document.body.classList.contains('is-mobile')) return;
     const tb = document.querySelector('#conversation .conv-toolbar:not(.dv-toolbar)');
     if (tb) tb.classList.toggle('compact', window.scrollY > 72);
+    // Jump-to-top pill (Drive parity): once you've scrolled a screenful into a long
+    // archive, a floating tap gets you back to the title/nav without a long swipe.
+    const jump = document.getElementById('reader-jump');
+    if (jump) jump.classList.toggle('hidden', window.scrollY < 600);
   }, { passive: true });
 }
 
-// Tall prompt cards clamp to a few lines on mobile and expand on tap (P3 #10), so
-// ~4–5 cards fit per screen instead of ~2.5. Only cards that actually overflow the
-// clamp get the affordance — short cards keep their natural height.
-function clampReaderCards() {
-  if (!document.body.classList.contains('is-mobile')) return;
-  requestAnimationFrame(() => {
-    document.querySelectorAll('#conversation .pcard .pc-prompt').forEach((p) => {
-      const card = p.closest('.pcard');
-      if (!card) return;
-      card.classList.add('pc-clampable');         // applying the class clamps height…
-      if (p.scrollHeight <= p.clientHeight + 4) {  // …if it still fits, drop the gate
-        card.classList.remove('pc-clampable');
-        return;
-      }
-      if (!p._clampWired) { p._clampWired = true; p.addEventListener('click', () => card.classList.toggle('pc-open')); }
+// Wire the reader's expandable blocks (prompt / answer / earlier-context) and copy
+// buttons. The show-more toggle only appears on blocks whose content actually
+// overflows the clamp; copy lifts the rendered text to the clipboard. Re-runs on each
+// renderSessionReader (incl. live merges), and when a collapsed <details> opens —
+// content hidden in a closed <details> has no layout to measure until it's shown.
+function wireReaderBlocks() {
+  const scope = document.getElementById('conversation');
+  if (!scope) return;
+  const measure = () => scope.querySelectorAll('.clampable').forEach((c) => {
+    const body = c.querySelector('.clamp-body');
+    const overflow = body && body.scrollHeight > body.clientHeight + 4;
+    c.classList.toggle('has-overflow', !!overflow);
+  });
+  requestAnimationFrame(measure);
+  scope.querySelectorAll('.clamp-toggle').forEach((btn) => {
+    if (btn._wired) return; btn._wired = true;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const c = btn.closest('.clampable'); if (!c) return;
+      btn.textContent = c.classList.toggle('open') ? 'show less' : 'show more';
     });
+  });
+  scope.querySelectorAll('.pc-copy').forEach((btn) => {
+    if (btn._wired) return; btn._wired = true;
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const c = btn.closest('.clampable');
+      const text = c ? (c.querySelector('.clamp-body')?.innerText || '') : '';
+      try { await navigator.clipboard.writeText(text); const o = btn.textContent; btn.textContent = '✓'; setTimeout(() => { btn.textContent = o; }, 1200); } catch { /* clipboard unavailable */ }
+    });
+  });
+  scope.querySelectorAll('details.pc-before, details.pc-after').forEach((d) => {
+    if (d._remeasure) return; d._remeasure = true;
+    d.addEventListener('toggle', () => { if (d.open) requestAnimationFrame(measure); });
   });
 }
 
@@ -3112,6 +3143,17 @@ function renderOutcomeRail(u) {
   return chips + shots; // link / default / unclassified → flat
 }
 
+// A height-clamped block with a "show more / show less" toggle and (optional) copy
+// button. Replaces the old destructive char-clips + the mobile-only tap-to-expand:
+// nothing in the reader is cut without a visible, tappable way to open it (works on
+// desktop and mobile). `clamp` is a CSS length for the collapsed max-height; the
+// toggle only appears when the content actually overflows it (wired post-render).
+function clampBlock(html, { cls = '', clamp = null, copy = false } = {}) {
+  const style = clamp ? ` style="--clamp:${clamp}"` : '';
+  const copyBtn = copy ? `<button class="pc-copy" type="button" title="copy text" aria-label="copy text">⧉</button>` : '';
+  return `<div class="clampable ${cls}"${style}>${copyBtn}<div class="clamp-body">${html}</div><button class="clamp-toggle" type="button">show more</button></div>`;
+}
+
 // One prompt unit as an internal reader card. Acks ("go ahead") collapse to a slim
 // connector so the chain stays legible without giving filler a full card.
 function renderReaderCard(u, i) {
@@ -3123,8 +3165,8 @@ function renderReaderCard(u, i) {
   const b = u.before;
   const before = b && (b.agent || b.prompt)
     ? `<details class="pc-before"><summary>▸ earlier in this session</summary>
-         ${b.prompt ? `<div class="pc-bu">you: ${esc(b.prompt)}</div>` : ''}
-         ${b.agent ? `<div class="pc-ba">agent: ${esc(b.agent)}</div>` : ''}
+         ${b.prompt ? clampBlock(`<span class="pc-blabel">you:</span> ${esc(b.prompt)}`, { cls: 'pc-bu', clamp: '8em' }) : ''}
+         ${b.agent ? clampBlock(`<span class="pc-blabel">agent:</span> ${esc(b.agent)}`, { cls: 'pc-ba', clamp: '8em' }) : ''}
        </details>`
     : '';
   const docs = (u.docRefs || []).map((d) => `<span class="pc-doc">📄 ${esc(d)}</span>`).join('');
@@ -3133,18 +3175,27 @@ function renderReaderCard(u, i) {
     .join('');
   const shown = u.after && u.after.steps ? u.after.steps.length : 0;
   const more = u.after && u.after.stepCount > shown ? `<div class="pc-more">+${u.after.stepCount - shown} more</div>` : '';
-  const verdict = u.after && u.after.verdict ? `<div class="pc-verdict">${esc(u.after.verdict)}</div>` : '';
-  const played = steps || verdict
-    ? `<details class="pc-after"><summary>▸ how it played out${u.after.stepCount ? ` · ${u.after.stepCount} steps` : ''}</summary>${steps}${more}${verdict}</details>`
+  // The verdict (the agent's final message) is the headline of an archived turn, so
+  // it rides ABOVE the collapsed step log, always visible, in full, with a show-more
+  // clamp — not buried inside "how it played out" and chopped to 400 chars as before.
+  const answer = u.after && u.after.verdict
+    ? `<div class="pc-answer">
+         <div class="pc-answer-head"><span class="pc-answer-tag">answer</span></div>
+         ${clampBlock(formatText(u.after.verdict), { cls: 'pc-answer-body', clamp: '15em', copy: true })}
+       </div>`
+    : '';
+  const played = steps
+    ? `<details class="pc-after"><summary>▸ how it played out${u.after.stepCount ? ` · ${u.after.stepCount} steps` : ''}</summary>${steps}${more}</details>`
     : '';
   const when = u.ts ? `<span class="pc-when">${fmtTime(u.ts)}</span>` : '';
   const link = u.cardId ? `<a class="pc-link" href="/c/${esc(u.cardId)}" title="permalink" target="_blank" rel="noopener">🔗</a>` : '';
   return `<article class="turn pcard rcard${fresh}" id="${anchor}">
     <div class="pc-head">${renderArchetype(u.archetype)}${docs}${contextGauge(u.context)}${when}</div>
     ${before}
-    <div class="pc-prompt">${formatText(u.prompt)}</div>
+    ${clampBlock(formatText(u.prompt), { cls: 'pc-prompt', clamp: '22em', copy: true })}
     ${renderAttachments(u.attachments)}
     ${renderOutcomeRail(u)}
+    ${answer}
     ${played}
     ${link ? `<div class="pc-bar">${link}</div>` : ''}
   </article>`;

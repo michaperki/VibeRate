@@ -519,7 +519,50 @@ pre.code {
 .pc-before summary { cursor: pointer; color: var(--claude); font-size: 12px; }
 .pc-bu, .pc-ba { font-size: 12px; color: #9aa1b2; margin-top: 5px; padding-left: 6px; }
 .pc-ba { border-left: 2px solid var(--codex); color: #cdd2de; }
-.pc-prompt { background: #12151c; border-left: 3px solid var(--accent); padding: 11px 13px; border-radius: 6px; font-size: 15px; white-space: pre-wrap; max-height: 280px; overflow: auto; }
+.pc-prompt { background: #12151c; border-left: 3px solid var(--accent); padding: 11px 13px; border-radius: 6px; font-size: 15px; white-space: pre-wrap; }
+
+/* Expandable block: clamp to --clamp, fade the cut edge, reveal a show-more toggle
+   only when the content overflows (JS adds .has-overflow). Replaces the old in-card
+   scrollbox + the destructive char-clips — nothing is hidden without a visible tap. */
+.clampable { position: relative; }
+.clampable .clamp-body { overflow: hidden; }
+.clampable:not(.open) .clamp-body { max-height: var(--clamp, 16em); }
+.clampable.has-overflow:not(.open) .clamp-body {
+  -webkit-mask-image: linear-gradient(#000 72%, transparent);
+          mask-image: linear-gradient(#000 72%, transparent);
+}
+.clamp-toggle {
+  display: none; margin-top: 6px; background: none; border: none; padding: 2px 0;
+  color: var(--accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.clampable.has-overflow > .clamp-toggle { display: inline-block; }
+.pc-copy {
+  position: absolute; top: 6px; right: 6px; z-index: 1; background: rgba(18,21,28,.85);
+  border: 1px solid var(--border); border-radius: 6px; color: var(--muted);
+  font-size: 12px; line-height: 1; padding: 3px 6px; cursor: pointer; opacity: 0; transition: opacity .12s;
+}
+.clampable:hover > .pc-copy, .pc-copy:focus { opacity: 1; }
+.pc-copy:hover { color: var(--text); border-color: var(--accent); }
+body.is-mobile .pc-copy { opacity: .7; }   /* no hover on touch — keep it reachable */
+
+/* The agent's final message: the headline of an archived turn. Surfaced above the
+   collapsed step log, in full, with a show-more clamp (was buried + chopped to 400). */
+.pc-answer { margin-top: 12px; }
+.pc-answer-head { margin-bottom: 5px; }
+.pc-answer-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--codex); font-weight: 600; }
+.pc-answer-body { font-size: 14px; color: #cdd2de; line-height: 1.5; white-space: pre-wrap; padding-left: 8px; border-left: 2px solid var(--codex); }
+.pc-answer-body .clamp-body, .pc-prompt .clamp-body { white-space: pre-wrap; }
+.pc-blabel { color: var(--muted); }
+
+/* Reader jump-to-top pill (mobile): floats once you've scrolled into a long archive. */
+.reader-jump {
+  position: fixed; right: 14px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 60;
+  padding: 8px 14px; border-radius: 99px; border: none; cursor: pointer;
+  background: var(--accent); color: #0a1020; font: inherit; font-weight: 600; font-size: 13px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.reader-jump.hidden { display: none; }
+body:not(.is-mobile) .reader-jump { display: none; }   /* desktop has the nav row */
 .outcome-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .outcome-chips.compact { margin-top: 7px; gap: 5px; }
 .out-chip {
@@ -1590,15 +1633,9 @@ body.is-mobile .conv-body { padding-left: clamp(12px, 4vw, 28px); padding-right:
 body.is-mobile .dashboard { padding: clamp(12px, 4vw, 28px); gap: 16px; }
 body.is-mobile .dv-composer { padding-left: clamp(12px, 4vw, 28px); padding-right: clamp(12px, 4vw, 28px); }
 body.is-mobile .reader-card, body.is-mobile .pc-prompt { max-width: 100%; }
-/* Tall prompt cards clamp + tap-to-expand on mobile (UI_FEEDBACK P3 #10) so more
-   cards fit per screen. JS adds .pc-clampable only to cards that actually overflow. */
-body.is-mobile .pcard.pc-clampable .pc-prompt { position: relative; cursor: pointer; }
-body.is-mobile .pcard.pc-clampable:not(.pc-open) .pc-prompt { max-height: 7em; overflow: hidden; }
-body.is-mobile .pcard.pc-clampable:not(.pc-open) .pc-prompt::after {
-  content: "tap to expand"; position: absolute; left: 0; right: 0; bottom: 0;
-  padding: 1.4em 13px 4px; font-size: 11px; color: var(--muted); text-align: right;
-  background: linear-gradient(transparent, #12151c 60%); pointer-events: none;
-}
+/* Tall blocks clamp + show-more on every card (the unified .clampable mechanism,
+   wired in wireReaderBlocks) — replaces the old mobile-only tap-to-expand. */
+body.is-mobile .clampable .clamp-body { font-size: 14px; }
 /* hover-only peek is useless on touch and 248px overflows narrow screens */
 body.is-mobile .brain-peek { display: none !important; }
 body.is-mobile .brain-ticker { white-space: normal; }
