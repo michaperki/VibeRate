@@ -1384,7 +1384,7 @@ function agentRowHtml(a) {
       <span class="ck-dot ${esc(st)}"></span>
       <div class="ck-agent-main">
         <div class="ck-agent-top"><span class="ck-agent-title">${esc(a.title || 'session')}</span><span class="ck-type ${esc(a.type)}">${esc(a.type)}</span></div>
-        <div class="ck-agent-sub">${esc(task)}</div>
+        <div class="ck-agent-sub">${esc(task)}${a.currentPlan ? `<span class="ck-agent-plan" title="advancing ${esc(a.currentPlan)} (inferred from the files it touched)">◆ ${esc(a.currentPlan)}</span>` : ''}</div>
       </div>
       <div class="ck-agent-meta">${elapsed}${ctx}</div>
     </div>`;

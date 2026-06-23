@@ -303,6 +303,16 @@ function summarizeAction(name, input) {
   return { verb, label, file: file ? String(file) : null };
 }
 
+// The free half of session↔plan (PLAN_COCKPIT.md §3.1, tier 1): name the plan an
+// agent is advancing from the files it touches, no self-report needed. Any PLAN-ish
+// markdown the agent reads/edits (PLAN_*.md, *_PLAN.md) counts; returns the basename
+// or null. Sticky on the session, so it survives the agent moving on to edit code.
+function planDocOf(file) {
+  if (!file) return null;
+  const base = String(file).split(/[\\/]/).pop();
+  return /plan/i.test(base) && /\.md$/i.test(base) ? base : null;
+}
+
 // Fold a raw Anthropic usage blob into the session's denormalized context meter.
 // The input side (fresh + both cache buckets) is the context the model actually
 // saw — the same sum the per-session pill shows (driveUpdateCtx).
@@ -343,6 +353,7 @@ function createSession({ cwd, permissionMode, projectSlug = null }) {
     model: null, // from the first system/init event
     promptStartedAt: null, // turn-start stamp → the roster's ticking elapsed timer
     lastAction: null, // { verb, label, file } — the agent's most recent tool call
+    currentPlan: null, // PLAN-ish doc basename the agent is advancing (planDocOf, sticky)
     ctxTokens: 0, // live context-window fill (input side), from interim usage
     ctxPct: 0, // ctxTokens / windowOf(model), 0–100
     // Per-turn flags: did we stream this block kind via partials? If so we skip
@@ -452,7 +463,12 @@ function handleRawEvent(session, obj) {
         if (!session.streamedText) emit(session, { kind: 'assistant_text', text: block.text });
       } else if (block.type === 'thinking' && block.thinking) {
         if (!session.streamedThinking) emit(session, { kind: 'thinking', text: block.thinking });
-      } else if (block.type === 'tool_use') { session.lastAction = summarizeAction(block.name, block.input || {}); emit(session, { kind: 'tool_use', id: block.id || null, name: block.name, input: block.input || {} }); }
+      } else if (block.type === 'tool_use') {
+        session.lastAction = summarizeAction(block.name, block.input || {});
+        const plan = planDocOf(session.lastAction.file);
+        if (plan) session.currentPlan = plan; // sticky: last plan touched wins
+        emit(session, { kind: 'tool_use', id: block.id || null, name: block.name, input: block.input || {} });
+      }
     }
     if (obj.error) emit(session, { kind: 'error', message: String(obj.error) });
     return;
@@ -807,6 +823,7 @@ function publicView(session) {
     model: session.model || null,
     promptStartedAt: session.promptStartedAt || null,
     lastAction: session.lastAction || null,
+    currentPlan: session.currentPlan || null,
     ctxTokens: session.ctxTokens || 0,
     ctxPct: session.ctxPct || 0,
   };

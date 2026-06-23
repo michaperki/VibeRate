@@ -1743,6 +1743,7 @@ body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-
 .ck-type { flex: 0 0 auto; font: 600 9px ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 5px; color: var(--claude); background: rgba(169, 120, 255, 0.14); }
 .ck-type.codex { color: var(--codex); background: rgba(46, 207, 143, 0.14); }
 .ck-agent-sub { font-size: 12px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-agent-plan { color: var(--doc); margin-left: 6px; font-size: 11px; opacity: 0.9; }
 .ck-agent-meta { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .ck-elapsed { font: 500 11px ui-monospace, Menlo, monospace; color: var(--muted); }
 .ck-ctx { display: inline-flex; align-items: center; gap: 5px; font: 500 10px ui-monospace, Menlo, monospace; color: var(--muted); }
