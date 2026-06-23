@@ -7,7 +7,7 @@
 //     — an empty/missing allowlist locks the control plane entirely.
 
 import fs from 'node:fs';
-import { startSession, adoptSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk } from './agent.js';
+import { startSession, adoptSession, sendMessage, stopSession, subscribe, getSession, listSessions, registerAsk, resolveAsk, recordReport } from './agent.js';
 import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
@@ -262,6 +262,14 @@ export function mountAgent(app, opts = {}) {
     } catch (err) {
       res.json({ error: err && err.message, selections: [] });
     }
+  });
+
+  // The MCP `report` sidecar posts here when the driven agent self-declares the
+  // plan it's advancing (PLAN_COCKPIT.md §3.1 tier 2). Loopback-only like `ask`.
+  // Fire-and-forget: we stamp the session and ack immediately (no parking).
+  app.post('/api/agent/internal/report', loopbackOnly, (req, res) => {
+    const { sessionId, plan, status } = req.body || {};
+    res.json(recordReport(sessionId, { plan, status }));
   });
 
   // The Drive UI replies to an `ask` picker here (guarded like the rest of the

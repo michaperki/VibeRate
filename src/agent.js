@@ -33,6 +33,7 @@ const CLAUDE_BIN = process.env.VBRT_CLAUDE_BIN || 'claude';
 // per turn via the --mcp-config we write below.
 const MCP_ASK_PATH = fileURLToPath(new URL('./mcpAsk.js', import.meta.url));
 const MCP_ASK_TOOL = 'mcp__viberate__ask';
+const MCP_REPORT_TOOL = 'mcp__viberate__report';
 
 // How long the server parks an `ask` waiting for the human, in ms. Must stay
 // BELOW the child's MCP_TOOL_TIMEOUT so our graceful "no answer" result wins the
@@ -110,6 +111,28 @@ export function resolveAsk(askId, selections) {
   }
   pending.resolve({ selections: Array.isArray(selections) ? selections : [] });
   return true;
+}
+
+// The ground-truth half of session↔plan (PLAN_COCKPIT.md §3.1 tier 2): the driven
+// agent self-declaring what it's advancing via our MCP `report` tool. Unlike `ask`
+// this is fire-and-forget — it doesn't block on a human, it just stamps the declared
+// plan + a short status note on the session, which the cockpit roster prefers over
+// the inferred `currentPlan`. Returns a small ack for the sidecar. A blank `plan`
+// clears a stale declaration (the agent moved off a plan). Unknown session → ok:false.
+export function recordReport(sessionId, report = {}) {
+  const session = sessions.get(sessionId);
+  if (!session) return { ok: false, error: 'unknown session' };
+  if (report.plan !== undefined) {
+    const base = report.plan == null ? '' : String(report.plan).trim().split(/[\\/]/).pop();
+    session.declaredPlan = base || null;
+  }
+  if (report.status !== undefined) {
+    const note = report.status == null ? '' : String(report.status).trim().slice(0, 200);
+    session.declaredNote = note || null;
+  }
+  session.declaredAt = now();
+  emit(session, { kind: 'report', plan: session.declaredPlan, note: session.declaredNote });
+  return { ok: true, plan: session.declaredPlan || null, note: session.declaredNote || null };
 }
 
 // Where the CLI keeps its config + OAuth credentials. Honors CLAUDE_CONFIG_DIR
@@ -354,6 +377,9 @@ function createSession({ cwd, permissionMode, projectSlug = null }) {
     promptStartedAt: null, // turn-start stamp → the roster's ticking elapsed timer
     lastAction: null, // { verb, label, file } — the agent's most recent tool call
     currentPlan: null, // PLAN-ish doc basename the agent is advancing (planDocOf, sticky)
+    declaredPlan: null, // plan the agent self-reported via the MCP `report` tool (tier 2)
+    declaredNote: null, // short status note from the same self-report
+    declaredAt: 0, // when the agent last self-reported
     ctxTokens: 0, // live context-window fill (input side), from interim usage
     ctxPct: 0, // ctxTokens / windowOf(model), 0–100
     // Per-turn flags: did we stream this block kind via partials? If so we skip
@@ -559,12 +585,16 @@ function runTurn(session, prompt, { resume }) {
         }),
       );
       args.push('--mcp-config', mcpConfigPath);
-      args.push('--allowedTools', MCP_ASK_TOOL);
+      args.push('--allowedTools', `${MCP_ASK_TOOL},${MCP_REPORT_TOOL}`);
       args.push(
         '--append-system-prompt',
         'When you need a decision, preference, or clarification from the user, call the ' +
           `${MCP_ASK_TOOL} tool — it shows a picker in their UI and returns their answer in the ` +
-          'same turn. Do NOT use the built-in AskUserQuestion tool; it cannot be answered here.',
+          'same turn. Do NOT use the built-in AskUserQuestion tool; it cannot be answered here.\n' +
+          `When you start advancing a specific plan doc (a PLAN_*.md) or change which one you're on, ` +
+          `call the ${MCP_REPORT_TOOL} tool with { plan: "<PLAN_FILE.md>", status: "<short note of what ` +
+          `you're doing>" }. It returns instantly (no human wait) and lets the person watching the ` +
+          `cockpit see which plan you're driving and your progress. Re-report when the plan or focus changes.`,
       );
     } catch (e) {
       emit(session, { kind: 'error', message: `failed to write mcp config: ${e.message}` });
@@ -824,6 +854,8 @@ function publicView(session) {
     promptStartedAt: session.promptStartedAt || null,
     lastAction: session.lastAction || null,
     currentPlan: session.currentPlan || null,
+    declaredPlan: session.declaredPlan || null,
+    declaredNote: session.declaredNote || null,
     ctxTokens: session.ctxTokens || 0,
     ctxPct: session.ctxPct || 0,
   };

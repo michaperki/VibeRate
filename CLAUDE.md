@@ -80,3 +80,9 @@ burned turns rediscovering these facts; don't.
 - **`prototypes/` is gitignored at any depth** — a prototype under `public/prototypes/`
   won't stage. Use a non-ignored path (e.g. `public/proto/`) if it must be committed,
   or just preview it (above) and skip the commit.
+- **Tell the human which plan you're driving — call `mcp__viberate__report`.** When you
+  start advancing a `PLAN_*.md` (or switch to another), call the `report` MCP tool with
+  `{ plan, status }`. It returns instantly (no human wait) and lights up the plan you're
+  on, plus a status note, in the cockpit's live agent roster — ground truth instead of the
+  dashboard inferring it from the files you touch. Re-report when your focus changes.
+  (Defined in `src/mcpAsk.js`; see `PLAN_COCKPIT.md` §3.1 tier 2.)

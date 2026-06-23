@@ -147,6 +147,15 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
       a hard MCP timeout. Verified end-to-end in `default` mode: answered path
       (`SELECTED=Spaces`, 7.4s) and ignored path (timeout → agent proceeds).
       Full per-tool *approvals* remain backlogged. Original spike notes:
+- [x] **Agent self-report (`report` MCP tool).** SHIPPED 2026-06-23 (cockpit tier 2,
+      `PLAN_COCKPIT.md` §3.1). A second tool in the same `mcpAsk.js` sidecar lets the
+      driven agent declare which `PLAN_*.md` it's advancing + a short status note.
+      Unlike `ask` it's **fire-and-forget** — POSTs to loopback
+      `/api/agent/internal/report` → `recordReport()` stamps `session.declaredPlan`/
+      `declaredNote` and acks immediately (no parking, no human wait). Allowlisted
+      alongside `ask` (`--allowedTools mcp__viberate__ask,mcp__viberate__report`) and
+      nudged via the same `--append-system-prompt`. The cockpit roster prefers this
+      ground-truth declaration over the file-touch inference (`planDocOf`).
       - `AskUserQuestion` is available headless and emits a clean structured
         `tool_use`: `input.questions[]` = `{question, header, multiSelect,
         options:[{label, description}]}`. So we can render a real choice card.

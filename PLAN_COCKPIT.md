@@ -28,12 +28,20 @@ the design rationale. What landed against the sequencing in §7:
   (`agent.js`) names any PLAN-ish markdown (`PLAN_*.md`, `*_PLAN.md`) the agent reads/edits,
   sticky on the session so it survives the agent moving on to code; surfaced on `publicView`
   and rendered as a `◆ PLAN_X.md` chip on the roster row (`agentRowHtml`). This is the *free*
-  half — derived, no agent cooperation. The richer **self-report** path (an MCP `report` tool
-  reusing the `registerAsk` channel, optionally a skill) is still open; so is per-plan
-  progress *attribution* (which checkbox an agent ticked).
+  half — derived, no agent cooperation.
+- **§3.1 session↔plan — tier 2 done (2026-06-23, self-report / ground truth).** The driven
+  agent now *declares* what it's advancing via a new MCP **`report`** tool, alongside `ask`
+  in the same stdio sidecar (`mcpAsk.js`): fire-and-forget (no human wait), it POSTs to
+  loopback `POST /api/agent/internal/report` → `recordReport()` (`agent.js`), which stamps
+  `session.declaredPlan` + `declaredNote` and surfaces them on `publicView`. The tool is
+  allowlisted next to `ask` and the per-turn `--append-system-prompt` steers the agent to
+  call it when it starts/switches a plan (the "skill" half — instruction, no separate file).
+  The roster chip **prefers `declaredPlan` over the inferred `currentPlan`** and renders it
+  brighter (a filled pill) to mark ground truth; the declared note rides in the tooltip.
+  Belt-and-suspenders: declared when the agent reports, inferred otherwise. *Still open:*
+  per-plan progress **attribution** (which checkbox an agent ticked).
 - **Still open (as flagged in §3 / §6):** live **agent type** is hardcoded `claude` (Drive
-  only spawns claude); **session↔plan self-report** (agent declares the plan/progress, vs
-  today's inference); the two-worlds clock skew (live runtime vs 2 s ingest poll) is
+  only spawns claude); the two-worlds clock skew (live runtime vs 2 s ingest poll) is
   unresolved.
 
 The target design was the mockup `viberate-cockpit.jsx`. Every current-state claim below
@@ -165,7 +173,7 @@ Per roster field (verdict + where the gap lives):
 | **type (claude / codex)** | **NOT CAPTURED** | Drive only ever spawns the `claude` binary (`CLAUDE_BIN`, `agent.js:30`); session objects carry no `source`/`type`/`provider`. `source` exists **only** in *parsed* transcripts (`parsers.js`, `getActivity` sessions), not on live runtime sessions. **Gap: agent runtime + model.** The mockup's codex agents have no live counterpart today. |
 | status (working / **waiting** / idle) | **PARTIAL** | `status` enum = `starting \| working \| idle \| error \| exited` (`agent.js:291,508,581`). **There is no `waiting` state** — the mockup's "waiting / awaiting review" does not exist. **Gap: new lifecycle state in the runtime** (`agent.js setStatus`). |
 | current-task summary | **DERIVABLE, not surfaced** | Latest `{kind:'tool_use'}` / `user_prompt` / `title` in the SSE event log; not on `publicView`. **Gap: client must hold an SSE per agent, or the runtime must denormalize "last action" onto the list payload.** |
-| plan / file it's touching | **TRACKED (inferred)** | File is on `lastAction.file`. **Plan** now stamped onto `session.currentPlan` by `planDocOf()` — the last PLAN-ish doc the agent touched (sticky), surfaced on `publicView` and shown as a `◆` chip on the roster. Inference only (no explicit session↔plan link); a **self-report** tool would make it ground truth. |
+| plan / file it's touching | **TRACKED** | File is on `lastAction.file`. **Plan** comes two ways: inferred (`planDocOf` → `session.currentPlan`, the last PLAN-ish doc touched, sticky) and **declared** (`session.declaredPlan` via the MCP `report` tool — ground truth). Both on `publicView`; the roster `◆` chip prefers declared (brighter pill) over inferred. |
 | **elapsed on current prompt** | **DERIVABLE, not stored** | Every event has `t` (`agent.js:312`); `user_prompt` (`:507`) → now gives elapsed. `publicView` exposes `createdAt`/`lastEventAt` but **not turn-start**. **Gap: stamp `promptStartedAt` on the session and add it to `publicView`,** else the timer can't tick from the list endpoint alone. |
 | **context-window fill %** | **TRACKED in stream, not in list** | Emitted as `{kind:'usage', usage:{input_tokens, cache_read_input_tokens, cache_creation_input_tokens, output_tokens}}` per `message_start` (`agent.js:373–387`); model via `{kind:'system', model}`. Client computes `pct = (input+cacheRead+cacheCreate)/windowOf(model)` (`parsers.js:38–54`; `windowOf` 200k/1M). **Gap: this lives on the per-session SSE, not on `/api/agent/sessions`,** so a roster meter needs the value denormalized onto the list payload or N live streams. |
 
@@ -284,12 +292,12 @@ Mockup pieces are React; the work is to author equivalent **render functions** i
   disagree (a commit exists in git.json only after ingest; an agent is "working" in the
   runtime before any commit lands). The cockpit header ("active 13m ago" next to live
   tickers) must define which clock wins.
-- **Not currently captured (upstream work):** live-session **agent type**; **session↔plan
-  self-report** (the agent declaring its plan/progress vs. today's `planDocOf` inference).
-  (Shipped 2026-06-23: the **`waiting`** status; **commit→agent** attribution as a
-  client-side time-window heuristic, §3.2; **session↔plan tier 1** as a touched-files
-  inference, §3.1 — none needed data-model work after all.) What's left is the *ground-truth*
-  layer — an agent self-report tool — and live agent type, both genuine runtime work.
+- **Not currently captured (upstream work):** live-session **agent type** (Drive only spawns
+  `claude`); **per-plan progress attribution** (which checkbox an agent ticked). (Shipped
+  2026-06-23: the **`waiting`** status; **commit→agent** attribution, §3.2; **session↔plan
+  tier 1** inferred from touched files and **tier 2** self-reported via the MCP `report`
+  tool, §3.1.) What's left is mostly the live agent-type capture; session↔plan is now
+  covered both inferred and declared.
 
 ## 7. Suggested sequencing
 1. **Unblock the roster data (runtime work).** Enrich `publicView`/`listSessions`

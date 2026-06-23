@@ -71,6 +71,26 @@ const ASK_TOOL = {
   },
 };
 
+// The `report` tool: the agent self-declares which plan it's advancing + a short
+// status note (PLAN_COCKPIT.md §3.1 tier 2). Fire-and-forget — unlike `ask` it does
+// NOT block on a human; it returns as soon as the server records it, so the person
+// watching the cockpit roster sees ground truth instead of an inference.
+const REPORT_TOOL = {
+  name: 'report',
+  description:
+    "Tell the person watching the cockpit which plan doc you're advancing and what " +
+    "you're doing, so the live agent roster shows it. Returns instantly (no human " +
+    'wait). Call it when you start working a PLAN_*.md, switch plans, or hit a ' +
+    'milestone. Leave `plan` empty to clear a stale declaration.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      plan: { type: 'string', description: 'The plan doc you are advancing, e.g. "PLAN_COCKPIT.md". Empty string clears it.' },
+      status: { type: 'string', description: 'A short note on what you are doing / your progress.' },
+    },
+  },
+};
+
 // POST the questions to the VibeRate server and resolve with its JSON answer.
 // The server holds the response open until the user answers (or it times out
 // and returns a "no answer" payload), so this promise is the human round-trip.
@@ -98,6 +118,39 @@ function postAsk(questions) {
             resolve(JSON.parse(data));
           } catch (e) {
             reject(new Error('bad answer payload: ' + (e && e.message)));
+          }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// POST a self-report to the VibeRate server. Returns the server's ack immediately —
+// the server stamps the session and responds without parking the request.
+function postReport(report) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try {
+      url = new URL('/api/agent/internal/report', BASE_URL);
+    } catch (e) {
+      return reject(e);
+    }
+    const body = JSON.stringify({ sessionId: SESSION_ID, ...report });
+    const req = http.request(
+      url,
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+      (res) => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(new Error('bad report ack: ' + (e && e.message)));
           }
         });
       },
@@ -146,29 +199,47 @@ async function handle(msg) {
   // Notifications carry no id and get no response.
   if (method === 'notifications/initialized' || method === 'initialized') return;
   if (method === 'tools/list') {
-    send({ jsonrpc: '2.0', id, result: { tools: [ASK_TOOL] } });
+    send({ jsonrpc: '2.0', id, result: { tools: [ASK_TOOL, REPORT_TOOL] } });
     return;
   }
   if (method === 'tools/call') {
     const name = params && params.name;
-    if (name !== 'ask') {
-      send({ jsonrpc: '2.0', id, error: { code: -32601, message: 'unknown tool: ' + name } });
+    if (name === 'ask') {
+      const questions = (params.arguments && params.arguments.questions) || [];
+      try {
+        const answer = await postAsk(questions);
+        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: formatAnswer(answer) }] } });
+      } catch (e) {
+        log('ask failed:', e && e.message);
+        // Surface as a tool error (is_error) rather than a protocol error so the
+        // agent can read it and carry on instead of the turn falling over.
+        send({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: 'Could not reach the user: ' + (e && e.message) }], isError: true },
+        });
+      }
       return;
     }
-    const questions = (params.arguments && params.arguments.questions) || [];
-    try {
-      const answer = await postAsk(questions);
-      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: formatAnswer(answer) }] } });
-    } catch (e) {
-      log('ask failed:', e && e.message);
-      // Surface as a tool error (is_error) rather than a protocol error so the
-      // agent can read it and carry on instead of the turn falling over.
-      send({
-        jsonrpc: '2.0',
-        id,
-        result: { content: [{ type: 'text', text: 'Could not reach the user: ' + (e && e.message) }], isError: true },
-      });
+    if (name === 'report') {
+      const { plan, status } = params.arguments || {};
+      try {
+        const ack = await postReport({ plan, status });
+        const txt = ack && ack.ok
+          ? `Reported${ack.plan ? ` — advancing ${ack.plan}` : ' (plan cleared)'}.`
+          : `Report not recorded: ${(ack && ack.error) || 'unknown'}.`;
+        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: txt }] } });
+      } catch (e) {
+        log('report failed:', e && e.message);
+        send({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: 'Could not record report: ' + (e && e.message) }], isError: true },
+        });
+      }
+      return;
     }
+    send({ jsonrpc: '2.0', id, error: { code: -32601, message: 'unknown tool: ' + name } });
     return;
   }
   if (id != null) {

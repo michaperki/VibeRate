@@ -1380,11 +1380,19 @@ function agentRowHtml(a) {
   const ctx = a.ctxTokens
     ? `<span class="ck-ctx" title="context window ${a.ctxPct}% full — ${a.ctxTokens.toLocaleString()} tokens${a.model ? ' · ' + esc(a.model) : ''}"><span class="ck-ctx-bar"><i style="width:${a.ctxPct}%;background:${ctxColor(a.ctxPct)}"></i></span>${a.ctxPct}%</span>`
     : '';
+  // The plan chip prefers the agent's own self-report (tier 2, ground truth) over the
+  // inferred currentPlan (tier 1, from files touched); a declared plan reads brighter.
+  const plan = a.declaredPlan || a.currentPlan;
+  const declared = !!a.declaredPlan;
+  const planTitle = declared
+    ? `advancing ${plan} (self-reported by the agent)${a.declaredNote ? ' — ' + a.declaredNote : ''}`
+    : `advancing ${plan} (inferred from the files it touched)`;
+  const planChip = plan ? `<span class="ck-agent-plan${declared ? ' declared' : ''}" title="${esc(planTitle)}">◆ ${esc(plan)}</span>` : '';
   return `<div class="ck-agent" data-agent="${esc(a.id)}" tabindex="0" title="Open this agent in Drive">
       <span class="ck-dot ${esc(st)}"></span>
       <div class="ck-agent-main">
         <div class="ck-agent-top"><span class="ck-agent-title">${esc(a.title || 'session')}</span><span class="ck-type ${esc(a.type)}">${esc(a.type)}</span></div>
-        <div class="ck-agent-sub">${esc(task)}${a.currentPlan ? `<span class="ck-agent-plan" title="advancing ${esc(a.currentPlan)} (inferred from the files it touched)">◆ ${esc(a.currentPlan)}</span>` : ''}</div>
+        <div class="ck-agent-sub">${esc(task)}${planChip}</div>
       </div>
       <div class="ck-agent-meta">${elapsed}${ctx}</div>
     </div>`;
