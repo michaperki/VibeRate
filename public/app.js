@@ -5643,6 +5643,49 @@ async function boot() {
     setTimeout(refreshInsets, 250);
   }, 300));
 
+  // --- TEMP on-device safe-area diagnostic (enable with ?satdebug in the URL) ---
+  // The env()/probe-frozen approach has now failed twice on Mike's TestFlight device,
+  // which means our model of what the probe actually READS there is wrong. This pins a
+  // live readout to the bottom of the screen so we can see the real numbers across a
+  // keyboard open/close instead of guessing. Tap it to hide. Remove once diagnosed.
+  if (/[?&]satdebug\b/.test(location.search)) {
+    const dbg = document.createElement('div');
+    dbg.style.cssText = 'position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;'
+      + 'font:11px/1.35 ui-monospace,Menlo,monospace;background:rgba(0,0,0,.86);color:#0f0;'
+      + 'padding:7px 9px;border-radius:8px;white-space:pre;pointer-events:auto;'
+      + 'border:1px solid #0a0;max-height:42vh;overflow:auto';
+    dbg.addEventListener('click', () => dbg.remove());
+    document.body.appendChild(dbg);
+    let kbCloses = 0, lastKbUp = false, peakProbe = 0;
+    const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '(unset)';
+    const paint = () => {
+      const vv = window.visualViewport;
+      const probe = readInset('top');
+      if (probe > peakProbe) peakProbe = probe;
+      const bar = document.getElementById('m-appbar');
+      const barRect = bar ? bar.getBoundingClientRect() : null;
+      const kbUp = vv ? (window.innerHeight - vv.height) > 120 : false;
+      if (lastKbUp && !kbUp) kbCloses++;
+      lastKbUp = kbUp;
+      dbg.textContent =
+        'innerH ' + window.innerHeight + '   vv.h ' + (vv ? Math.round(vv.height) : '—')
+        + '   vv.offTop ' + (vv ? Math.round(vv.offsetTop) : '—')
+        + '\nprobe(env-top) ' + probe + '   peak ' + peakProbe
+        + '   probe-bot ' + readInset('bottom')
+        + '\n--sat ' + cssVar('--sat') + '   --sab ' + cssVar('--sab')
+        + '\nappbar h ' + (barRect ? Math.round(barRect.height) : '—')
+        + '  top ' + (barRect ? Math.round(barRect.top) : '—')
+        + '   kbUp ' + kbUp + '   kbCloses ' + kbCloses
+        + '\nminTop ' + minTop + '   minBot ' + minBot + '   (tap to hide)';
+    };
+    paint();
+    setInterval(paint, 250);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', paint);
+      window.visualViewport.addEventListener('scroll', paint);
+    }
+  }
+
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
   const closeSheet = () => body.classList.remove('m-sheet-open');
