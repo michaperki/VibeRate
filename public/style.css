@@ -1508,8 +1508,24 @@ body.is-mobile.m-driving #m-brainbar {
 #m-brainbar .m-grip { flex: none; color: var(--muted); font-size: 12px; cursor: pointer; padding-left: 4px; }
 body.is-mobile.m-brain-open #m-brainbar .m-grip::after { content: ""; }
 
-/* App becomes a single column; content clears the fixed header. */
-body.is-mobile #app { display: block; height: auto; min-height: 100dvh; padding-top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px)); }
+/* App becomes a single column; content clears the fixed header.
+   #app — not the document — owns the scroll on mobile. iOS WKWebView toggles a
+   safe-area top contentInset on the *document* scroller at scrollY 0 (innerHeight
+   drops by exactly env(safe-area-inset-top) there, then springs back on scroll),
+   which stacks on the CSS env() padding and double-tall the fixed header — but
+   only at the very top, and only in the wrapped WebView (Safari never insets the
+   document). Locking the document (body overflow:hidden) and giving #app its own
+   overflow-y removes that scroll-origin state entirely: there's no document scroll
+   for WebKit to inset, so the viewport — and the header — stay put. The sticky
+   .dv-head-stack now resolves against #app's scrollport (top:0 = viewport top), so
+   its existing top offsets are unchanged. */
+html:has(body.is-mobile) { overflow: hidden; }
+body.is-mobile { height: 100%; overflow: hidden; }
+body.is-mobile #app {
+  display: block; height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: none; -webkit-overflow-scrolling: touch;
+  padding-top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
+}
 body.is-mobile.m-driving #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
 body.is-mobile #main { display: block; min-width: 0; }
 body.is-mobile .pane { height: auto; min-height: 40dvh; }

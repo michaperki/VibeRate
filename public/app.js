@@ -5564,26 +5564,28 @@ async function boot() {
       badge.addEventListener('click', () => badge.remove());
       document.body.appendChild(badge);
       const vv = window.visualViewport;
-      const se = document.scrollingElement || document.documentElement;
+      // #app is now the scroller on mobile (document is locked) — listen there, not window.
+      const scroller = byId('app') || document.scrollingElement || document.documentElement;
       const probe = document.createElement('div');
       probe.style.cssText = 'position:fixed;top:0;left:0;height:env(safe-area-inset-top,0px);width:0;visibility:hidden';
       document.body.appendChild(probe);
-      let peak = 0; // largest bar.top seen — captures the "tall" state even after it snaps back
+      let minH = 99999, maxH = 0; // track innerHeight range — the 47px toggle should now be gone
       function paint() {
         const bar = byId('m-appbar');
         const r = bar ? bar.getBoundingClientRect() : null;
         const barTop = r ? r.top : 0;
-        if (barTop > peak) peak = barTop;
         const sat = probe.getBoundingClientRect().height;
+        const ih = window.innerHeight;
+        if (ih < minH) minH = ih; if (ih > maxH) maxH = ih;
         badge.textContent =
-          `scrollY = ${Math.round(window.scrollY)} / se.top=${Math.round(se.scrollTop)}\n`
-          + `bar.top = ${barTop.toFixed(1)}  (peak ${peak.toFixed(1)})\n`
-          + `bar.h   = ${r ? r.height.toFixed(1) : '?'}   sat=${sat.toFixed(1)}\n`
-          + `vv.offTop=${vv ? vv.offsetTop.toFixed(1) : 'n/a'}  vv.scale=${vv ? vv.scale.toFixed(2) : 'n/a'}\n`
-          + `vv.h=${vv ? Math.round(vv.height) : 'n/a'}  innerH=${window.innerHeight}\n`
-          + `docH=${se.scrollHeight}  scroller=${se === document.documentElement ? 'html' : se.tagName}`;
+          `app.scrollTop = ${Math.round(scroller.scrollTop)}\n`
+          + `bar.top = ${barTop.toFixed(1)}   bar.h = ${r ? r.height.toFixed(1) : '?'}\n`
+          + `sat=${sat.toFixed(1)}  vv.offTop=${vv ? vv.offsetTop.toFixed(1) : 'n/a'}\n`
+          + `innerH=${ih}  range[${minH}-${maxH}]  Δ=${maxH - minH}\n`
+          + `scroller=${scroller.id || scroller.tagName}`;
       }
       paint();
+      scroller.addEventListener('scroll', paint, { passive: true });
       window.addEventListener('scroll', paint, { passive: true });
       window.addEventListener('resize', paint);
       if (vv) { vv.addEventListener('resize', paint); vv.addEventListener('scroll', paint); }
