@@ -5555,21 +5555,30 @@ async function boot() {
   // env(safe-area-inset-top). In the wrapped WKWebView, focusing the Drive composer
   // raises the keyboard, which scrolls/insets the native scroll view; on dismiss
   // WebKit leaves env(safe-area-inset-top) reading ~2x until the next reflow — so
-  // *closing* the text box double-tall'd the header (the bug Mike pinned). Freezing
-  // the inset into --sat/--sab and sizing the chrome off the frozen var defeats that:
-  // a keyboard-close resize can't re-inflate a constant.
+  // *closing* the text box double-tall'd the header (the bug Mike pinned). We freeze
+  // the real inset into --sat/--sab and size the chrome off the frozen var, not live
+  // env(): a keyboard-close resize can't re-inflate a constant px value.
   //
-  // BUT: the wrapped WKWebView often reports the insets as 0 at *boot* — they only
-  // populate a tick after the webview is in the view hierarchy (mobile Safari has them
-  // ready immediately). Freezing that 0 hard-zeroed the header's top padding, sliding
-  // it under the status bar and dropping its tap targets into the dead status-bar strip
-  // (the TestFlight brick). So we only freeze a *plausible, settled* reading; anything
-  // implausible (0-at-boot, or a ~2x keyboard inflation) leaves the var UNSET, so CSS
-  // falls back to live env() — which self-heals as the inset populates — and we retry
-  // until a good reading lands. Once frozen to the real inset, the keyboard can no
-  // longer re-inflate it.
+  // The whole difficulty is capturing the TRUE inset, because env() lies in two ways:
+  //   - at *boot* WKWebView reports 0 (the insets populate a tick after the webview
+  //     enters the view hierarchy; mobile Safari has them ready immediately). Freezing
+  //     that 0 hard-zeroed the header's top padding, sliding it under the status bar and
+  //     killing its tap targets — the TestFlight brick.
+  //   - while the keyboard is up/closing env() reads inflated (up to ~2x).
+  // The prior version froze the FIRST plausible reading and never re-read (except on
+  // rotation). On the initiate-Drive screen you land and type immediately, so the
+  // keyboard is up during the boot window; if its inflated reading happened to land
+  // under the cap it got frozen *tall*, with no way back but an app restart — the bug.
+  //
+  // Key insight: the real inset is a device constant per orientation, and every lie is
+  // an *inflation* (0 aside) — strictly LARGER than the truth. So we track the running
+  // MINIMUM of every sane reading and freeze that. 0 → ignore (not populated). > cap →
+  // ignore (keyboard inflation). In (0, cap] → lower the min. We re-read on every
+  // keyboard close (visualViewport), so the min converges down to the truth and can
+  // never be re-inflated. Orientation genuinely changes the inset, so it resets the min.
   const SAT_MAX = 70, SAB_MAX = 50; // largest real iOS portrait insets are ~59/34px;
-                                    // a ~2x keyboard inflation lands well above these.
+                                    // a keyboard inflation lands above these.
+  let minTop = null, minBot = null;
   function readInset(edge) {
     const probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;left:0;width:0;visibility:hidden;pointer-events:none;'
@@ -5581,34 +5590,58 @@ async function boot() {
     probe.remove();
     return Math.round(h);
   }
-  // Apply one edge. A reading within (0, cap] is the real inset → freeze it. A reading
-  // above the cap is a keyboard-style inflation → reject (keep whatever's frozen). A 0
-  // reading is ambiguous: at boot it usually means "not populated yet" (reject, retry),
-  // but after a rotation it can be a legitimate landscape inset of 0 — so the caller
-  // passes allowZero to clear the frozen var and hand back to the live env() fallback.
-  // Returns true once a concrete value (or an allowed 0) was applied.
-  function applyEdge(prop, edge, cap, allowZero) {
+  // Fold one reading into the running minimum for that edge and write the var. A value in
+  // (0, cap] lowers (or sets) the min; 0 and >cap readings are lies → ignored, leaving
+  // the prior min (or, if none yet, the var UNSET so CSS falls back to live env() until a
+  // real reading lands). Returns the (possibly unchanged) min.
+  function foldEdge(prop, edge, cap, cur) {
     const v = readInset(edge);
-    if (v > 0 && v <= cap) { document.documentElement.style.setProperty(prop, v + 'px'); return true; }
-    if (v === 0 && allowZero) { document.documentElement.style.removeProperty(prop); return true; }
-    return false;
+    if (v > 0 && v <= cap) {
+      const m = cur == null ? v : Math.min(cur, v);
+      document.documentElement.style.setProperty(prop, m + 'px');
+      return m;
+    }
+    return cur;
   }
-  function freezeSafeAreaInsets(allowZero) {
-    const top = applyEdge('--sat', 'top', SAT_MAX, allowZero);
-    applyEdge('--sab', 'bottom', SAB_MAX, allowZero);
-    return top; // top is the one that bricks the header; gate boot retries on it.
+  function refreshInsets() {
+    minTop = foldEdge('--sat', 'top', SAT_MAX, minTop);
+    minBot = foldEdge('--sab', 'bottom', SAB_MAX, minBot);
+    return minTop != null; // gate boot retries on top — it's the one that bricks the header.
   }
-  // Retry at boot until the WKWebView's insets populate (or we've waited long enough —
-  // a true no-notch device never will, and env()=0 fallback is correct for it).
-  if (!freezeSafeAreaInsets(false)) {
+  // Boot: poll until the inset populates. Generous window — a real notch always reports
+  // within a second or two; a no-notch device never will and the env()=0 fallback is
+  // correct for it. Once a value lands we keep polling no further: min() handles any
+  // later inflation, and keyboard-close re-reads (below) lower it if this first reading
+  // was itself mildly inflated.
+  if (!refreshInsets()) {
     let tries = 0;
-    const tick = setInterval(() => { if (freezeSafeAreaInsets(false) || ++tries >= 8) clearInterval(tick); }, 200);
+    const tick = setInterval(() => { if (refreshInsets() || ++tries >= 20) clearInterval(tick); }, 250);
   }
-  // A rotation genuinely changes the insets; re-read after it settles, allowing a 0
-  // (landscape) reading to clear the freeze back to live env(). (No resize listener on
-  // purpose — that's what the keyboard fires, and re-reading then would reintroduce the
-  // exact inflation we're freezing out; the cap also rejects it.)
-  window.addEventListener('orientationchange', () => setTimeout(() => freezeSafeAreaInsets(true), 300));
+  // Every keyboard close is a fresh chance to read the honest inset. The visual viewport
+  // shrinks when the keyboard opens and grows back when it closes; on the grow-back,
+  // re-read after a beat (env() needs a tick to settle) and fold into the min — lowering
+  // it to the truth if an early inflated reading had latched too high. Because we fold by
+  // min(), a still-inflated post-close reading can only be ignored, never re-inflate the
+  // frozen value. (This replaces the old "no resize listener" stance: a resize-driven
+  // re-read was dangerous only because it overwrote; folding by min() makes it safe.)
+  if (window.visualViewport) {
+    let kbWasUp = false;
+    window.visualViewport.addEventListener('resize', () => {
+      const kbUp = (window.innerHeight - window.visualViewport.height) > 120;
+      if (kbWasUp && !kbUp) setTimeout(refreshInsets, 300); // just closed → re-read
+      kbWasUp = kbUp;
+    });
+  }
+  // A rotation genuinely changes the insets (portrait ~47px ↔ landscape 0), so the
+  // running min from the old orientation is stale — reset it and re-establish. Clearing
+  // the vars first hands back to live env() for the instant before a fresh reading lands,
+  // which correctly yields 0 in landscape.
+  window.addEventListener('orientationchange', () => setTimeout(() => {
+    minTop = minBot = null;
+    document.documentElement.style.removeProperty('--sat');
+    document.documentElement.style.removeProperty('--sab');
+    setTimeout(refreshInsets, 250);
+  }, 300));
 
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
