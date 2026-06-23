@@ -1429,14 +1429,19 @@ body.is-mobile .dv-copy { opacity: .75; }
 
 body.is-mobile { --m-appbar-h: 52px; --m-brainbar-h: 47px; }
 
-/* --sat / --sab are the safe-area insets, frozen once at boot by freezeSafeAreaInsets()
-   in app.js (when the keyboard is down and env() is honest). The mobile chrome below
-   sizes off the frozen var, not raw env(): in the wrapped WKWebView, dismissing the
-   Drive composer's keyboard leaves env(safe-area-inset-top) reading ~2x until the next
-   reflow, which double-tall'd the env()-driven fixed app bar on text-box close. A
-   constant var can't be re-inflated by that keyboard resize. env() is the fallback for
-   plain mobile web, where it's stable. (The #app-scroller fix killed the rubber-band
-   trigger of the same native inset; the keyboard is a separate one CSS can't gate.) */
+/* --sat / --sab are the safe-area insets, frozen by freezeSafeAreaInsets() in app.js
+   ONLY when it reads a sane value (when the keyboard is down and env() is honest). The
+   mobile chrome below sizes off the frozen var when set, else falls back to live env():
+   in the wrapped WKWebView, dismissing the Drive composer's keyboard leaves
+   env(safe-area-inset-top) reading ~2x until the next reflow, which double-tall'd the
+   env()-driven fixed app bar on text-box close — a constant var can't be re-inflated by
+   that keyboard resize. CRUCIAL: the var is left UNSET until a plausible reading lands,
+   because the WKWebView reports the insets as 0 at boot (they populate a tick later); a
+   hard-frozen 0 would slide the header under the status bar and kill its tap targets
+   (the TestFlight brick). Unset → env() fallback, which self-heals as the inset
+   populates, then app.js freezes the real value. env() is also the fallback for plain
+   mobile web, where it's stable. (The #app-scroller fix killed the rubber-band trigger
+   of the same native inset; the keyboard is a separate one CSS can't gate.) */
 
 /* Kill the iOS rubber-band bounce on the document scroller. The overscroll zone at
    the top is what exposes/inflates the fixed app bar at scrollY 0 in TestFlight's

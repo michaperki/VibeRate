@@ -5555,35 +5555,60 @@ async function boot() {
   // env(safe-area-inset-top). In the wrapped WKWebView, focusing the Drive composer
   // raises the keyboard, which scrolls/insets the native scroll view; on dismiss
   // WebKit leaves env(safe-area-inset-top) reading ~2x until the next reflow — so
-  // *closing* the text box double-tall'd the header (the bug Mike pinned). The
-  // #app-scroller change removed the rubber-band trigger of the same inset, but the
-  // keyboard is a separate trigger that CSS overflow can't gate. The real inset only
-  // changes on orientation, so read it once here — at boot, keyboard down, env()
-  // honest — via a probe, freeze it into --sat/--sab, and let the chrome size off the
-  // frozen var (see style.css). A keyboard-close resize then can't re-inflate it.
-  // Re-read on orientationchange (a legitimate inset change), never on resize/the
-  // keyboard event.
-  function freezeSafeAreaInsets() {
-    const read = (edge) => {
-      const probe = document.createElement('div');
-      probe.style.cssText = 'position:fixed;left:0;width:0;visibility:hidden;pointer-events:none;'
-        + (edge === 'top'
-          ? 'top:0;height:env(safe-area-inset-top,0px)'
-          : 'bottom:0;height:env(safe-area-inset-bottom,0px)');
-      document.body.appendChild(probe);
-      const h = probe.getBoundingClientRect().height;
-      probe.remove();
-      return Math.round(h);
-    };
-    const root = document.documentElement.style;
-    root.setProperty('--sat', read('top') + 'px');
-    root.setProperty('--sab', read('bottom') + 'px');
+  // *closing* the text box double-tall'd the header (the bug Mike pinned). Freezing
+  // the inset into --sat/--sab and sizing the chrome off the frozen var defeats that:
+  // a keyboard-close resize can't re-inflate a constant.
+  //
+  // BUT: the wrapped WKWebView often reports the insets as 0 at *boot* — they only
+  // populate a tick after the webview is in the view hierarchy (mobile Safari has them
+  // ready immediately). Freezing that 0 hard-zeroed the header's top padding, sliding
+  // it under the status bar and dropping its tap targets into the dead status-bar strip
+  // (the TestFlight brick). So we only freeze a *plausible, settled* reading; anything
+  // implausible (0-at-boot, or a ~2x keyboard inflation) leaves the var UNSET, so CSS
+  // falls back to live env() — which self-heals as the inset populates — and we retry
+  // until a good reading lands. Once frozen to the real inset, the keyboard can no
+  // longer re-inflate it.
+  const SAT_MAX = 70, SAB_MAX = 50; // largest real iOS portrait insets are ~59/34px;
+                                    // a ~2x keyboard inflation lands well above these.
+  function readInset(edge) {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:0;width:0;visibility:hidden;pointer-events:none;'
+      + (edge === 'top'
+        ? 'top:0;height:env(safe-area-inset-top,0px)'
+        : 'bottom:0;height:env(safe-area-inset-bottom,0px)');
+    document.body.appendChild(probe);
+    const h = probe.getBoundingClientRect().height;
+    probe.remove();
+    return Math.round(h);
   }
-  freezeSafeAreaInsets();
-  // A rotation genuinely changes the insets; re-read after it settles. (No resize
-  // listener on purpose — that's what the keyboard fires, and re-reading then would
-  // reintroduce the exact inflation we're freezing out.)
-  window.addEventListener('orientationchange', () => setTimeout(freezeSafeAreaInsets, 300));
+  // Apply one edge. A reading within (0, cap] is the real inset → freeze it. A reading
+  // above the cap is a keyboard-style inflation → reject (keep whatever's frozen). A 0
+  // reading is ambiguous: at boot it usually means "not populated yet" (reject, retry),
+  // but after a rotation it can be a legitimate landscape inset of 0 — so the caller
+  // passes allowZero to clear the frozen var and hand back to the live env() fallback.
+  // Returns true once a concrete value (or an allowed 0) was applied.
+  function applyEdge(prop, edge, cap, allowZero) {
+    const v = readInset(edge);
+    if (v > 0 && v <= cap) { document.documentElement.style.setProperty(prop, v + 'px'); return true; }
+    if (v === 0 && allowZero) { document.documentElement.style.removeProperty(prop); return true; }
+    return false;
+  }
+  function freezeSafeAreaInsets(allowZero) {
+    const top = applyEdge('--sat', 'top', SAT_MAX, allowZero);
+    applyEdge('--sab', 'bottom', SAB_MAX, allowZero);
+    return top; // top is the one that bricks the header; gate boot retries on it.
+  }
+  // Retry at boot until the WKWebView's insets populate (or we've waited long enough —
+  // a true no-notch device never will, and env()=0 fallback is correct for it).
+  if (!freezeSafeAreaInsets(false)) {
+    let tries = 0;
+    const tick = setInterval(() => { if (freezeSafeAreaInsets(false) || ++tries >= 8) clearInterval(tick); }, 200);
+  }
+  // A rotation genuinely changes the insets; re-read after it settles, allowing a 0
+  // (landscape) reading to clear the freeze back to live env(). (No resize listener on
+  // purpose — that's what the keyboard fires, and re-reading then would reintroduce the
+  // exact inflation we're freezing out; the cap also rejects it.)
+  window.addEventListener('orientationchange', () => setTimeout(() => freezeSafeAreaInsets(true), 300));
 
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
