@@ -5653,6 +5653,17 @@ async function boot() {
     if (e.target.closest('#sessions') || e.target.closest('#m-rail')) return;
     closeSheet();
   });
+  // Same non-modal pattern for the projects drawer. #sidebar lives inside #app (the
+  // mobile scrollport / stacking context), so a body-level backdrop would paint over
+  // it instead of behind — dimming and click-blocking the project picker in WKWebView.
+  // No backdrop, so we catch the outside tap here. Excluding #m-menu stops the opening
+  // hamburger tap from immediately re-closing it (toggleDrawer ran first, so the drawer
+  // is open by the time this fires); excluding #sidebar lets taps inside the drawer act.
+  document.addEventListener('click', (e) => {
+    if (!body.classList.contains('m-drawer-open')) return;
+    if (e.target.closest('#sidebar') || e.target.closest('#m-menu')) return;
+    closeDrawer();
+  });
   if (byId('m-brainbar')) byId('m-brainbar').onclick = (e) => {
     // The leading "← dashboard" pill leaves Drive for the project dashboard (the
     // strip is fixed chrome, so this back affordance never scrolls out of reach).
