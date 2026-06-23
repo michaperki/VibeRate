@@ -5545,6 +5545,53 @@ async function boot() {
   const isMobile = () => body.classList.contains('is-mobile');
   const brainOpen = () => body.classList.contains('m-brain-open');
 
+  // ── TEMP LIVE DIAGNOSTIC (tall-header-at-scroll-top, WKWebView-only) ────────
+  // The header is tall only at scrollY 0 and snaps right after a tiny scroll, in
+  // TestFlight only. CSS compositing + overscroll-behavior didn't move it, so the
+  // cause is native (scroll content-inset vs document bounce vs visual-viewport
+  // offset). These can't be told apart from a single static reading — we need to
+  // see the numbers change between the "tall" (top) and "normal" (scrolled) state.
+  // This badge updates live on scroll/resize. Read it at the very top, then after
+  // scrolling a little, and report both. Tap to dismiss. Remove once diagnosed.
+  function liveDebug() {
+    try {
+      if (!mq.matches && location.hash.indexOf('safedebug') < 0) return;
+      const badge = document.createElement('div');
+      badge.id = 'safedebug-badge';
+      badge.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:99999;max-width:96vw;'
+        + 'background:#000;color:#0f0;font:11px/1.35 ui-monospace,monospace;padding:8px 10px;'
+        + 'border:1px solid #0f0;border-radius:8px;white-space:pre;pointer-events:auto';
+      badge.addEventListener('click', () => badge.remove());
+      document.body.appendChild(badge);
+      const vv = window.visualViewport;
+      const se = document.scrollingElement || document.documentElement;
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;top:0;left:0;height:env(safe-area-inset-top,0px);width:0;visibility:hidden';
+      document.body.appendChild(probe);
+      let peak = 0; // largest bar.top seen — captures the "tall" state even after it snaps back
+      function paint() {
+        const bar = byId('m-appbar');
+        const r = bar ? bar.getBoundingClientRect() : null;
+        const barTop = r ? r.top : 0;
+        if (barTop > peak) peak = barTop;
+        const sat = probe.getBoundingClientRect().height;
+        badge.textContent =
+          `scrollY = ${Math.round(window.scrollY)} / se.top=${Math.round(se.scrollTop)}\n`
+          + `bar.top = ${barTop.toFixed(1)}  (peak ${peak.toFixed(1)})\n`
+          + `bar.h   = ${r ? r.height.toFixed(1) : '?'}   sat=${sat.toFixed(1)}\n`
+          + `vv.offTop=${vv ? vv.offsetTop.toFixed(1) : 'n/a'}  vv.scale=${vv ? vv.scale.toFixed(2) : 'n/a'}\n`
+          + `vv.h=${vv ? Math.round(vv.height) : 'n/a'}  innerH=${window.innerHeight}\n`
+          + `docH=${se.scrollHeight}  scroller=${se === document.documentElement ? 'html' : se.tagName}`;
+      }
+      paint();
+      window.addEventListener('scroll', paint, { passive: true });
+      window.addEventListener('resize', paint);
+      if (vv) { vv.addEventListener('resize', paint); vv.addEventListener('scroll', paint); }
+    } catch (e) { /* diagnostic only */ }
+  }
+  window.addEventListener('load', () => setTimeout(liveDebug, 400));
+  // ───────────────────────────────────────────────────────────────────────────
+
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
   const closeSheet = () => body.classList.remove('m-sheet-open');
