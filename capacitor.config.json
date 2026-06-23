@@ -8,7 +8,7 @@
     "allowNavigation": ["vbrt.fly.dev"]
   },
   "ios": {
-    "contentInset": "always",
+    "contentInset": "never",
     "limitsNavigationsToAppBoundDomains": false
   },
   "plugins": {

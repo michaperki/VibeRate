@@ -47,7 +47,11 @@ the review notes; don't ship a bare webview.
 - `package.json` — Capacitor deps (`@capacitor/core`, `/ios`, `/push-notifications`) +
   dev (`/cli`, `/assets`); scripts `ios:add`, `ios:sync`, `ios:assets`.
 - `capacitor.config.json` — appId `com.viberate.app`, webview → `vbrt.fly.dev/app`, push
-  presentation options.
+  presentation options. **`ios.contentInset: "never"`** is deliberate: the SPA already
+  owns the safe area via `viewport-fit=cover` + `env(safe-area-inset-*)` (PLAN_MOBILE.md),
+  so the WKWebView must NOT also inset its scroll content. The scaffold shipped with
+  `"always"`, which double-applied the top inset and rendered a ~120px dark band above the
+  mobile app bar in TestFlight (header looked ~200px tall). Leave it `"never"`.
 - `codemagic.yaml` — `ios-release` workflow: generates the Xcode project on the Mac
   (`cap add ios`), signs, builds the IPA, publishes to TestFlight. The `ios/` Xcode
   project is intentionally **not committed** — CI regenerates it (it can't be built or
