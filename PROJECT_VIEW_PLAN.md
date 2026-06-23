@@ -98,6 +98,98 @@ scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right me
 
 ---
 
+## Brain architecture rethink — prototype-led, not decided (2026-06-23)
+
+> **Status: open. We do not solve this here.** Mike's explicit steer: "Nailing the
+> brain will require prototyping." So this section *documents the thinking and the
+> options to prototype* — it does **not** pick a design. Next step is **mocks/prototypes
+> of the candidates, compared live** (the house toggle/mock method), then a decision.
+
+The brain is the most important surface and the least settled. Two complaints from
+dogfooding the PWA, both confirmed in code:
+
+- **"Why is it always everything circling a CLAUDE.md?"** The *live* brain shown
+  while Driving (`public/app.js` ~L4915 `step()`/`draw()`) is a **radial field**:
+  constitution/core docs (`CLAUDE.md`, `SEED.md`, …) are pinned at the center (target
+  radius ~32px) and every other node is pulled to an orbit radius set by its *heat*
+  (recency of read/edit) — hot toward the core, cold to the rim. So the constitution
+  literally is the hub everything orbits, **by construction, not by link topology**.
+  (The static Web/Tree/Recent layouts — `layoutGraph` ~L1531 — cluster by role around
+  anchor points instead; but the orbit field is what's on screen during Drive.)
+- **"Constant rotation isn't the right way to give movement."** The orbital drift is a
+  per-frame tangential velocity kick (`-sin(ang)*(0.08+heat*0.22)`, ~L4944) — motion
+  for motion's sake, decoupled from anything actually happening. It reads as ambient
+  spin, not as "the agent is touching *this* doc right now." Crowding compounds it:
+  every `.md` plus ephemeral code-file activations shares one orbital field with no
+  hierarchy beyond heat, so a real project's docs pack the center.
+
+### What the view is *for* (functionality Mike is sure of)
+
+The audience is a **vibe coder watching the agent cook**. The view should make a few
+things obvious without reading code:
+- **What is the agent touching right now**, and **what did it just touch** — movement
+  should *mean* activity.
+- **Am I being steered by my own principles?** — seeing the agent consult (or ignore)
+  the right brain doc is the steering story made visible.
+- **Progress** — *plans with a completion ring read as strong; keep that* (Mike). The
+  ring filling as a checklist completes is exactly the "watch it cook" signal.
+- **Structure** — what's load-bearing vs. a leaf — without everything collapsing onto
+  the constitution.
+
+### Candidate organizing principles (to prototype, not to choose now)
+
+Mike's instinct leans **#1**, but called all four interesting and explicitly wants to
+decide *through* prototypes, not on paper:
+
+1. **Activity-driven, nodes at rest** *(leading instinct).* Kill the ambient tangential
+   drift. Nodes sit still; motion happens **only** on a real event, then settles.
+   "Recency as physics" becomes "recency as a one-shot settling animation that stops."
+2. **Structure-first map.** Position encodes role/relationship (constitution → plans →
+   logs → memory as regions/columns, or lean on the Tree layout already judged most
+   legible). The force web becomes one optional view; constitution de-centered.
+3. **Foreground/background split.** A small "now active" cluster (3–6 docs in play this
+   session) prominent, with the full brain as a calm navigable map behind it — one
+   surface stops doing two jobs.
+4. **Health/centrality as the signal** (`CONTEXT_CREDIT_RESEARCH.md` Phase 1). Size &
+   placement by inbound references + churn + staleness, with provenance labels, so the
+   map *teaches* which docs are load-bearing vs. stale — not heat alone.
+
+These aren't exclusive (e.g. #1's event choreography over #2's structured map, with
+#3's foreground cluster, is a coherent combined target).
+
+### The dimension to actually prototype: event choreography
+
+The open design question Mike named is **"what does the brain look like when X
+happens?"** — and he's unsure what events we can even observe. From the runtime
+(`src/hooks.js`, `src/agent.js`, Drive `tool_use` → `brainTouch()`), the observable
+events are:
+
+| Event | Source today | Candidate brain reaction (to prototype) |
+|---|---|---|
+| Agent **reads** a brain doc / file | `Read` tool_use; `brainTouch()` glows node | one-shot pulse on that node; trail/edge from the prompt |
+| Agent **edits/writes** a file | `Edit`/`Write` tool_use | flash the node's ring; if a `.md`, ripple to linked docs |
+| Agent **runs a command** | `Bash`/`shell` tool_use | transient activation (current ephemeral code-file behavior) |
+| **New brain doc** created / **deleted** | git `--name-status` (births/ghosts) | birth animation / ghost into the graveyard (already exists) |
+| **Plan completion** changes | checklist parser, completion ring | ring fills live — *the keeper signal* |
+| **Context** filling | `usage` events (`src/agent.js`) | dumb-zone warning surfaced on the brain, not just the gauge |
+| **Commit** produced | git capture | mark the docs that commit touched |
+| Turn **start / working / idle / end** | hooks (`UserPromptSubmit`/`Stop`) | global "cooking vs. settled" state of the whole field |
+
+The prototype work is to choose, per event, the **reaction that's legible and
+meaningful** to someone watching — and to make sure the field is calm when nothing is
+happening (the anti-ambient-spin principle). Build these as live mocks of #1–#4 (or a
+combination) driven by a scripted event stream, compare, then decide.
+
+### Open questions for the prototypes to answer
+- Is the default a **map you navigate** or a **live activity monitor** — or two modes?
+- Does movement ever happen with no triggering event? (Leaning: no.)
+- How do we show "what the agent just read" without orbiting?
+- Should the constitution be de-centered, or is "everything relates to the constitution"
+  actually true and worth keeping (just shown without the spin)?
+- How does crowding scale on a real 20–40-doc repo, not our tidy set?
+
+---
+
 ## ✅ Done
 
 - **Slice 1 — prompt-unit reader + context gauge.** Session reader renders the
@@ -132,6 +224,17 @@ scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right me
 - [x] **Unify "what is the brain"** — `BRAIN_DOCS` allowlist retired; `git.js`
   keeps **all `.md`** and the viewer intersects with the captured doc graph
   (`docs.js`). Timeline and graph now agree on what counts as a brain doc.
+- [ ] **Timeline rethink + git-tree (2026-06-23, Mike).** The activity ribbon "gives a
+  big-picture view but I don't reference it." It may earn its place mainly for
+  **collaborators / a fleet** (multiple agents or people), so revisit its value-prop
+  when fleet/multi-user lands — for a solo driver today it's low-value. Working
+  hypothesis: pair it with, or partly replace it by, a **git-tree / DAG visual** — a
+  branch/merge graph reads as "what happened to the code" better than a flat commit
+  lane, and would sit *near* the timeline (or fold into it). **Cheap enabler:**
+  `src/git.js` already parses parent hashes (`%P`) and discards them, keeping only an
+  `isMerge` boolean (~L43–59) — capturing the parent list is a ~3-line change and
+  unlocks a real DAG render with no other capture work. Park as an experiment; don't
+  build until the brain rethink and convos-mobile parity land.
 
 ### B. Brain lifecycle & time-travel — ✅ shipped
 - [x] **"just-changed" entrance** — docs from the most recent brain commit play a

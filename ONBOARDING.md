@@ -55,6 +55,14 @@ credentials (API key, or pooled subscription within Anthropic's terms).
   spend cap that interrupts a session, and per-user credential isolation so one
   user's runaway can't burn another's budget.
 
+> **Reaffirmed 2026-06-23 (Mike):** **1A is the intended model** — "I'll let users use
+> my tokens and then charge them." Operator-Claude + per-user metering + billing.
+> Sequencing: **pricing/margin must be settled before go-to-market** — it gates the
+> launch, not the build, and the demo (`DEMO_PLAN.md`) can be recorded ahead of it. The
+> open 1A questions below (flat vs. metered vs. credit-pack, the spend-cap UX, and
+> whether Anthropic's terms permit pooled-subscription resale vs. requiring API-key
+> billing) are the pre-launch homework, not blockers for dogfooding now.
+
 ### B — BYO key (user supplies their own `ANTHROPIC_API_KEY`)
 The user pastes their own API key; we run their sessions on it.
 - **Pros:** fastest to market; we carry no model cost; clean ToS story (it's their

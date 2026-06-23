@@ -17,6 +17,17 @@ the existing dev loop intact and never requires owning a Mac. Decided & scaffold
 > retire the auth hacks, and reintroduce the WKWebView safe-area compensation (git
 > `b73e4af..5e45389`) only inside the wrapper, not the shared app. Everything below is the
 > original plan, preserved for that revival.
+>
+> **Stance update (2026-06-23, Mike) — the App Store push is *deferred*, and a full
+> native rewrite is back on the table for it.** Mike's read: re-platforming the SPA into
+> a native codebase is "not a big deal — modern AI tackles this in a few sessions," so
+> when we return to the App Store, **a clean native rewrite is a live option, not just
+> the Capacitor wrap** (it would sidestep the WKWebView-seam class of bugs entirely). The
+> "own a Mac" question resurfaces at that point and gets solved then (cloud Mac or
+> otherwise). None of this is now-work — it sits behind the brain rethink, convos-mobile
+> parity, the demo, and pricing. Don't propose resuming a native build until those land
+> and Mike calls for the App Store push. (Caveat: *we* are bad at dev-time estimates —
+> "a few sessions" is Mike's planning anchor, treat it as the frame, not a guarantee.)
 
 ## The decision
 

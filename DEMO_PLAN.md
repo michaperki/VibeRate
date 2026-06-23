@@ -82,6 +82,33 @@ chat" — small, on-screen, the kind of thing we've actually shipped) so an outs
 can follow "badge appears + doc updates" without understanding VibeRate internals.
 Authentic **and** legible.
 
+### Update (2026-06-23, Mike) — concrete demo project: "Uber for pottery wheels"
+
+Mike's pick for the *recordable* demo is a **throwaway seeded app: "Uber for pottery
+wheels"** (on-demand access to pottery wheels). It's instantly legible to anyone,
+visually obvious, and — crucially — has enough product surface to show **decisions
+made over time**: the brain accumulating opinionated docs, `.md` files visibly
+updating as the agent and driver settle calls, completion rings filling as plans get
+done, and a steering moment landing against a *real prior decision* in the brain.
+
+This is the artifact that demonstrates what Mike's calling **"principle-based
+development"** (working name — sits alongside "steering" as a framing for the thesis;
+both point at the same thing: development governed by stated principles in the brain,
+not prompt-and-pray). The pitch the demo makes visible: *you can watch the agent cook,
+and watch your principles steer it.*
+
+It also resolves the table above toward the **throwaway-seeded** column rather than
+dogfooding the live repo for the *recording* — neutral content, no VibeRate-internals
+knowledge required, and full control of the steering beat — while the live repo stays
+the honest fixture for the *trial*. The starter-brain set below is built for this
+project: a roadmap + 2–3 opinionated decision docs for the pottery-wheel app, with the
+"obvious-but-wrong first path" and a brain-doc-backed correction scripted in.
+
+> Sequencing (Mike, 2026-06-23): record the demo **before** the App Store push and
+> **after** the brain view is in better shape (the brain web is the hero of the
+> "watch it cook" shot). Go-to-market is gated on pricing being settled
+> (`ONBOARDING.md` Fork 1A).
+
 ## Separate the two asks: trial ≠ video
 
 They have **opposite control profiles** and were blurred in the brainstorm:

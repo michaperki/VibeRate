@@ -93,6 +93,13 @@ Social features all require a shared backend, so a thin deploy gates most of wha
      machines on one slug with divergent history ping-pong which set is "live" each
      push, but no commit is ever lost. Remaining edge cases above (branch switches,
      renamed-doc history, two-machine reconciliation proper) still open.
+   - **Dogfood destructive git actions in a *scratch* repo, not our own (2026-06-23,
+     Mike).** Exercising `git reset` / rebase / force-push / branch-switch capture by
+     running it on the VibeRate repo itself risks resetting the app we're building.
+     Stand up a separate throwaway checkout to drive these experiments against — still
+     dogfooding the capture loop, but with no blast radius on our own history. (This is
+     also the natural place to work through "how different git actions happen" in the UI
+     — branch/commit/reset affordances — without endangering the dogfood timeline.)
 6. **Live orchestration + timeline legibility** *(now-priority)* — make the dashboard
    feel real-time and coherent while an agent is actively working. Full breakdown +
    code root-causes in `archive/LIVE_ORCHESTRATION.md`. ✅ First pass shipped (2026-06-18):
@@ -190,6 +197,16 @@ anyone but the operator using VibeRate to actually drive.
    so brain, drive, reader, and rail are all first-class on a phone. Default
    assumption flips: a feature is mobile unless it proves it needs desktop (dense
    brain editing, side-by-side diffs are the likely desktop-only exceptions).
+   - **Convos/reader is behind Drive on mobile (2026-06-23, code-verified — the bounded
+     near-term win).** The Drive chat got the full mobile treatment — sticky head-stack
+     composer, fixed brain-chip strip (`#m-brainbar`), jump-to-latest pill, live status
+     — but the conversation **reader** (`renderReaderCard`/`renderSessionList` + the
+     `Sessions|Prompts` rail) did not: its toolbar only compacts *reactively* after you
+     scroll (so the back/nav controls vanish), it has **no** brain strip, **no** jump
+     pill, and the rail is buried in the bottom sheet. Bring the reader up to Drive's
+     mobile bar so the read half of the loop is first-class on the phone too. Concrete
+     gap list mapped this session; this is the most bounded, immediately-useful item in
+     the cluster.
 4. **Context management as a feature** — beyond the context-fullness gauge, help the
    driver act on the "dumb zone": surface when to **compact / branch / start fresh**
    before quality degrades. Context is the scarce resource in agentic-first coding.
@@ -425,13 +442,21 @@ and largely shipped — they're the read/understand half of the loop.
     to completion*, *add commit & push to main*, *update the MDs*, *investigate & fix*,
     *ask if unsure* — phrased the way they actually get typed. This is a one-off manual
     pass of what v2 automates.
-  - **v2 (suggested phrases):** mine the user's own history for recurring openers. We
-    already parse every session's first user message (`parsers.peekClaude` →
-    `firstUserText`, and prompt-unit data per project). A cheap pass — cluster/rank
-    frequent opening sentences, optionally normalized by a Haiku call
-    (`claude-haiku-4-5`) to merge near-duplicates and produce a clean canonical phrase
-    — surfaces the top N as suggestion chips. Haiku (not a bigger model) keeps it cheap
-    and fast; the server already holds an API key for the classifier (`classify.js`).
+  - **v2 (suggested phrases) — *now explicitly requested (2026-06-23, Mike): "think
+    through how the auto text chips get populated / updated over time in an intelligent
+    way."*** Mine the user's own history for recurring openers. We already parse every
+    session's first user message (`parsers.peekClaude` → `firstUserText`, and
+    prompt-unit data per project). A cheap pass — cluster/rank frequent opening
+    sentences, optionally normalized by a Haiku call (`claude-haiku-4-5`) to merge
+    near-duplicates and produce a clean canonical phrase — surfaces the top N as
+    suggestion chips. Haiku (not a bigger model) keeps it cheap and fast; the server
+    already holds an API key for the classifier (`classify.js`). **The "over time"
+    half is the new ask:** the chip set should **refresh incrementally** as new
+    sessions land (same once-per-`cardId` discipline as the classifier — don't re-mine
+    the whole corpus each push) and **age out** phrases the user has stopped typing, so
+    the chips track how their prompting actually *evolves* rather than freezing the
+    one-off 2026-06-22 seed. Open: rank by recency-weighted frequency vs. raw count;
+    cap + pin behavior so a user's saved chips aren't evicted by mined ones.
   - **v3 (prompt coaching):** once suggestions exist, steer toward *better* prompts —
     e.g. flag a vague opener and offer a tighter rewrite, or attach the relevant plan
     doc automatically. Tie-in with `archive/experiments/PROMPT_GALLERY.md`. Park until v1/v2 prove the chip
