@@ -5643,18 +5643,23 @@ async function boot() {
     setTimeout(refreshInsets, 250);
   }, 300));
 
-  // --- TEMP on-device safe-area diagnostic (enable with ?satdebug in the URL) ---
+  // --- TEMP on-device safe-area diagnostic ---
   // The env()/probe-frozen approach has now failed twice on Mike's TestFlight device,
   // which means our model of what the probe actually READS there is wrong. This pins a
   // live readout to the bottom of the screen so we can see the real numbers across a
-  // keyboard open/close instead of guessing. Tap it to hide. Remove once diagnosed.
-  if (/[?&]satdebug\b/.test(location.search)) {
-    const dbg = document.createElement('div');
+  // keyboard open/close instead of guessing. The wrapped app loads a fixed URL (no query
+  // string reachable), so enabling is via a TRIPLE-TAP on the header title — persisted in
+  // localStorage so it survives the keyboard test — as well as ?satdebug for Safari. Tap
+  // the readout itself to hide for this session. Remove once diagnosed.
+  let satDbgEl = null, satDbgTimer = null;
+  function showSatDebug() {
+    if (satDbgEl) return;
+    const dbg = satDbgEl = document.createElement('div');
     dbg.style.cssText = 'position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;'
       + 'font:11px/1.35 ui-monospace,Menlo,monospace;background:rgba(0,0,0,.86);color:#0f0;'
       + 'padding:7px 9px;border-radius:8px;white-space:pre;pointer-events:auto;'
       + 'border:1px solid #0a0;max-height:42vh;overflow:auto';
-    dbg.addEventListener('click', () => dbg.remove());
+    dbg.addEventListener('click', hideSatDebug);
     document.body.appendChild(dbg);
     let kbCloses = 0, lastKbUp = false, peakProbe = 0;
     const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '(unset)';
@@ -5676,15 +5681,44 @@ async function boot() {
         + '\nappbar h ' + (barRect ? Math.round(barRect.height) : '—')
         + '  top ' + (barRect ? Math.round(barRect.top) : '—')
         + '   kbUp ' + kbUp + '   kbCloses ' + kbCloses
-        + '\nminTop ' + minTop + '   minBot ' + minBot + '   (tap to hide)';
+        + '\nminTop ' + minTop + '   minBot ' + minBot + '   (tap to hide; 3-tap title to toggle)';
     };
     paint();
-    setInterval(paint, 250);
+    satDbgTimer = setInterval(paint, 250);
+    dbg._paint = paint;
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', paint);
       window.visualViewport.addEventListener('scroll', paint);
     }
   }
+  function hideSatDebug() {
+    if (satDbgTimer) clearInterval(satDbgTimer);
+    if (satDbgEl && window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', satDbgEl._paint);
+      window.visualViewport.removeEventListener('scroll', satDbgEl._paint);
+    }
+    if (satDbgEl) satDbgEl.remove();
+    satDbgEl = satDbgTimer = null;
+  }
+  try {
+    if (/[?&]satdebug\b/.test(location.search) || localStorage.getItem('satdebug') === '1') showSatDebug();
+  } catch (_) {}
+  // Triple-tap the header title to toggle (works in the wrapped app, no URL needed).
+  (function wireSatDebugToggle() {
+    const title = document.getElementById('m-title');
+    if (!title) return;
+    let taps = 0, t = null;
+    title.addEventListener('click', () => {
+      taps++;
+      clearTimeout(t);
+      t = setTimeout(() => { taps = 0; }, 600);
+      if (taps >= 3) {
+        taps = 0; clearTimeout(t);
+        if (satDbgEl) { hideSatDebug(); try { localStorage.removeItem('satdebug'); } catch (_) {} }
+        else { showSatDebug(); try { localStorage.setItem('satdebug', '1'); } catch (_) {} }
+      }
+    });
+  })();
 
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
