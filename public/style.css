@@ -550,8 +550,10 @@ body.is-mobile .pc-copy { opacity: .7; }   /* no hover on touch — keep it reac
 .pc-answer { margin-top: 12px; }
 .pc-answer-head { margin-bottom: 5px; }
 .pc-answer-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--codex); font-weight: 600; }
-.pc-answer-body { font-size: 14px; color: #cdd2de; line-height: 1.5; white-space: pre-wrap; padding-left: 8px; border-left: 2px solid var(--codex); }
-.pc-answer-body .clamp-body, .pc-prompt .clamp-body { white-space: pre-wrap; }
+.pc-answer-body { font-size: 14px; color: #cdd2de; line-height: 1.5; padding-left: 10px; border-left: 2px solid var(--codex); }
+.pc-prompt .clamp-body { white-space: pre-wrap; }   /* prompt is plain text; answer is rendered markdown */
+.pc-answer-body .clamp-body > :first-child { margin-top: 0; }
+.pc-answer-body .clamp-body > :last-child { margin-bottom: 0; }
 .pc-blabel { color: var(--muted); }
 
 /* Reader jump-to-top pill (mobile): floats once you've scrolled into a long archive. */

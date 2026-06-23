@@ -265,6 +265,12 @@ combination) driven by a scripted event stream, compare, then decide.
   - **Verdict ships in full** (`clip(verdict, 8000)` safety cap, was 400) and is **pulled
     out into an always-visible `answer` block above the step log** — the step log keeps
     only the reasoning/tool actions. The answer is the headline of an archived turn.
+  - **Answer renders as real markdown.** It was going through the weak `formatText`
+    (code-fence + bold only), so tables came out as raw pipes and lists as flat text. It
+    now uses the **same `renderMarkdown` as the Drive view** — tables that stack into
+    labelled cards on mobile, lists, headings, links, and code blocks with a copy button.
+    The code-copy wiring is shared via `wireMdCodeCopies` (one renderer, both surfaces —
+    don't reinvent). Prompt text stays plain (matches how Drive shows user input).
   - **Unified `.clampable` block** (`clampBlock` + `wireReaderBlocks` in `app.js`,
     `.clampable` CSS): prompt / answer / earlier-context all clamp to a height with a
     **visible "show more / show less" toggle that only appears on overflow** + a fade

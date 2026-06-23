@@ -2818,6 +2818,7 @@ function wireReaderScroll() {
 function wireReaderBlocks() {
   const scope = document.getElementById('conversation');
   if (!scope) return;
+  wireMdCodeCopies(scope); // code blocks in rendered-markdown answers copy like Drive's
   const measure = () => scope.querySelectorAll('.clampable').forEach((c) => {
     const body = c.querySelector('.clamp-body');
     const overflow = body && body.scrollHeight > body.clientHeight + 4;
@@ -3148,10 +3149,10 @@ function renderOutcomeRail(u) {
 // nothing in the reader is cut without a visible, tappable way to open it (works on
 // desktop and mobile). `clamp` is a CSS length for the collapsed max-height; the
 // toggle only appears when the content actually overflows it (wired post-render).
-function clampBlock(html, { cls = '', clamp = null, copy = false } = {}) {
+function clampBlock(html, { cls = '', bodyCls = '', clamp = null, copy = false } = {}) {
   const style = clamp ? ` style="--clamp:${clamp}"` : '';
   const copyBtn = copy ? `<button class="pc-copy" type="button" title="copy text" aria-label="copy text">⧉</button>` : '';
-  return `<div class="clampable ${cls}"${style}>${copyBtn}<div class="clamp-body">${html}</div><button class="clamp-toggle" type="button">show more</button></div>`;
+  return `<div class="clampable ${cls}"${style}>${copyBtn}<div class="clamp-body ${bodyCls}">${html}</div><button class="clamp-toggle" type="button">show more</button></div>`;
 }
 
 // One prompt unit as an internal reader card. Acks ("go ahead") collapse to a slim
@@ -3178,10 +3179,14 @@ function renderReaderCard(u, i) {
   // The verdict (the agent's final message) is the headline of an archived turn, so
   // it rides ABOVE the collapsed step log, always visible, in full, with a show-more
   // clamp — not buried inside "how it played out" and chopped to 400 chars as before.
+  // The answer is the agent's prose, so render it as full markdown — the same
+  // renderMarkdown the Drive view uses (tables that stack on mobile, code blocks with
+  // copy, lists, headings, links). The old formatText only did code-fence/bold, so
+  // tables and lists in a reply came out as raw pipes. Reuse, don't reinvent.
   const answer = u.after && u.after.verdict
     ? `<div class="pc-answer">
          <div class="pc-answer-head"><span class="pc-answer-tag">answer</span></div>
-         ${clampBlock(formatText(u.after.verdict), { cls: 'pc-answer-body', clamp: '15em', copy: true })}
+         ${clampBlock(renderMarkdown(u.after.verdict), { cls: 'pc-answer-body', bodyCls: 'docview markdown', clamp: '15em', copy: true })}
        </div>`
     : '';
   const played = steps
@@ -4465,10 +4470,13 @@ function driveAppend(elm, text) {
   else if (b) b.textContent += text;
   driveScroll();
 }
-// Render a bubble's accumulated markdown to HTML + wire copy buttons on code.
-function driveRenderMd(b) {
-  b.innerHTML = renderMarkdown(b._raw || '');
-  b.querySelectorAll('pre.md-code').forEach((pre) => {
+// Wire a "copy" button onto each rendered code block under `root`. Shared by the
+// Drive bubble renderer and the convos reader so a code block copies the same way in
+// both surfaces. Idempotent — a re-render or re-wire won't stack duplicate buttons.
+function wireMdCodeCopies(root) {
+  if (!root) return;
+  root.querySelectorAll('pre.md-code').forEach((pre) => {
+    if (pre._copyWired) return; pre._copyWired = true;
     const code = pre.textContent;
     const btn = document.createElement('button');
     btn.className = 'dv-copy'; btn.type = 'button'; btn.textContent = 'copy';
@@ -4480,6 +4488,12 @@ function driveRenderMd(b) {
     });
     pre.appendChild(btn);
   });
+}
+
+// Render a bubble's accumulated markdown to HTML + wire copy buttons on code.
+function driveRenderMd(b) {
+  b.innerHTML = renderMarkdown(b._raw || '');
+  wireMdCodeCopies(b);
 }
 // Coalesce re-renders during streaming to one per frame (a delta arrives per token).
 function driveScheduleMd(b) {
