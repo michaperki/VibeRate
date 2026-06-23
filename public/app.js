@@ -1663,12 +1663,10 @@ function wireRoster(root) {
   });
 }
 
-// End an agent from the roster (the swipe-revealed ✕). Non-destructive — the
-// conversation is saved and stays in the rail; this just clears the live handle.
+// End an agent from the roster (the swipe-revealed ✕). No confirm — the slide+✕ is
+// itself the deliberate gesture, and it's non-destructive: the conversation is saved
+// and stays in the rail, so this just clears the live handle.
 async function endRosterAgent(id) {
-  const a = (state.roster || []).find((x) => x.id === id);
-  const name = a && a.title ? a.title : 'this agent';
-  if (!confirm(`End "${name}"?\n\nIts conversation is saved and stays in the rail — this only removes it from the live roster.`)) return;
   try { await drivePost('/sessions/' + encodeURIComponent(id) + '/end'); } catch { /* the SSE 'removed' frame, or the next poll, reconciles either way */ }
   state._revealedAgent = null;
   state.roster = (state.roster || []).filter((x) => x.id !== id);
