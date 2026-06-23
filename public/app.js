@@ -5545,6 +5545,47 @@ async function boot() {
   const isMobile = () => body.classList.contains('is-mobile');
   const brainOpen = () => body.classList.contains('m-brain-open');
 
+  // ── TEMP DIAGNOSTIC (tall-header investigation) ────────────────────────────
+  // The iOS header renders ~2x too tall and neither the contentInset nor the
+  // export-compliance change moved it, so before guessing again we read the real
+  // numbers off the device. A probe element measures the *resolved*
+  // env(safe-area-inset-top) (CSS won't tell us; only layout does), and we dump
+  // the native-platform flag + the actual app-bar geometry. Visit the app with
+  // `#safedebug` (or set localStorage.safedebug) to show it. Remove once fixed.
+  function safeDebug() {
+    try {
+      // Auto-show on mobile (the native app loads a fixed /app URL, so a #hash
+      // gate would be unreachable on-device). Tap the badge to dismiss.
+      if (!mq.matches && location.hash.indexOf('safedebug') < 0) return;
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;top:0;left:0;height:env(safe-area-inset-top,0px);width:0;visibility:hidden;pointer-events:none';
+      document.body.appendChild(probe);
+      const sat = probe.getBoundingClientRect().height;
+      probe.remove();
+      const bar = byId('m-appbar');
+      const r = bar ? bar.getBoundingClientRect() : null;
+      const cap = window.Capacitor;
+      const native = !!(cap && (cap.isNativePlatform ? cap.isNativePlatform() : cap.isNative));
+      const badge = document.createElement('div');
+      badge.id = 'safedebug-badge';
+      badge.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:99999;max-width:96vw;'
+        + 'background:#000;color:#0f0;font:11px/1.4 ui-monospace,monospace;padding:8px 10px;'
+        + 'border:1px solid #0f0;border-radius:8px;white-space:pre;pointer-events:auto';
+      badge.textContent =
+        `sat(env)= ${sat.toFixed(1)}px\n`
+        + `bar.top = ${r ? r.top.toFixed(1) : '?'}px\n`
+        + `bar.h   = ${r ? r.height.toFixed(1) : '?'}px\n`
+        + `native  = ${native}  platform=${cap && cap.getPlatform ? cap.getPlatform() : 'web'}\n`
+        + `innerH  = ${window.innerHeight}  screenH=${window.screen && window.screen.height}\n`
+        + `dpr     = ${window.devicePixelRatio}`;
+      badge.addEventListener('click', () => badge.remove());
+      (document.getElementById('safedebug-badge') || {}).remove?.();
+      document.body.appendChild(badge);
+    } catch (e) { /* diagnostic only */ }
+  }
+  window.addEventListener('load', () => setTimeout(safeDebug, 400));
+  // ───────────────────────────────────────────────────────────────────────────
+
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
   const closeSheet = () => body.classList.remove('m-sheet-open');
