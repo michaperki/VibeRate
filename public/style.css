@@ -1429,6 +1429,21 @@ body.is-mobile .dv-copy { opacity: .75; }
 
 body.is-mobile { --m-appbar-h: 52px; --m-brainbar-h: 47px; }
 
+/* Kill the iOS rubber-band bounce on the document scroller. The overscroll zone at
+   the top is what exposes/inflates the fixed app bar at scrollY 0 in TestFlight's
+   WKWebView (it settles the instant you scroll). Harmless on desktop/Safari. */
+html, body { overscroll-behavior: none; }
+body.is-mobile { -webkit-overflow-scrolling: touch; }
+
+/* iOS auto-zooms when you focus a form control whose font-size is < 16px, and the
+   wrapped WebView (unlike Safari) gives you no pinch-out to escape — so a tap on the
+   Drive composer left you stranded zoomed-in. The composer/text fields inherit the
+   14px body font; force 16px on mobile so the zoom never triggers. We keep
+   user-scalable on (no `maximum-scale` hack) so accessibility zoom still works. */
+body.is-mobile input,
+body.is-mobile textarea,
+body.is-mobile select { font-size: 16px; }
+
 /* App bar — fixed at the top, above the panes; carries the safe-area inset. */
 body.is-mobile #m-appbar {
   display: flex; align-items: center; gap: 8px;
@@ -1436,6 +1451,16 @@ body.is-mobile #m-appbar {
   height: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
   padding: env(safe-area-inset-top, 0px) 10px 0;
   background: var(--panel); border-bottom: 1px solid var(--border);
+  /* iOS WKWebView (TestFlight) mis-paints a `position:fixed; top:0` bar while the
+     document sits at scrollY 0 / inside the rubber-band zone: the safe-area band
+     reads ~2x its height until the first scroll re-composites it (extra space that
+     lives above the layout origin, which JS getBoundingClientRect can't see — why
+     the on-device probe still read 99px). Pinning the bar to its own GPU layer
+     makes WebKit composite it against the viewport from the first paint, so it's
+     the right height at the top too. Mobile Safari is already correct; this only
+     changes the wrapped WebView. */
+  transform: translateZ(0);
+  will-change: transform;
 }
 .m-iconbtn {
   flex: none; width: 40px; height: 40px; border-radius: 10px;
@@ -1468,6 +1493,7 @@ body.is-mobile.m-driving #m-brainbar {
   top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
   height: var(--m-brainbar-h); padding: 0 10px;
   background: var(--panel); border-bottom: 1px solid var(--border);
+  transform: translateZ(0); will-change: transform; /* same WKWebView fixed-bar repaint fix as #m-appbar */
 }
 /* Leading back-to-dashboard pill — first in the strip, never scrolls (the chips do). */
 #m-brainbar .m-bb-dash {
