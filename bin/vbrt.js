@@ -705,6 +705,14 @@ async function cmdShot(args = []) {
     const kind = rec.media === 'video' ? 'clip (webm)' : clip ? 'clip (gif)' : 'artifact';
     const dur = clip && rec.durationMs ? ` · ${(rec.durationMs / 1000).toFixed(1)}s (${rec.settled ? 'auto-stopped when motion settled' : 'hit --clip cap; raise it if the motion was cut off'})` : '';
     console.log(C.green(`\n✓ Captured ${kind}${rec.label ? ` (${rec.label})` : ''}${dur} → ${path.relative(cwd, rec.file)}`));
+    // The capture can't return pixels to a headless agent. Point at the standalone
+    // media file so the agent can `Read` it to actually see its work, instead of
+    // hand-rolling its own Playwright capture (the old workaround).
+    if (rec.mediaFile && rec.media !== 'video') {
+      console.log(C.dim(`  See it yourself: ${C.cyan(`Read ${path.relative(cwd, rec.mediaFile)}`)}`));
+    } else if (rec.mediaFile) {
+      console.log(C.dim(`  Saved playable file → ${path.relative(cwd, rec.mediaFile)}`));
+    }
     console.log(C.dim(`  bound to ${rec.session ? `session ${rec.session.id}` : '(no active session found — will attach by time)'}${rec.note ? ` · "${rec.note}"` : ''}`));
     // Before the first commit, evidence can't tie to a code checkpoint — nudge, don't fail.
     if (isGitRepo(cwd) && !rec.gitHead) {

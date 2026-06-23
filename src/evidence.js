@@ -200,6 +200,29 @@ const MIME_BY_EXT = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', png: 'image/png',
   webm: 'video/webm', mp4: 'video/mp4',
 };
+const EXT_BY_MIME = {
+  'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/png': 'png',
+  'video/webm': 'webm', 'video/mp4': 'mp4',
+};
+
+// Drop a standalone media file next to the JSON record. The JSON keeps the image
+// inlined as a data URL (that's what the bundle/reader render), but a *headless*
+// driving agent can't see a data URL — it needs a real file to `Read`. Without this
+// it has to decode the base64 out of the JSON or hand-roll its own Playwright capture
+// just to look at its own UI work. Writing the sibling closes that gap.
+function writeMediaFile(dir, id, dataUrlStr) {
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(dataUrlStr || '');
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  const ext = EXT_BY_MIME[mime] || (mime.startsWith('video/') ? 'webm' : 'png');
+  const file = path.join(dir, `${id}.${ext}`);
+  try {
+    fs.writeFileSync(file, Buffer.from(m[2], 'base64'));
+    return file;
+  } catch {
+    return null;
+  }
+}
 
 function dataUrl(imgPath) {
   const buf = fs.readFileSync(imgPath);
@@ -397,7 +420,8 @@ export async function recordShot(cwd, { target, image, label = null, note = '', 
     image: img,
   };
   fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(rec));
-  return { ...rec, file: path.join(dir, `${id}.json`), durationMs, settled };
+  const mediaFile = writeMediaFile(dir, id, img);
+  return { ...rec, file: path.join(dir, `${id}.json`), mediaFile, durationMs, settled };
 }
 
 // All recorded artifacts for a repo, oldest→newest (so before/after pair in order),

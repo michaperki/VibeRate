@@ -44,8 +44,10 @@ burned turns rediscovering these facts; don't.
 
 - **`python` is absent — this is a Node project.** Parse JSON/JSONL and write scripts
   in `node`, never `python3`.
-- **Run `npm install` first** in a fresh checkout — `node_modules` isn't cloned, so a
-  bare boot fails with `Cannot find package 'express'`. Expected, not a bug.
+- **Deps auto-install on clone now** — Drive runs `npm install` after cloning a
+  workspace, so `node_modules` is normally already there. If a bare boot still fails with
+  `Cannot find package` (an older container, or a manual checkout), run `npm install`
+  once — `node_modules` isn't committed.
 - **Port 8080 is already taken** by the hosted server you're running inside. Don't
   `vbrt serve` on it; pick another port (e.g. `--port 8137`) or skip the local server.
 - **Hosted routing:** `/` is the public landing page; the dashboard SPA is at **`/app`**
@@ -58,17 +60,21 @@ burned turns rediscovering these facts; don't.
   (injected into your env; = `<instance>/preview/<slug>/<path>`), straight off the
   shared volume with **zero commit/push/redeploy**. Hand the human that URL for any
   prototype/mock/page. Only commit+push when the change is meant to ship.
-- **Screenshots/clips for evidence:** `vbrt shot "$VBRT_PREVIEW_BASE/<path>" --label
-  after` — works out of the box (fixed 2026-06-21): `vbrt` is on PATH, Playwright +
-  chromium are baked into the image, and `shot` auto-rewrites a `$VBRT_PREVIEW_BASE`
-  target to loopback so the admin-gated preview route doesn't 403 your headless capture.
-  No `vbrt doctor --fix` dance needed. (If you're in an *old* container from before that
-  redeploy, the prior workarounds in memory still apply.) Last resort: register a file
-  you produced yourself with `vbrt shot ./shot.png`. **`--label` only takes `before` or
-  `after`** — not an arbitrary string. The shot **auto-attaches to your prompt card in
-  the Convos rail at turn-end — no `vbrt push`** (Drive binds + ingests evidence itself
-  now; `archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md`). So a shot is the way to *show the human in the
-  conversation* what you built, distinct from handing them a live preview URL.
+- **Seeing your own UI work (to verify a change):** you're headless — you can't refresh
+  the app like the human can. Preview the page at `$VBRT_PREVIEW_BASE/<path>` (above),
+  capture it yourself (a short Playwright script is fine), and **`Read` the PNG** to look
+  at the actual pixels. Note: **`vbrt shot` does *not* return the image** — it only prints
+  a confirmation — so don't run `shot` expecting to see your work. Capture-and-`Read` is
+  that loop; `shot` is not.
+- **`vbrt shot` is on-request only.** It captures a screenshot/clip into the human's
+  Convos-rail evidence card. **Don't fire it automatically after UI changes** — only when
+  the user actually asks to see something captured. (Most humans just refresh the live
+  app; an unrequested shot is wasted turns and tokens.) When asked, it works out of the
+  box: `vbrt shot "$VBRT_PREVIEW_BASE/<path>" --label after` — `vbrt` is on PATH,
+  Playwright is baked in, and `shot` auto-rewrites a `$VBRT_PREVIEW_BASE` target to
+  loopback past the admin gate (no `doctor --fix` dance). `--label` takes only `before`/
+  `after`; register a file you already made with `vbrt shot ./shot.png`. It auto-attaches
+  at turn-end — no `vbrt push` (`archive/drive-reconciliation/DRIVE_CONVO_INGEST_GAP.md`).
 - **Editing `.md` brain docs updates the brain automatically — no `vbrt push`.** When
   a driven turn ends, Drive re-extracts the workspace's docs (+ git timeline +
   time-travel history) into the bound project, so a `STORY.md` you add or a `CLAUDE.md`

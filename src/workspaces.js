@@ -80,6 +80,27 @@ async function headSha(dir) {
 // Clone (or re-clone) a project's repo into its workspace dir. Marks the manifest
 // `cloning` immediately so the UI can poll, then `ready`/`error` on completion.
 // Returns the initial workspace record (status `cloning`).
+// Install Node deps after a fresh clone so a driven session doesn't boot straight
+// into `Cannot find package 'express'`. node_modules isn't cloned, and that was the
+// single most common stall in driven sessions — past agents burned turns rediscovering
+// they had to `npm install` first. Best-effort: a failure here (offline, odd repo)
+// leaves the checkout usable and the agent can still install by hand. Only runs when
+// there's a package.json and node_modules isn't already present.
+async function installDeps(dir) {
+  if (!fs.existsSync(path.join(dir, 'package.json'))) return;
+  if (fs.existsSync(path.join(dir, 'node_modules'))) return;
+  const opts = { cwd: dir, timeout: 10 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 };
+  const hasLock = fs.existsSync(path.join(dir, 'package-lock.json'));
+  try {
+    // `npm ci` is reproducible and never rewrites the lockfile (keeps the checkout
+    // clean for the agent's own commits); fall back to `install` if the lock is
+    // missing or out of sync with package.json.
+    await exec('npm', hasLock ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-audit', '--no-fund'], opts);
+  } catch {
+    try { await exec('npm', ['install', '--no-audit', '--no-fund'], opts); } catch { /* leave it to the agent */ }
+  }
+}
+
 export async function startClone(slug, { repo, branch } = {}) {
   if (!validRepo(repo)) throw new Error('a valid https or git@ repo URL is required');
   const cur = getWorkspace(slug);
@@ -103,6 +124,9 @@ export async function startClone(slug, { repo, branch } = {}) {
       // it in the clone URL, which git persists there. No token touches disk.
       args.push(repo, dir);
       await exec('git', args, { timeout: 5 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
+      // Stay in `cloning` while deps install so the agent isn't handed a node_modules-less
+      // checkout the instant the git clone returns.
+      await installDeps(dir);
       setWorkspace(slug, { status: 'ready', head: await headSha(dir), error: null });
     } catch (err) {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }

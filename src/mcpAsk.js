@@ -37,7 +37,11 @@ const ASK_TOOL = {
   description:
     'Ask the user one or more questions and wait for their answer. Use this ' +
     'whenever you need a decision, preference, or clarification from the user. ' +
-    'A picker appears in their UI and your call returns once they respond.',
+    'A picker appears in their UI and your call returns once they respond. ' +
+    'Reserve it for choices you need to proceed — do NOT use it to ask the user to ' +
+    'perform manual QA on their device ("scroll and tell me if the header sticks"); ' +
+    'they often leave those unanswered. Verify UI yourself by capturing a screenshot ' +
+    'and reading it.',
   inputSchema: {
     type: 'object',
     properties: {
