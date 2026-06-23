@@ -71,8 +71,27 @@ Pick one when native sign-in becomes a priority:
 
 Until then: token sign-in is the path, and it now grants full account scope.
 
+## Drive (the admin control plane) in the native app
+
+Same root cause, one layer deeper: the Drive button only lights up if
+`/api/agent/health` succeeds, and that route's `makeAdminGuard` (`src/agentRoutes.js`)
+required an OAuth **session** whose email is in `VBRT_ADMIN_EMAILS`. A token sign-in
+has no session, so Drive stayed dark in the app.
+
+Fix: the admin guard now resolves identity from an OAuth session **or** an
+admin-linked bearer token (`adminEmailFor` → `findUserByOwnerHash`). So the same
+token that signs you in also unlocks Drive on the phone — the "drive agents from
+your phone" loop.
+
+**Security:** this makes an admin-linked token **RCE-capable** (Drive spawns agents =
+code execution on the host), not just read scope. Accepted for the single-user
+instance; before multi-user, move Drive to a real admin *session* (deep-link OAuth)
+or a separate, narrowly-scoped Drive credential.
+
 ## Status
 
 - [x] Documented root cause (cookie context split; both providers; webview block).
 - [x] Token sign-in grants full account scope (`currentOwners` + `findUserByOwnerHash`).
-- [ ] Deep-link or native OAuth — deferred with onboarding.
+- [x] Drive unlocked in the app via admin-linked token (`adminEmailFor` in the guard).
+- [ ] Deep-link or native OAuth — deferred with onboarding (also retires the
+      RCE-capable-token tradeoff above).

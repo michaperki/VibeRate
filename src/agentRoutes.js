@@ -11,6 +11,8 @@ import { startSession, adoptSession, sendMessage, stopSession, subscribe, getSes
 import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
+import { bearer, hashToken } from './auth.js';
+import { findUserByOwnerHash } from './accounts.js';
 
 // Is the TCP peer loopback? We deliberately read socket.remoteAddress (the real
 // peer) rather than req.ip, so a spoofed X-Forwarded-For can't pass even though the
@@ -28,13 +30,28 @@ function loopbackOnly(req, res, next) {
   next();
 }
 
-// Hosted guard: a signed-in account whose email is in the admin allowlist. The
-// loopback check is meaningless behind Fly's proxy, so identity is the gate.
+// The admin identity behind a request: an OAuth session, OR a bearer token linked
+// to an account (the native/TestFlight app can't complete OAuth, so it signs in
+// with a token — see PLAN_NATIVE_AUTH.md). Returns the account email or null.
+function adminEmailFor(req) {
+  const user = currentUser(req);
+  if (user && user.email) return user.email.toLowerCase();
+  const token = bearer(req);
+  if (token) {
+    const acct = findUserByOwnerHash(hashToken(token));
+    if (acct && acct.email) return acct.email.toLowerCase();
+  }
+  return null;
+}
+
+// Hosted guard: the request must resolve to an account whose email is in the admin
+// allowlist. The loopback check is meaningless behind Fly's proxy, so identity is the
+// gate. Accepting an admin-linked token makes that token RCE-capable — acceptable for
+// the single-user instance; revisit for multi-user (PLAN_NATIVE_AUTH.md).
 function makeAdminGuard(adminEmails) {
   const allow = new Set((adminEmails || []).map((e) => e.trim().toLowerCase()).filter(Boolean));
   return function requireAdmin(req, res, next) {
-    const user = currentUser(req);
-    const email = user && user.email ? user.email.toLowerCase() : null;
+    const email = adminEmailFor(req);
     if (!email || !allow.has(email)) {
       return res.status(403).json({ error: 'drive is restricted to the instance admin; sign in at /auth' });
     }
