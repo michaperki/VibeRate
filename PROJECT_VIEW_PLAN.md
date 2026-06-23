@@ -462,12 +462,13 @@ combination) driven by a scripted event stream, compare, then decide.
 > `PRODUCT_STRATEGY.md` is explicit: surface dumb-zone risk **and offer the
 > affordances**, since context is the scarce resource in agentic-first coding. None of
 > the actions below are tracked anywhere else — this is the gap.
-- [ ] **🐛 Context meter is inconsistent — make it stable + always-on (2026-06-23,
-  Mike).** *This is the foundation: the dumb-zone affordances below are worthless if
-  the number they trigger on can't be trusted.* The Drive header context pill (`#dv-ctx`,
-  `driveUpdateCtx` in `public/app.js` ~L4305, fed by `usage` events the runtime emits
-  off each `message_start` in `src/agent.js` ~L373) has four problems, researched this
-  session:
+- [x] **🐛 Context meter is inconsistent — make it stable + always-on (2026-06-23,
+  Mike).** *FIXED 2026-06-23* — all four problems below are addressed in `src/agent.js`
+  + `public/app.js` (`driveUpdateCtx`). *This is the foundation: the dumb-zone affordances
+  below are worthless if the number they trigger on can't be trusted.* The Drive header
+  context pill (`#dv-ctx`, `driveUpdateCtx` in `public/app.js` ~L4305, fed by `usage`
+  events the runtime emits off each `message_start` in `src/agent.js` ~L373) had four
+  problems, researched + fixed this session:
   - **It bounces around a lot mid-session.** The pill is updated from *every*
     `message_start`'s input usage. The token math itself is sound — `input_tokens +
     cache_read_input_tokens + cache_creation_input_tokens` is the full prompt size and
@@ -479,6 +480,9 @@ combination) driven by a scripted event stream, compare, then decide.
     stream-json, and if so filter them (the raw event may carry a `parent_tool_use_id` /
     sidechain marker — `handleRawEvent` does not check today). On the main thread the
     meter should be monotonic non-decreasing within a session (only compaction lowers it).
+    *Fixed:* the sub-agent suspicion was right — `handleRawEvent` now gates the interim
+    `usage` emit on `!obj.parent_tool_use_id`, so only the main thread's `message_start`
+    moves the pill; `Task` sub-agent calls no longer drop it.
   - **It changes across resume — "doesn't make sense" (Mike's most-important point).**
     The `adopt`/replay path (`agent.js` ~L640–648) replays the transcript but emits **no
     `usage` and no `system`(model) event** — so after a resume the pill has no seed
@@ -490,7 +494,12 @@ combination) driven by a scripted event stream, compare, then decide.
     context incl. final output) while the resumed figure is the first `message_start`
     (context as the harness *reconstructed* it). Fix: persist the last-known
     tokens+model with the session and **re-seed the pill on adopt**, and reconcile
-    end-of-turn vs start-of-turn so they don't read as a regression.
+    end-of-turn vs start-of-turn so they don't read as a regression. *Fixed:* `adoptSession`
+    now scans the replayed transcript for the last assistant `.usage` (parseClaude already
+    attaches it) and emits a seed `system`(model) + `usage` event, mapping the normalized
+    `{input,cacheRead,cacheCreate}` back to the raw token keys the pill reads — so the
+    window is correct (1M vs 200k) and the pill shows real fill the moment you return,
+    no separate persistence layer needed.
   - **Likely auto-compaction, and we don't tell the user.** Claude Code auto-compacts a
     near-full context; that's the honest reason a resumed session can show *less* fill
     than when it ended. The runtime currently only handles `system`/`subtype:init` and
@@ -498,14 +507,20 @@ combination) driven by a scripted event stream, compare, then decide.
     `raw` bucket (`agent.js` L438). **Surface the compaction event** — a transcript
     note + a header cue ("⤵ context auto-compacted") — so a drop reads as a known event,
     not a glitch. (Confirm the exact stream-json shape Claude Code emits for a compaction
-    boundary, then handle it.)
+    boundary, then handle it.) *Fixed:* `handleRawEvent` now catches `system` events whose
+    `subtype` contains `compact` (before the `raw` fallback) and emits a transcript note
+    (`⊟ context auto-compacted (<trigger>)`), reading the trigger from `compact_metadata`.
+    Defensive on the subtype string since the exact name should still be confirmed live.
   - **Show the token count itself in the header, K-formatted, always visible.** Mike
     wants the running token number *in* the header pill (alongside the idle / bypass
     chips), ticking up as the session grows, using `k` for thousands (`driveFmtTok`
     already does this; the pill currently shows only `◔ 12%` — exact tokens were moved
     to the title + advanced row per UI_FEEDBACK P1 #5). Reconcile: surface e.g.
     `◔ 23.4k · 12%` (or token/window) in the pill, and keep it visible at rest and on
-    resume rather than `hidden` until the first usage event.
+    resume rather than `hidden` until the first usage event. *Fixed:* the pill now renders
+    `◔ <k-tokens> · <pct>%` via `driveFmtTok`, matching the convos brain-ticker pill; the
+    resume re-seed above keeps it populated on return. (Still `hidden` until the first
+    usage *exists* — there is no token count to show before the session has run at all.)
 - [ ] **Dumb-zone warning in Drive** — when the live session crosses ~75%, the
   composer/header flags it (not just the static reader gauge), so the driver sees it
   *before* sending the next prompt.

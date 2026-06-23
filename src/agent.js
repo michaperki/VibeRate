@@ -378,7 +378,13 @@ function handleRawEvent(session, obj) {
       // only snapping at the end-of-turn `result` (the staleness we were chasing).
       // Output tokens are still a placeholder at message_start; the context meter
       // only reads the input side, so that's fine.
-      emit(session, { kind: 'usage', usage: e.message.usage });
+      //
+      // BUT: a Task sub-agent runs its own tool loop, and each of its calls opens a
+      // message_start carrying the *sub-agent's* (much smaller) context. Surfacing
+      // those made the main pill lurch down then snap back up mid-turn — the "bounce"
+      // bug. The stream-json line tags sub-agent events with parent_tool_use_id; only
+      // the main agent's calls (no parent) reflect the real window fill, so gate on it.
+      if (!obj.parent_tool_use_id) emit(session, { kind: 'usage', usage: e.message.usage });
     }
     return;
   }
@@ -430,6 +436,17 @@ function handleRawEvent(session, obj) {
       // tokens regardless of billing mode (it's metering, not a charge).
       usage: obj.usage || null,
     });
+    return;
+  }
+
+  // Auto-compaction: when the window fills, the CLI compacts the transcript and
+  // emits a system event for the boundary. We otherwise drop every non-init system
+  // subtype into `raw` (unrendered), so a compaction used to vanish silently — and
+  // the context pill would lurch down with no explanation. Surface it as a note so
+  // the transcript shows where history was summarised and the pill drop has a cause.
+  if (type === 'system' && typeof obj.subtype === 'string' && obj.subtype.includes('compact')) {
+    const trigger = (obj.compact_metadata && obj.compact_metadata.trigger) || obj.trigger || null;
+    emit(session, { kind: 'note', text: `⊟ context auto-compacted${trigger ? ` (${trigger})` : ''} — earlier history was summarised to free up the window.` });
     return;
   }
 
@@ -644,6 +661,25 @@ export async function adoptSession({ claudeSessionId, cwd, projectSlug = null, p
     else if (m.kind === 'thinking') { if (m.text) emit(session, { kind: 'thinking', text: m.text }); }
     else if (m.kind === 'tool_use') emit(session, { kind: 'tool_use', name: m.name, input: m.input || {} });
     else if (m.kind === 'tool_result') emit(session, { kind: 'tool_result', isError: false, text: String(m.text || '') });
+  }
+  // Re-seed the context pill. The replayed transcript carries per-assistant usage,
+  // but adopt emits no system/usage event of its own, so a reconnecting client's
+  // gauge would start blank and — with no model in hand — default to a 200k window,
+  // mis-reading a [1m] session as ~5× fuller than it is (the "resume drift" bug).
+  // Replay the last known usage and its model so the pill shows the real fill the
+  // moment you return, before the next turn produces fresh numbers.
+  let lastUsage = null;
+  for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].usage) { lastUsage = messages[i].usage; break; } }
+  if (lastUsage) {
+    if (lastUsage.model) emit(session, { kind: 'system', model: lastUsage.model });
+    // parseClaude normalises usage to {input,cacheRead,cacheCreate,...}; the live
+    // pill (driveUpdateCtx) reads the raw Anthropic token keys, so map it back.
+    emit(session, { kind: 'usage', usage: {
+      input_tokens: lastUsage.input || 0,
+      cache_read_input_tokens: lastUsage.cacheRead || 0,
+      cache_creation_input_tokens: lastUsage.cacheCreate || 0,
+      output_tokens: lastUsage.output || 0,
+    } });
   }
   emit(session, { kind: 'note', text: '↩ reconnected to your earlier session — continue the conversation below.' });
   return publicView(session);

@@ -4313,9 +4313,11 @@ function driveUpdateCtx(ev) {
   // Context-fullness diverges from completion (UI_FEEDBACK P1 #5): ≥75% amber,
   // ≥90% red+⚠. A full context is *bad* (the "dumb zone"), unlike a full
   // completion ring — so it must not share the almost-done green/amber language.
-  // Primary pill stays compact (just %); exact tokens move to the advanced row (#4).
+  // Pill shows the running token count alongside the % (Mike's ask 2026-06-23): the
+  // raw number ticking up is the headline signal, the % its window-relative read.
+  // Mirrors the convos brain-ticker pill. Exact / window tokens stay in the advanced row (#4).
   const danger = pct >= 90, hot = pct >= 75;
-  c.textContent = `◔ ${pct}%${danger ? ' ⚠' : ''}`;
+  c.textContent = `◔ ${driveFmtTok(ctx)} · ${pct}%${danger ? ' ⚠' : ''}`;
   c.title = `context window ${pct}% full — ${ctx.toLocaleString()} / ${win.toLocaleString()} tokens${model ? ' · ' + model : ''}${danger ? ' · nearly full — expect worse output; compact or start fresh' : hot ? ' · getting full' : ''}`;
   c.classList.toggle('hot', hot && !danger);
   c.classList.toggle('danger', danger);
