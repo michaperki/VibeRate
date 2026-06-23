@@ -29,6 +29,14 @@ const state = {
   ttIndex: 0, // selected commit index within the brain-history timeline
   ttFocus: null, // doc path whose diff is shown in the panel
   docLayout: 'web', // 'web' | 'tree' | 'recent'
+  // Cockpit (PLAN_COCKPIT.md): the calm Now/Latest/Next home is the default; this
+  // flips to the dense Activity+ribbon+brain stack ("Full timeline →"). The roster is
+  // the live per-agent list (enriched /api/agent/sessions), polled while the cockpit
+  // is mounted; _cockpitTick/_rosterPoll are its interval handles.
+  fullTimeline: false,
+  roster: [], // enriched agent-runtime sessions for the open project
+  _cockpitTick: null,
+  _rosterPoll: null,
   sourceFilter: 'all',
   colorById: {},
   selectedConvo: null,
@@ -923,6 +931,11 @@ async function refreshLive() {
   renderSessionList();
   if (state.session) return; // reading a session — data's updated; render on return
 
+  // Cockpit is the default home: refresh its ingested zones (Latest/Next + the Now
+  // ring/sparkline) in place. The dense brain/activity surfaces below only exist in
+  // the Full timeline, so skip them unless that view is up.
+  if (!state.fullTimeline) { refreshCockpitFeeds(); return; }
+
   // Smooth path: node set unchanged (the common case — a doc's content changed)
   // → animate the brain in place (rings fill, changed nodes glow) + refresh the
   // activity card, no rebuild.
@@ -1278,7 +1291,363 @@ function timelineSessions() {
     .sort((a, b) => a.start - b.start);
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// COCKPIT — the calm project home (PLAN_COCKPIT.md). Three zones in one column:
+//   Now    — live per-agent roster off the enriched agent runtime (/api/agent/
+//            sessions): status dot, current task, ticking elapsed, context meter,
+//            an aggregate completion ring + a merged-pulse sparkline.
+//   Latest — calm event feed (brain-doc changes ◆, commit bursts, conversations)
+//            reduced client-side from git/dochistory/activity.
+//   Next   — the 2–3 plans closest to done, from per-plan checkbox completion.
+// The dense Activity+ribbon+brain stack is demoted behind "Full timeline →".
+// ══════════════════════════════════════════════════════════════════════════
+
+// Context-window fill color for the roster meter — a full context is *bad* (the
+// "dumb zone"), so it climbs muted → amber → red (mirrors driveUpdateCtx's thresholds).
+function ctxColor(pct) {
+  if (pct >= 90) return '#f85149';
+  if (pct >= 75) return '#d29922';
+  return 'var(--accent)';
+}
+
+// Per-plan completion straight off the brain graph's checkbox parse (the same
+// {done,total,pct} the live-brain rings use) — un-summed, one entry per PLAN_*.md.
+function planNodes() {
+  const g = state.docGraph;
+  if (!g || !g.nodes) return [];
+  return g.nodes
+    .filter((n) => !n.archived && n.completion && n.completion.total)
+    .map((n) => ({ name: n.name, base: n.base, done: n.completion.done, total: n.completion.total, pct: n.completion.pct }));
+}
+
+// The roster, sorted needs-attention first: working/starting → waiting → error →
+// idle, then most-recently-active within a rank.
+function rosterAgents() {
+  const rank = (s) => (s === 'working' || s === 'starting' ? 0 : s === 'waiting' ? 1 : s === 'error' ? 2 : 3);
+  return [...(state.roster || [])].sort((a, b) => {
+    const r = rank(a.status) - rank(b.status);
+    return r || (b.lastEventAt || 0) - (a.lastEventAt || 0);
+  });
+}
+
+// Aggregate completion ring (reuses the dvb-prog dasharray idea) + center %.
+function aggregateRingHtml() {
+  const plans = planNodes();
+  const done = plans.reduce((a, p) => a + p.done, 0);
+  const total = plans.reduce((a, p) => a + p.total, 0);
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const C = 2 * Math.PI * 22;
+  return `<div class="ck-ring"><svg viewBox="0 0 54 54" width="46" height="46" aria-hidden="true">
+      <circle cx="27" cy="27" r="22" fill="none" stroke="#2b3340" stroke-width="5"/>
+      <circle cx="27" cy="27" r="22" fill="none" stroke="${pctColor(pct)}" stroke-width="5" stroke-linecap="round"
+              transform="rotate(-90 27 27)" stroke-dasharray="${((pct / 100) * C).toFixed(1)} 999"/>
+    </svg><span class="ck-ring-pct">${pct}%</span></div>`;
+}
+
+// Merged-pulse sparkline: one combined activity series (messages + commits) binned
+// to ~40 points (the same reduction renderRibbon does, at sparkline resolution).
+function cockpitSparkline(sessions) {
+  const pts = [];
+  for (const s of sessions) for (const m of s.msgs || []) pts.push(m.t);
+  if (state.git.ok) for (const c of windowCommits(sessions)) pts.push(c.t);
+  if (pts.length < 2) return '';
+  const tMin = Math.min(...pts);
+  const tMax = Math.max(...pts);
+  const span = Math.max(1, tMax - tMin);
+  const N = 40;
+  const bins = new Array(N).fill(0);
+  for (const t of pts) { let i = Math.floor(((t - tMin) / span) * N); i = Math.max(0, Math.min(N - 1, i)); bins[i]++; }
+  const max = Math.max(1, ...bins);
+  const W = 300, H = 26;
+  const path = bins.map((n, i) => `${((i / (N - 1)) * W).toFixed(1)},${(H - (n / max) * (H - 2) - 1).toFixed(1)}`).join(' ');
+  return `<svg class="ck-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${path}" fill="none" stroke="var(--accent)" stroke-width="1.5" opacity="0.55"/></svg>`;
+}
+
+// One roster row: status dot + title/type + current task + (live) elapsed + ctx meter.
+function agentRowHtml(a) {
+  const verbTxt = { read: 'Reading', edit: 'Editing', write: 'Writing', run: 'Running', plan: 'Planning' };
+  const st = a.status;
+  let task;
+  if (st === 'waiting') task = '⏸ waiting for you';
+  else if (st === 'error') task = 'error';
+  else if (st === 'exited') task = 'session closed';
+  else if (st === 'working' || st === 'starting') task = a.lastAction ? `${verbTxt[a.lastAction.verb] || 'Using'} ${a.lastAction.label}` : 'thinking…';
+  else task = 'idle';
+  const ticking = (st === 'working' || st === 'starting' || st === 'waiting') && a.promptStartedAt;
+  const elapsed = ticking
+    ? `<span class="ck-elapsed" data-since="${a.promptStartedAt}">${driveFmtElapsed(Math.max(0, Math.round((Date.now() - a.promptStartedAt) / 1000)))}</span>`
+    : '';
+  const ctx = a.ctxTokens
+    ? `<span class="ck-ctx" title="context window ${a.ctxPct}% full — ${a.ctxTokens.toLocaleString()} tokens${a.model ? ' · ' + esc(a.model) : ''}"><span class="ck-ctx-bar"><i style="width:${a.ctxPct}%;background:${ctxColor(a.ctxPct)}"></i></span>${a.ctxPct}%</span>`
+    : '';
+  return `<div class="ck-agent" data-agent="${esc(a.id)}" tabindex="0" title="Open this agent in Drive">
+      <span class="ck-dot ${esc(st)}"></span>
+      <div class="ck-agent-main">
+        <div class="ck-agent-top"><span class="ck-agent-title">${esc(a.title || 'session')}</span><span class="ck-type ${esc(a.type)}">${esc(a.type)}</span></div>
+        <div class="ck-agent-sub">${esc(task)}</div>
+      </div>
+      <div class="ck-agent-meta">${elapsed}${ctx}</div>
+    </div>`;
+}
+
+// The Now card: aggregate ring + header summary + sparkline + the live roster.
+function renderNowCard() {
+  const sessions = timelineSessions();
+  const agents = rosterAgents();
+  const working = agents.filter((a) => a.status === 'working' || a.status === 'starting').length;
+  const waiting = agents.filter((a) => a.status === 'waiting').length;
+  const idle = agents.length - working - waiting;
+  const plans = planNodes();
+  const done = plans.reduce((a, p) => a + p.done, 0);
+  const total = plans.reduce((a, p) => a + p.total, 0);
+  const lastAt = agents.length ? Math.max(...agents.map((a) => a.lastEventAt || 0)) : 0;
+  let body;
+  if (state.driveable === false) body = '<div class="ck-empty">Live agents show here while you drive. Sign in as the instance admin to start one.</div>';
+  else if (!agents.length) body = '<div class="ck-empty">No agents running. Open a conversation and tap <b>✦ Drive</b> to start one.</div>';
+  else body = agents.map(agentRowHtml).join('');
+  const line1 = agents.length ? `${working} working · ${waiting} waiting · ${idle} idle` : 'Now';
+  const line2 = (total ? `${done}/${total} tasks` : 'no plan checklists') + (lastAt ? ` · active ${fmtAgo(lastAt)}` : '');
+  return `<section class="dash-card cockpit-now">
+      <div class="ck-now-head">
+        ${aggregateRingHtml()}
+        <div class="ck-now-sum">
+          <div class="ck-now-line1">${esc(line1)}</div>
+          <div class="ck-now-line2">${esc(line2)}</div>
+        </div>
+        <span class="ck-live${state.driveable === false ? ' off' : ''}" title="The roster polls the live agent runtime"><i></i>live</span>
+      </div>
+      ${cockpitSparkline(sessions)}
+      <div class="ck-roster">${body}</div>
+    </section>`;
+}
+
+// Build the calm "Latest" event list from ingested history: brain-doc changes,
+// commit bursts (≥2 commits within a window), lone non-brain commits, and convos.
+function cockpitEvents(sessions) {
+  const events = [];
+  for (const s of sessions) events.push({ t: s.end, kind: 'convo', count: s.userCount, title: s.title, source: s.source, id: s.id });
+  if (state.git.ok) {
+    const commits = windowCommits(sessions);
+    const brainSet = brainNodeSet();
+    const brainHashes = new Set();
+    for (const c of commits) {
+      const bd = brainDocsOf(c, brainSet);
+      if (bd.length) { brainHashes.add(c.hash); events.push({ t: c.t, kind: 'brain', subject: c.subject, docs: bd.map((d) => docName(d).split('/').pop()), hash: c.hash }); }
+    }
+    const sorted = [...commits].sort((a, b) => a.t - b.t);
+    const GAP = 45 * 60 * 1000;
+    let burst = null;
+    const bursts = [];
+    for (const c of sorted) {
+      if (burst && c.t - burst.last <= GAP) { burst.commits.push(c); burst.last = c.t; }
+      else { burst = { commits: [c], last: c.t }; bursts.push(burst); }
+    }
+    for (const b of bursts) {
+      if (b.commits.length >= 2) events.push({ t: b.last, kind: 'commits', count: b.commits.length, subjects: b.commits.map((c) => c.subject) });
+      else if (!brainHashes.has(b.commits[0].hash)) events.push({ t: b.commits[0].t, kind: 'commit', subject: b.commits[0].subject });
+    }
+  }
+  return events.sort((a, b) => b.t - a.t);
+}
+
+function eventRowHtml(e) {
+  if (e.kind === 'brain')
+    return `<div class="ck-ev brain" data-bh-doc="${esc(e.docs[0])}" title="Open ${esc(e.docs[0])} in the reader">
+        <span class="ck-ev-icon brain">◆</span>
+        <div class="ck-ev-main"><div class="ck-ev-title">${esc(e.docs.join(', '))}</div><div class="ck-ev-sub">${esc(e.subject)}</div></div>
+        <span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
+  if (e.kind === 'commits')
+    return `<div class="ck-ev commits" data-burst title="Tap to list the commits">
+        <span class="ck-ev-icon">⎇</span>
+        <div class="ck-ev-main"><div class="ck-ev-title">${e.count} ${plw(e.count, 'commit')}</div><div class="ck-ev-sub ck-burst-list" hidden>${e.subjects.map((s) => `<div>· ${esc(s)}</div>`).join('')}</div></div>
+        <span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
+  if (e.kind === 'commit')
+    return `<div class="ck-ev commit">
+        <span class="ck-ev-icon">⎇</span>
+        <div class="ck-ev-main"><div class="ck-ev-title">${esc(e.subject)}</div></div>
+        <span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
+  return `<div class="ck-ev convo" data-open="${esc(e.id)}" title="Open this conversation">
+      <span class="ck-ev-icon" style="color:${SRC_COLOR[e.source] || 'var(--accent)'}">💬</span>
+      <div class="ck-ev-main"><div class="ck-ev-title">${e.count} ${plw(e.count, 'message')}</div><div class="ck-ev-sub">${esc(e.title || '')}</div></div>
+      <span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
+}
+
+function renderLatest(sessions) {
+  const events = cockpitEvents(sessions).slice(0, 14);
+  const body = events.length
+    ? events.map(eventRowHtml).join('')
+    : '<div class="ck-empty">Nothing yet — activity lands here as the agent commits and edits brain docs.</div>';
+  return `<section class="dash-card cockpit-latest"><div class="dash-head"><span>Latest</span><span class="dim-note">recent activity</span></div>${body}</section>`;
+}
+
+function renderNext() {
+  const plans = planNodes().filter((p) => p.pct < 100).sort((a, b) => b.pct - a.pct).slice(0, 3);
+  if (!plans.length) return '';
+  const rows = plans
+    .map((p) => `<div class="ck-plan" data-bh-doc="${esc(p.base)}" title="Open ${esc(p.base)} in the reader">
+        <div class="ck-plan-top"><span class="ck-plan-name">${esc(p.base)}</span><span class="ck-plan-meta">${p.total - p.done} left · ${p.pct}%</span></div>
+        <div class="ck-bar"><span style="width:${p.pct}%;background:${pctColor(p.pct)}"></span></div>
+      </div>`)
+    .join('');
+  return `<section class="dash-card cockpit-next"><div class="dash-head"><span>Next</span><span class="dim-note">plans closest to done</span></div>${rows}</section>`;
+}
+
+// Compose the cockpit into #conversation and arm its live loops.
+function renderCockpit() {
+  if (state._driveOpen) return;
+  const sessions = timelineSessions();
+  const tHas = sessions.length;
+  const tMin = tHas ? Math.min(...sessions.map((s) => s.start)) : 0;
+  const tMax = tHas ? Math.max(...sessions.map((s) => s.end)) : 0;
+  el('#conversation').innerHTML = `
+    <div class="conv-toolbar dash-toolbar">
+      <div class="conv-head">
+        <h2>${esc(state.projectData.name)}</h2>
+        <div class="meta">${tHas ? `${plural(sessions.length, 'conversation')} · ${fmtShort(tMin)} → ${fmtShort(tMax)}` : 'no conversations captured yet'}</div>
+      </div>
+      <button class="live-toggle${state.live ? ' on' : ''}" data-live-toggle title="Follow this project — Latest &amp; Next refresh as commits, prompts &amp; brain edits land."><span class="live-dot"></span>${state.live ? 'Following' : 'Follow'}<span class="live-ago"></span></button>
+    </div>
+    <div class="cockpit">
+      ${renderNowCard()}
+      ${renderLatest(sessions)}
+      ${renderNext()}
+      <button class="cockpit-full" data-full-timeline title="The dense Activity timeline + ribbon + live brain">Full timeline →</button>
+    </div>`;
+  wireCockpit();
+  cockpitAttach();
+}
+
+function wireCockpit() {
+  const conv = el('#conversation');
+  if (!conv) return;
+  const lt = conv.querySelector('[data-live-toggle]');
+  if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderTimeline(); };
+  const full = conv.querySelector('[data-full-timeline]');
+  if (full) full.onclick = () => { state.fullTimeline = true; renderTimeline(); };
+  wireRoster(conv);
+  wireCockpitFeeds(conv);
+}
+
+function wireRoster(root) {
+  root.querySelectorAll('[data-agent]').forEach((n) => {
+    const open = () => openRosterAgent(n.dataset.agent);
+    n.onclick = open;
+    n.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  });
+}
+
+function wireCockpitFeeds(root) {
+  root.querySelectorAll('.ck-ev.convo[data-open]').forEach((n) => (n.onclick = () => selectSession(state.project, n.dataset.open)));
+  root.querySelectorAll('[data-bh-doc]').forEach((n) => (n.onclick = () => { const d = currentDocNode(n.dataset.bhDoc); if (d) openDocLightbox(d); }));
+  root.querySelectorAll('.ck-ev.commits[data-burst]').forEach((n) => (n.onclick = () => { const l = n.querySelector('.ck-burst-list'); if (l) l.hidden = !l.hidden; }));
+}
+
+// Open a roster agent in the live Drive view (its publicView already carries the
+// {id,status,claudeSessionId,cwd,permissionMode} enterDrive needs).
+function openRosterAgent(id) {
+  const a = (state.roster || []).find((x) => x.id === id);
+  if (!a) return;
+  state.driveProject = state.project;
+  cockpitDetach();
+  enterDrive(a);
+}
+
+// --- cockpit live loops -----------------------------------------------------
+// Two cadences: a 1 s tick advances the elapsed timers (cheap, off cached roster),
+// and a 2.5 s poll refetches the roster from the agent runtime (the only live
+// transport — the MVP from PLAN_COCKPIT.md §3.1, no new aggregate SSE). The poll is
+// gated on the Drive probe so a public /p/:slug viewer (403) never polls. The
+// ingested Latest/Next zones refresh through the existing Follow poll (refreshLive).
+function cockpitAttach() {
+  cockpitDetach();
+  state._cockpitTick = setInterval(cockpitTick, 1000);
+  ensureDriveProbe().then((ok) => {
+    if (state.fullTimeline || state._driveOpen || !state.project) return;
+    if (!ok) { renderNowInPlace(); return; } // reflect the unavailable empty state
+    refreshRoster();
+    if (!state._rosterPoll) state._rosterPoll = setInterval(refreshRoster, 2500);
+  });
+}
+
+function cockpitDetach() {
+  if (state._cockpitTick) { clearInterval(state._cockpitTick); state._cockpitTick = null; }
+  if (state._rosterPoll) { clearInterval(state._rosterPoll); state._rosterPoll = null; }
+}
+
+async function refreshRoster() {
+  if (state.fullTimeline || state._driveOpen || !state.project) return;
+  let list = [];
+  try { list = await driveApi('/sessions'); } catch { list = []; }
+  if (state.fullTimeline || state._driveOpen || !state.project) return;
+  state.roster = (Array.isArray(list) ? list : []).filter((s) => s.projectSlug === state.project);
+  renderNowInPlace();
+}
+
+// Surgically replace the Now card (so the roster + ring + sparkline refresh without
+// rebuilding Latest/Next or re-arming the live loops).
+function renderNowInPlace() {
+  const card = el('#conversation .cockpit-now');
+  if (!card) return;
+  const tmp = document.createElement('template');
+  tmp.innerHTML = renderNowCard().trim();
+  const node = tmp.content.firstElementChild;
+  if (!node) return;
+  card.replaceWith(node);
+  wireRoster(node);
+}
+
+function cockpitTick() {
+  document.querySelectorAll('#conversation .ck-elapsed[data-since]').forEach((n) => {
+    const since = Number(n.dataset.since);
+    if (!since) return;
+    n.textContent = driveFmtElapsed(Math.max(0, Math.round((Date.now() - since) / 1000)));
+  });
+  updateLiveReadout();
+}
+
+// Refresh the ingested cockpit zones (Latest + Next + the Now ring/sparkline) in
+// place on a Follow tick — the cockpit analogue of refreshActivityCard.
+function refreshCockpitFeeds() {
+  const conv = el('#conversation');
+  if (!conv) return;
+  const sessions = timelineSessions();
+  const swap = (sel, html, wire) => {
+    const cur = conv.querySelector(sel);
+    if (!cur) return null;
+    if (!html) { cur.remove(); return null; }
+    const tmp = document.createElement('template');
+    tmp.innerHTML = html.trim();
+    const node = tmp.content.firstElementChild;
+    if (!node) return null;
+    cur.replaceWith(node);
+    if (wire) wire(node);
+    return node;
+  };
+  swap('.cockpit-latest', renderLatest(sessions), wireCockpitFeeds);
+  const nextHtml = renderNext();
+  const existingNext = conv.querySelector('.cockpit-next');
+  if (existingNext) swap('.cockpit-next', nextHtml, wireCockpitFeeds);
+  else if (nextHtml) {
+    const latest = conv.querySelector('.cockpit-latest');
+    if (latest) { const t = document.createElement('template'); t.innerHTML = nextHtml.trim(); const n = t.content.firstElementChild; if (n) { latest.insertAdjacentElement('afterend', n); wireCockpitFeeds(n); } }
+  }
+  renderNowInPlace();
+}
+
+// The project home now dispatches between the calm "cockpit" (default — Now / Latest
+// / Next, PLAN_COCKPIT.md) and the dense "Full timeline" (the original Activity +
+// ribbon + live-brain stack, demoted behind a link). `state.fullTimeline` toggles
+// between them within the same route. cockpitDetach() here is the single teardown
+// point for the roster poll + elapsed tick, so every re-render starts clean and only
+// renderCockpit re-arms them.
 function renderTimeline() {
+  if (state._driveOpen) return; // Drive owns #conversation — don't repaint over it
+  cockpitDetach();
+  if (state.fullTimeline) return renderFullTimeline();
+  return renderCockpit();
+}
+
+function renderFullTimeline() {
   if (state._driveOpen) return; // Drive owns #conversation — don't repaint over it
   const sessions = timelineSessions();
   if (sessions.length === 0) {
@@ -1292,6 +1661,7 @@ function renderTimeline() {
   el('#conversation').innerHTML = `
     <div class="conv-toolbar dash-toolbar">
       <div class="conv-head">
+        <button class="back-dash" data-cockpit title="Back to the cockpit">← cockpit</button>
         <h2>${esc(state.projectData.name)}</h2>
         <div class="meta">${plural(sessions.length, 'conversation')} · ${fmtShort(tMin)} → ${fmtShort(tMax)}${
           enriched ? '' : ' · <span class="warn-inline">restart <code>vbrt serve</code> for message data</span>'
@@ -1332,6 +1702,8 @@ function renderTimeline() {
   wireActivity();
   const lt = el('#conversation [data-live-toggle]');
   if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderTimeline(); };
+  const ck = el('#conversation [data-cockpit]');
+  if (ck) ck.onclick = () => { state.fullTimeline = false; renderTimeline(); };
   state._brainEntrance = false; // consumed — don't replay on layout toggles / re-renders
   state._streamIn = null; // consumed — the new nodes have rendered with their fade-in
   liveBrain.attach(el('#conversation').querySelector('.centerpiece')); // start the live force-sim
@@ -4304,7 +4676,11 @@ function driveSetStatus(status) {
   const pill = el('#dv-pill');
   if (pill) { pill.textContent = status; pill.className = 'dv-pill ' + status; }
   const send = el('#dv-send'); const stop = el('#dv-stop');
-  const busy = status === 'working' || status === 'starting';
+  // `waiting` (the agent called the MCP ask picker and is blocked on you) is still an
+  // in-flight turn: the child is alive, so keep the working footer + Stop enabled and
+  // don't flush the queue — but label it so it reads as "your move", not "thinking".
+  const waiting = status === 'waiting';
+  const busy = status === 'working' || status === 'starting' || waiting;
   // Keep Send enabled while busy so a follow-up can be queued mid-turn; it just
   // relabels to "Queue" to signal the message will land after the current turn.
   if (send) { send.disabled = false; send.textContent = busy ? 'Queue' : 'Send'; }
@@ -4313,7 +4689,7 @@ function driveSetStatus(status) {
   // The composer footer carries the "Claude is working…" indicator (spinner +
   // live activity label + elapsed time on task). Show it while a turn is in
   // flight; hide it the moment the turn settles.
-  if (busy) { driveStartTurn(); driveStatusLabel(status === 'starting' ? 'Starting…' : 'Working…'); }
+  if (busy) { driveStartTurn(); driveStatusLabel(waiting ? 'Waiting for you…' : status === 'starting' ? 'Starting…' : 'Working…'); }
   else driveEndTurn();
   // Turn settled → deliver the next queued message (no-op if the queue is empty).
   if (status === 'idle') driveFlushQueue();

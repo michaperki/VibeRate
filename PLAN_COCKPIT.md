@@ -1,8 +1,26 @@
 # PLAN_COCKPIT.md — migrating the project home from the dense Activity dashboard to the calm "cockpit"
 
-**Status:** research / change-map only. Nothing here is implemented. The target design is
-the mockup `viberate-cockpit.jsx` (treated as the source of truth for the *target* state).
-Every current-state claim below cites a real file/symbol; inferences are marked **[assume]**.
+**Status: SHIPPED (2026-06-23).** The cockpit is now the default project home; the
+dense Activity+ribbon+brain stack is demoted behind "Full timeline →" (`state.fullTimeline`
+toggles within the same route). This doc began as the research / change-map; it's kept as
+the design rationale. What landed against the sequencing in §7:
+- **§7.1 runtime telemetry — done.** `publicView()`/`listSessions()` (`src/agent.js:802`)
+  now carry `type`, `model`, `promptStartedAt`, `lastAction:{verb,label,file}`, `ctxTokens`,
+  `ctxPct`; `setStatus` gained the **`waiting`** lifecycle state, set from the MCP-ask
+  round-trip (`registerAsk`/`resolveAsk`) and cleared back to `working` on answer/timeout.
+- **§7.2 transport — MVP poll, not a new aggregate SSE.** The roster polls
+  `/api/agent/sessions` every 2.5 s (`refreshRoster`), with a 1 s client tick advancing the
+  elapsed timers off the cached roster (`cockpitTick`). The dedicated project-scoped SSE
+  (§3.1c) remains the future optimization.
+- **§7.3–6 Now / Latest / Next / sparkline / route cutover — done** in `public/app.js`
+  (`renderCockpit` and friends, ~`:1294`) + cockpit CSS in `public/style.css`.
+- **Still open (as flagged in §3 / §6):** live **agent type** is hardcoded `claude` (Drive
+  only spawns claude); **session↔plan** association and **commit→agent** attribution are not
+  captured, so commit-burst rows carry no agent label; the two-worlds clock skew (live
+  runtime vs 2 s ingest poll) is unresolved.
+
+The target design was the mockup `viberate-cockpit.jsx`. Every current-state claim below
+cites a real file/symbol; inferences are marked **[assume]**.
 
 ## TL;DR — two findings that reframe the whole migration
 

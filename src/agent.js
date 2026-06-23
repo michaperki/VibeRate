@@ -80,9 +80,14 @@ export function registerAsk(sessionId, questions) {
   if (!session) return null;
   const askId = randomUUID();
   emit(session, { kind: 'ask', askId, questions: Array.isArray(questions) ? questions : [] });
+  // The turn's child is alive but blocked on the human — surface a real `waiting`
+  // lifecycle state (PLAN_COCKPIT.md §3.1) so the cockpit roster can sort
+  // needs-attention agents first. Cleared back to `working` when the ask settles.
+  setStatus(session, 'waiting');
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       if (pendingAsks.delete(askId)) {
+        if (session.child) setStatus(session, 'working'); // unblocked: agent proceeds
         emit(session, { kind: 'ask_resolved', askId, timedOut: true });
         resolve({ timedOut: true, selections: [] });
       }
@@ -99,7 +104,10 @@ export function resolveAsk(askId, selections) {
   clearTimeout(pending.timer);
   pendingAsks.delete(askId);
   const session = sessions.get(pending.sessionId);
-  if (session) emit(session, { kind: 'ask_resolved', askId });
+  if (session) {
+    if (session.child) setStatus(session, 'working'); // answered: turn resumes
+    emit(session, { kind: 'ask_resolved', askId });
+  }
   pending.resolve({ selections: Array.isArray(selections) ? selections : [] });
   return true;
 }
@@ -270,6 +278,42 @@ const PERMISSION_MODES = new Set(['default', 'plan', 'acceptEdits', 'bypassPermi
 
 const MAX_EVENTS = Number(process.env.VBRT_AGENT_MAX_EVENTS || 2000);
 
+// Context-window size for a model id — 1M for the [1m]/-1m long-context builds,
+// 200k otherwise. Mirrors the client's driveCtxWindow (public/app.js) so the
+// denormalized ctx% on the roster payload matches the per-session pill exactly.
+function windowOf(model) {
+  const m = String(model || '').toLowerCase();
+  return m.includes('[1m]') || m.includes('-1m') ? 1_000_000 : 200_000;
+}
+
+// One tool call → a compact {verb,label} for the cockpit roster's "current task"
+// line, so the list endpoint carries the agent's last action without a client
+// having to hold a per-session SSE just to read it. Verb mapping mirrors the live
+// brain's verbFor (read/edit/write/run/plan); the label is the touched file's
+// basename when there is one, else the bare tool name.
+function summarizeAction(name, input) {
+  const n = String(name || '').toLowerCase();
+  let verb = 'read';
+  if (/update_plan|todowrite|exit_plan|plan_mode/.test(n)) verb = 'plan';
+  else if (/write|create/.test(n)) verb = 'write';
+  else if (/edit|apply_patch|patch|notebook|multiedit/.test(n)) verb = 'edit';
+  else if (/bash|exec|shell|\brun\b|command|terminal/.test(n)) verb = 'run';
+  const file = input && (input.file_path || input.path || input.notebook_path);
+  const label = file ? String(file).split(/[\\/]/).pop() : (name || 'tool');
+  return { verb, label, file: file ? String(file) : null };
+}
+
+// Fold a raw Anthropic usage blob into the session's denormalized context meter.
+// The input side (fresh + both cache buckets) is the context the model actually
+// saw — the same sum the per-session pill shows (driveUpdateCtx).
+function recordUsage(session, usage) {
+  if (!usage) return;
+  const ctx = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+  if (!ctx) return;
+  session.ctxTokens = ctx;
+  session.ctxPct = Math.min(100, Math.round((ctx / windowOf(session.model)) * 100));
+}
+
 // In-memory registry of sessions this process owns. Lives only as long as the
 // server does; the durable record is the JSONL the spawned binary writes.
 const sessions = new Map();
@@ -288,10 +332,19 @@ function createSession({ cwd, permissionMode, projectSlug = null }) {
     permissionMode,
     projectSlug, // bound project (if any); drives the turn-end ingest into the rail
     claudeSessionId: null, // filled from the first `system/init` event
-    status: 'starting', // starting | working | idle | exited | error
+    status: 'starting', // starting | working | waiting | idle | exited | error
     createdAt: now(),
     lastEventAt: now(),
     title: null, // first user prompt, for the session list
+    // Cockpit roster fields (PLAN_COCKPIT.md §3.1): denormalized onto publicView so
+    // the "Now" zone can render a live per-agent row off the one-shot list endpoint —
+    // no per-session SSE required. type is fixed today (Drive only spawns claude).
+    type: 'claude',
+    model: null, // from the first system/init event
+    promptStartedAt: null, // turn-start stamp → the roster's ticking elapsed timer
+    lastAction: null, // { verb, label, file } — the agent's most recent tool call
+    ctxTokens: 0, // live context-window fill (input side), from interim usage
+    ctxPct: 0, // ctxTokens / windowOf(model), 0–100
     // Per-turn flags: did we stream this block kind via partials? If so we skip
     // it in the consolidated `assistant` message to avoid double-rendering.
     streamedText: false,
@@ -337,6 +390,7 @@ function handleRawEvent(session, obj) {
 
   if (type === 'system' && obj.subtype === 'init') {
     if (obj.session_id && !session.claudeSessionId) session.claudeSessionId = obj.session_id;
+    if (obj.model) session.model = obj.model; // window size for the roster ctx meter
     emit(session, {
       kind: 'system',
       sessionId: obj.session_id || null,
@@ -384,7 +438,7 @@ function handleRawEvent(session, obj) {
       // those made the main pill lurch down then snap back up mid-turn — the "bounce"
       // bug. The stream-json line tags sub-agent events with parent_tool_use_id; only
       // the main agent's calls (no parent) reflect the real window fill, so gate on it.
-      if (!obj.parent_tool_use_id) emit(session, { kind: 'usage', usage: e.message.usage });
+      if (!obj.parent_tool_use_id) { recordUsage(session, e.message.usage); emit(session, { kind: 'usage', usage: e.message.usage }); }
     }
     return;
   }
@@ -398,7 +452,7 @@ function handleRawEvent(session, obj) {
         if (!session.streamedText) emit(session, { kind: 'assistant_text', text: block.text });
       } else if (block.type === 'thinking' && block.thinking) {
         if (!session.streamedThinking) emit(session, { kind: 'thinking', text: block.thinking });
-      } else if (block.type === 'tool_use') emit(session, { kind: 'tool_use', id: block.id || null, name: block.name, input: block.input || {} });
+      } else if (block.type === 'tool_use') { session.lastAction = summarizeAction(block.name, block.input || {}); emit(session, { kind: 'tool_use', id: block.id || null, name: block.name, input: block.input || {} }); }
     }
     if (obj.error) emit(session, { kind: 'error', message: String(obj.error) });
     return;
@@ -421,6 +475,7 @@ function handleRawEvent(session, obj) {
   }
 
   if (type === 'result') {
+    recordUsage(session, obj.usage); // keep the roster ctx meter fresh at turn's end
     emit(session, {
       kind: 'result',
       isError: !!obj.is_error,
@@ -504,6 +559,10 @@ function runTurn(session, prompt, { resume }) {
   // Fresh per-turn streaming state (see handleRawEvent / publicView).
   session.streamedText = false;
   session.streamedThinking = false;
+  // Stamp the turn start so the cockpit roster's elapsed timer ticks from a real
+  // anchor; clear the prior action so the row reads "thinking…" until the first tool.
+  session.promptStartedAt = now();
+  session.lastAction = null;
   emit(session, { kind: 'user_prompt', text: prompt });
   setStatus(session, 'working');
 
@@ -671,15 +730,17 @@ export async function adoptSession({ claudeSessionId, cwd, projectSlug = null, p
   let lastUsage = null;
   for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].usage) { lastUsage = messages[i].usage; break; } }
   if (lastUsage) {
-    if (lastUsage.model) emit(session, { kind: 'system', model: lastUsage.model });
+    if (lastUsage.model) { session.model = lastUsage.model; emit(session, { kind: 'system', model: lastUsage.model }); }
     // parseClaude normalises usage to {input,cacheRead,cacheCreate,...}; the live
     // pill (driveUpdateCtx) reads the raw Anthropic token keys, so map it back.
-    emit(session, { kind: 'usage', usage: {
+    const usage = {
       input_tokens: lastUsage.input || 0,
       cache_read_input_tokens: lastUsage.cacheRead || 0,
       cache_creation_input_tokens: lastUsage.cacheCreate || 0,
       output_tokens: lastUsage.output || 0,
-    } });
+    };
+    recordUsage(session, usage); // so the cockpit roster shows the real fill on return
+    emit(session, { kind: 'usage', usage });
   }
   emit(session, { kind: 'note', text: '↩ reconnected to your earlier session — continue the conversation below.' });
   return publicView(session);
@@ -741,5 +802,12 @@ function publicView(session) {
     createdAt: session.createdAt,
     lastEventAt: session.lastEventAt,
     seq: session.seq,
+    // Cockpit roster enrichment (PLAN_COCKPIT.md §3.1).
+    type: session.type || 'claude',
+    model: session.model || null,
+    promptStartedAt: session.promptStartedAt || null,
+    lastAction: session.lastAction || null,
+    ctxTokens: session.ctxTokens || 0,
+    ctxPct: session.ctxPct || 0,
   };
 }

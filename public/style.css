@@ -1704,3 +1704,77 @@ body.is-mobile.m-brain-open #m-brain-overlay {
 body.is-mobile .lay-btn, body.is-mobile .filter, body.is-mobile .rail-toggle button { min-height: 34px; }
 body.is-mobile .nav button, body.is-mobile .dv-actions button { min-height: 40px; }
 body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-brainbar-h) - var(--sat, env(safe-area-inset-top, 0px))); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COCKPIT — the calm project home (PLAN_COCKPIT.md): Now / Latest / Next in one
+   narrow column, with the dense Activity stack demoted behind "Full timeline →".
+   ══════════════════════════════════════════════════════════════════════════ */
+.cockpit { display: flex; flex-direction: column; gap: 14px; max-width: 460px; margin: 0 auto; padding-top: 4px; }
+.cockpit .dash-card { padding: 14px 16px; }
+
+/* — Now: aggregate ring + live summary + sparkline + the agent roster — */
+.cockpit-now { display: flex; flex-direction: column; gap: 12px; }
+.ck-now-head { display: flex; align-items: center; gap: 12px; }
+.ck-ring { position: relative; flex: 0 0 auto; width: 46px; height: 46px; display: grid; place-items: center; }
+.ck-ring svg { display: block; }
+.ck-ring-pct { position: absolute; inset: 0; display: grid; place-items: center; font: 600 12px ui-monospace, Menlo, monospace; color: var(--text); }
+.ck-now-sum { flex: 1 1 auto; min-width: 0; }
+.ck-now-line1 { font-weight: 600; font-size: 14px; color: var(--text); }
+.ck-now-line2 { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ck-live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); flex: 0 0 auto; }
+.ck-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--codex); box-shadow: 0 0 6px var(--codex); animation: livepulse 1.4s ease-in-out infinite; }
+.ck-live.off i { background: var(--muted); box-shadow: none; animation: none; }
+@media (prefers-reduced-motion: reduce) { .ck-live i { animation: none; } }
+
+.ck-spark { display: block; width: 100%; height: 26px; }
+
+.ck-roster { display: flex; flex-direction: column; gap: 2px; }
+.ck-agent { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 9px; cursor: pointer; transition: background 0.12s; outline: none; }
+.ck-agent:hover, .ck-agent:focus-visible { background: var(--panel-2); }
+.ck-agent:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.ck-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.ck-dot.working, .ck-dot.starting { background: var(--codex); box-shadow: 0 0 6px var(--codex); animation: livepulse 1.4s ease-in-out infinite; }
+.ck-dot.waiting { background: #d29922; box-shadow: 0 0 6px rgba(210, 153, 34, 0.7); }
+.ck-dot.error, .ck-dot.exited { background: var(--live); }
+@media (prefers-reduced-motion: reduce) { .ck-dot.working, .ck-dot.starting { animation: none; } }
+.ck-agent-main { flex: 1 1 auto; min-width: 0; }
+.ck-agent-top { display: flex; align-items: center; gap: 7px; }
+.ck-agent-title { font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-type { flex: 0 0 auto; font: 600 9px ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 5px; color: var(--claude); background: rgba(169, 120, 255, 0.14); }
+.ck-type.codex { color: var(--codex); background: rgba(46, 207, 143, 0.14); }
+.ck-agent-sub { font-size: 12px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-agent-meta { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.ck-elapsed { font: 500 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+.ck-ctx { display: inline-flex; align-items: center; gap: 5px; font: 500 10px ui-monospace, Menlo, monospace; color: var(--muted); }
+.ck-ctx-bar { width: 34px; height: 4px; border-radius: 99px; background: var(--border); overflow: hidden; }
+.ck-ctx-bar i { display: block; height: 100%; border-radius: 99px; transition: width 0.4s ease, background 0.4s ease; }
+.ck-empty { font-size: 12.5px; color: var(--muted); line-height: 1.5; padding: 10px 6px; }
+
+/* — Latest: calm event feed — */
+.cockpit-latest .ck-ev { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-top: 1px solid var(--border); }
+.cockpit-latest .ck-ev:first-of-type { border-top: 0; }
+.ck-ev[data-open], .ck-ev[data-bh-doc], .ck-ev[data-burst] { cursor: pointer; border-radius: 8px; }
+.ck-ev[data-open]:hover, .ck-ev[data-bh-doc]:hover, .ck-ev[data-burst]:hover { background: var(--panel-2); }
+.ck-ev-icon { flex: 0 0 auto; width: 18px; text-align: center; font-size: 13px; color: var(--muted); }
+.ck-ev-icon.brain { color: var(--doc); }
+.ck-ev-main { flex: 1 1 auto; min-width: 0; }
+.ck-ev-title { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-ev-sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-burst-list { white-space: normal; line-height: 1.5; }
+.ck-burst-list[hidden] { display: none; }
+.ck-ev-ago { flex: 0 0 auto; font-size: 11px; color: var(--muted); }
+
+/* — Next: plans closest to done — */
+.cockpit-next .ck-plan { padding: 8px 6px; border-radius: 8px; cursor: pointer; }
+.cockpit-next .ck-plan:hover { background: var(--panel-2); }
+.ck-plan-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
+.ck-plan-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-plan-meta { flex: 0 0 auto; font: 500 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+.ck-bar { height: 5px; border-radius: 99px; background: var(--border); overflow: hidden; }
+.ck-bar span { display: block; height: 100%; border-radius: 99px; transition: width 0.4s ease; }
+
+/* — Full-timeline link — */
+.cockpit-full { align-self: center; font: inherit; font-size: 12.5px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 8px; padding: 7px 16px; cursor: pointer; transition: color 0.12s, border-color 0.12s; }
+.cockpit-full:hover { color: var(--text); border-color: var(--accent); }
+
+body.is-mobile .cockpit { max-width: none; }
