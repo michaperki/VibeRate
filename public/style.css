@@ -1516,9 +1516,7 @@ body.is-mobile.m-brain-open #m-brainbar .m-grip::after { content: ""; }
    only at the very top, and only in the wrapped WebView (Safari never insets the
    document). Locking the document (body overflow:hidden) and giving #app its own
    overflow-y removes that scroll-origin state entirely: there's no document scroll
-   for WebKit to inset, so the viewport — and the header — stay put. The sticky
-   .dv-head-stack now resolves against #app's scrollport (top:0 = viewport top), so
-   its existing top offsets are unchanged. */
+   for WebKit to inset, so the viewport — and the header — stay put. */
 html:has(body.is-mobile) { overflow: hidden; }
 body.is-mobile { height: 100%; overflow: hidden; }
 body.is-mobile #app {
@@ -1529,11 +1527,9 @@ body.is-mobile #app {
 body.is-mobile.m-driving #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
 body.is-mobile #main { display: block; min-width: 0; }
 body.is-mobile .pane { height: auto; min-height: 40dvh; }
-/* The document scrolls on mobile (not the pane), so #conversation must NOT stay a
-   scroll container — .pane's `overflow-y:auto` would otherwise capture the flipped
-   flow's sticky .dv-head-stack and clamp it down by its `top` offset, leaving a dead
-   gap (the height of the fixed header) above the Drive title + composer. Resolve the
-   sticky against the viewport instead. */
+/* #app scrolls on mobile, so #conversation must NOT stay a nested scroll container.
+   Let the Drive sticky stack resolve against #app and keep the transcript in one
+   continuous mobile flow. */
 body.is-mobile #conversation { width: 100%; padding: 0; overflow: visible; }
 body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
 
@@ -1542,11 +1538,9 @@ body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom
    and drop its back button: the fixed brain strip carries "← dashboard" instead. */
 body.is-mobile .dv-toolbar { position: static; }
 body.is-mobile .dv-toolbar .back-dash { display: none; }
-/* Flipped flow on mobile: the sticky composer stack must pin BELOW the fixed app
-   bar + brain strip, not behind them at viewport top. */
-body.is-mobile.m-driving .dv-head-stack {
-  top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px));
-}
+/* #app's mobile padding already clears the fixed app bar + brain strip. Adding that
+   offset again makes the composer stick in the middle of the screen. */
+body.is-mobile.m-driving .dv-head-stack { top: 0; }
 
 /* Reader nav row clipped at phone width (UI_FEEDBACK P0 #3): the controls used to
    wrap/clip mid-word ("expa al"). Scroll the row horizontally instead, mirroring

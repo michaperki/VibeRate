@@ -27,6 +27,16 @@
 > bottom on mobile. Where this plan says "composer pinned bottom," read "pinned top,
 > newest-first." See ROADMAP Phase 3 "top-anchored flipped flow."
 >
+> **Dogfooding regressions (2026-06-23):** TestFlight exposed a WKWebView-only tall
+> app header caused by WebKit insetting the document scroller at scroll origin. The
+> fix moved mobile scrolling from the document to `#app`. Any mobile surface that
+> still assumes `window`/document/`#conversation` owns scroll can drift: Drive's
+> sticky composer was double-offset by the app+brain bars, the Convos sheet backdrop
+> could block its own rail, and temporary safe-area probes must be removed once the
+> root cause is confirmed. Guardrail: mobile `#app` is the scrollport; fixed chrome
+> is cleared by `#app` padding; sticky children inside that flow should use `top: 0`
+> unless they intentionally escape the `#app` scrollport.
+>
 > **Deferred (open question, by design):** project home is still the **dashboard**, with
 > the brain strip on top and Drive (the composer surface) one tap away via the rail. The
 > chat-first "conversation IS the home" default is the one-line `data-screen` flip noted

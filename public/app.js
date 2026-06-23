@@ -2763,7 +2763,10 @@ function renderSessionReader() {
     </div>
     <div class="conv-body">${body}</div>`;
 
-  el('#conversation').scrollTop = 0;
+  {
+    const sp = document.body.classList.contains('is-mobile') ? el('#app') : el('#conversation');
+    if (sp) sp.scrollTop = 0;
+  }
   wireConversation(units.length);
   wireReaderScroll();
   clampReaderCards();
@@ -3734,7 +3737,7 @@ function openDriveForProject(slug) {
   state.driveProvisional = null;
   state.driveProject = slug || null;
   el('#conversation').innerHTML = driveShell('✦ Drive', 'checking workspace…', '<div class="dv-body"><div class="empty">Checking workspace…</div></div>');
-  el('#conversation').scrollTop = 0;
+  driveScroll(true);
   wireDriveBackDash();
   if (!slug) return renderDrivePrompt(null, null); // ad-hoc session in the host default cwd
   refreshDriveWorkspace(slug);
@@ -3774,7 +3777,7 @@ function renderDriveSetup(slug, st) {
        <div class="dv-actions"><button id="dv-clone">Clone &amp; continue</button></div>
      </div>`,
   );
-  el('#conversation').scrollTop = 0;
+  driveScroll(true);
   wireDriveBackDash();
   el('#dv-clone').addEventListener('click', async () => {
     const repoVal = el('#dv-repo').value.trim();
@@ -3828,7 +3831,7 @@ function renderDrivePrompt(slug, st) {
        ${driveHistoryHtml(slug)}
      </div>`,
   );
-  el('#conversation').scrollTop = 0;
+  driveScroll(true);
   wireDriveBackDash();
   state._driveHistory = null;
   wireDriveHistory(slug);
@@ -3938,7 +3941,7 @@ function renderDriveView() {
       </div>
       <div class="dv-body"><div id="dv-transcript" class="dv-transcript"></div></div>
     </div>`;
-  el('#conversation').scrollTop = 0;
+  driveScroll(true);
   wireDriveBackDash();
   driveSetStatus(d.status || 'starting');
   el('#dv-send').addEventListener('click', driveSend);
@@ -3955,9 +3958,8 @@ function renderDriveView() {
   // Sticky-TOP intent (flipped flow): the newest turn is at the top, so we stay glued
   // to the top only while the reader is parked there. Once they scroll down to read
   // history, new activity no longer yanks them up — it surfaces the "new activity" pill
-  // instead. The pane (#conversation) is the scroll container; its children get
-  // replaced, so the listener (wired once) survives.
-  const pane = el('#conversation');
+  // instead. Mobile scrolls #app; desktop still scrolls #conversation.
+  const pane = driveScrollport();
   state._drivePinned = true;
   if (!pane._driveScrollWired) {
     pane._driveScrollWired = true;
@@ -4338,17 +4340,20 @@ function driveResultMeta(ev) {
   ].filter(Boolean).join(' · ');
 }
 
+function driveScrollport() {
+  return document.body.classList.contains('is-mobile')
+    ? (el('#app') || document.scrollingElement || document.documentElement)
+    : el('#conversation');
+}
+
 // Flipped flow: the newest turn is at the TOP, so "keep up with activity" means
 // staying at scrollTop 0. `force` (the jump pill / explicit sends) always snaps to
 // the top. Otherwise, if they've scrolled down to read history, surface the "new
 // activity" pill instead of yanking them around.
 function driveScroll(force) {
-  const c = el('#conversation'); if (!c) return;
+  const c = driveScrollport(); if (!c) return;
   if (force || state._drivePinned) {
     c.scrollTop = 0;
-    // Mobile scrolls the document (not the pane), so an explicit snap also pulls the
-    // window up so the just-sent message + forming reply sit under the sticky composer.
-    if (force && document.body.classList.contains('is-mobile')) window.scrollTo({ top: 0 });
     state._drivePinned = true;
     const j = el('#dv-jump'); if (j) j.classList.add('hidden');
   } else {
@@ -5544,55 +5549,6 @@ async function boot() {
   const byId = (id) => document.getElementById(id);
   const isMobile = () => body.classList.contains('is-mobile');
   const brainOpen = () => body.classList.contains('m-brain-open');
-
-  // ── TEMP LIVE DIAGNOSTIC (tall-header-at-scroll-top, WKWebView-only) ────────
-  // The header is tall only at scrollY 0 and snaps right after a tiny scroll, in
-  // TestFlight only. CSS compositing + overscroll-behavior didn't move it, so the
-  // cause is native (scroll content-inset vs document bounce vs visual-viewport
-  // offset). These can't be told apart from a single static reading — we need to
-  // see the numbers change between the "tall" (top) and "normal" (scrolled) state.
-  // This badge updates live on scroll/resize. Read it at the very top, then after
-  // scrolling a little, and report both. Tap to dismiss. Remove once diagnosed.
-  function liveDebug() {
-    try {
-      if (!mq.matches && location.hash.indexOf('safedebug') < 0) return;
-      const badge = document.createElement('div');
-      badge.id = 'safedebug-badge';
-      badge.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:99999;max-width:96vw;'
-        + 'background:#000;color:#0f0;font:11px/1.35 ui-monospace,monospace;padding:8px 10px;'
-        + 'border:1px solid #0f0;border-radius:8px;white-space:pre;pointer-events:auto';
-      badge.addEventListener('click', () => badge.remove());
-      document.body.appendChild(badge);
-      const vv = window.visualViewport;
-      // #app is now the scroller on mobile (document is locked) — listen there, not window.
-      const scroller = byId('app') || document.scrollingElement || document.documentElement;
-      const probe = document.createElement('div');
-      probe.style.cssText = 'position:fixed;top:0;left:0;height:env(safe-area-inset-top,0px);width:0;visibility:hidden';
-      document.body.appendChild(probe);
-      let minH = 99999, maxH = 0; // track innerHeight range — the 47px toggle should now be gone
-      function paint() {
-        const bar = byId('m-appbar');
-        const r = bar ? bar.getBoundingClientRect() : null;
-        const barTop = r ? r.top : 0;
-        const sat = probe.getBoundingClientRect().height;
-        const ih = window.innerHeight;
-        if (ih < minH) minH = ih; if (ih > maxH) maxH = ih;
-        badge.textContent =
-          `app.scrollTop = ${Math.round(scroller.scrollTop)}\n`
-          + `bar.top = ${barTop.toFixed(1)}   bar.h = ${r ? r.height.toFixed(1) : '?'}\n`
-          + `sat=${sat.toFixed(1)}  vv.offTop=${vv ? vv.offsetTop.toFixed(1) : 'n/a'}\n`
-          + `innerH=${ih}  range[${minH}-${maxH}]  Δ=${maxH - minH}\n`
-          + `scroller=${scroller.id || scroller.tagName}`;
-      }
-      paint();
-      scroller.addEventListener('scroll', paint, { passive: true });
-      window.addEventListener('scroll', paint, { passive: true });
-      window.addEventListener('resize', paint);
-      if (vv) { vv.addEventListener('resize', paint); vv.addEventListener('scroll', paint); }
-    } catch (e) { /* diagnostic only */ }
-  }
-  window.addEventListener('load', () => setTimeout(liveDebug, 400));
-  // ───────────────────────────────────────────────────────────────────────────
 
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
