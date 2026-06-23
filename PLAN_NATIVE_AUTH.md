@@ -88,10 +88,33 @@ code execution on the host), not just read scope. Accepted for the single-user
 instance; before multi-user, move Drive to a real admin *session* (deep-link OAuth)
 or a separate, narrowly-scoped Drive credential.
 
+## Drive's live stream (SSE) in the native app
+
+Third layer of the same cookie split, found 2026-06-23 on the first TestFlight drive:
+the message you sent and the agent's tool calls showed up in **Convos**, but the
+**Drive** chat rendered *nothing* — not even your own bubble — while the working timer
+kept ticking.
+
+Cause: Drive paints every bubble from the live SSE transcript (`driveOpenStream` →
+`EventSource` → `driveRender`), and `driveSend` doesn't optimistically render — it POSTs
+and waits for the server to echo `user_prompt` over the stream. But `EventSource` **can't
+set an `Authorization` header**, and the native app has no session cookie, so the
+admin-guarded `/api/agent/sessions/:id/stream` 403'd and emitted zero events. Every other
+call worked because the fetch helpers carry the Bearer token — hence Convos populated,
+Drive stayed blank, and the timer (a client-local interval seeded by the authorized
+session fetch) ticked on regardless.
+
+Fix: the stream route accepts the admin token as an `?access_token=` query param, folded
+back into the Authorization header by a route-scoped `streamGuard`; the client appends
+`state.token` to the EventSource URL. Token-in-URL is logged, but it's the same single-user
+RCE-capable token from above — no new trust boundary. Deep-link/native OAuth retires this
+alongside the tradeoffs above.
+
 ## Status
 
 - [x] Documented root cause (cookie context split; both providers; webview block).
 - [x] Token sign-in grants full account scope (`currentOwners` + `findUserByOwnerHash`).
 - [x] Drive unlocked in the app via admin-linked token (`adminEmailFor` in the guard).
+- [x] Drive live stream authenticates in the app via `?access_token=` (`streamGuard`).
 - [ ] Deep-link or native OAuth — deferred with onboarding (also retires the
       RCE-capable-token tradeoff above).

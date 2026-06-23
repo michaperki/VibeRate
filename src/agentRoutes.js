@@ -81,6 +81,21 @@ export function mountAgent(app, opts = {}) {
     ? (req, res, next) => (isLoopbackPeer(req) ? next() : adminGuard(req, res, next))
     : loopbackOnly;
 
+  // EventSource can't set an Authorization header, and the native/TestFlight app has no
+  // OAuth session cookie (PLAN_NATIVE_AUTH.md) — so the live SSE stream would 403 there
+  // even though every fetch-based call authenticates fine with the Bearer token. Let the
+  // stream route ALSO accept the admin token as an `?access_token=` query param: we fold
+  // it into the Authorization header so the normal guard still does the real check. Token-
+  // in-URL gets logged, but the instance is single-user and that token is already RCE-
+  // capable, so this widens no trust boundary. Scoped to this one route; everything else
+  // stays header/cookie-only.
+  const streamGuard = (req, res, next) => {
+    if (!req.headers['authorization'] && req.query && req.query.access_token) {
+      req.headers['authorization'] = 'Bearer ' + req.query.access_token;
+    }
+    return guard(req, res, next);
+  };
+
   // Make sure the default working directory exists so the very first session can
   // start (on Fly this is a dir on the persistent volume, not the app source).
   try { fs.mkdirSync(defaultCwd, { recursive: true }); } catch { /* best effort */ }
@@ -263,7 +278,7 @@ export function mountAgent(app, opts = {}) {
   // we honor over the (connect-time, frozen) `?after` query param — otherwise a
   // dropped EventSource reconnects to the *original* `after=0` URL and replays the
   // whole log, doubling the client transcript. See archive/drive-reconciliation/DRIVE_LIVE_STREAM_DUP.md.
-  app.get('/api/agent/sessions/:id/stream', guard, (req, res) => {
+  app.get('/api/agent/sessions/:id/stream', streamGuard, (req, res) => {
     const lastEventId = Number(req.headers['last-event-id']);
     const after = Number.isFinite(lastEventId) ? lastEventId : (Number(req.query.after || 0) || 0);
     res.set({

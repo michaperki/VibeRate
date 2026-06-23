@@ -3942,7 +3942,7 @@ function renderDriveView() {
   wireDriveBackDash();
   driveSetStatus(d.status || 'starting');
   el('#dv-send').addEventListener('click', driveSend);
-  el('#dv-stop').addEventListener('click', () => state.drive && drivePost('/sessions/' + state.drive.id + '/stop').catch((e) => driveBanner(e.message, 'bad')));
+  el('#dv-stop').addEventListener('click', driveStopClick);
   el('#dv-new').addEventListener('click', () => openDriveForProject(state.driveProject || state.project));
   el('#dv-followup').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') driveSend(); });
   el('#dv-jump').addEventListener('click', () => driveScroll(true));
@@ -3986,6 +3986,29 @@ async function driveSend() {
     await drivePost('/sessions/' + state.drive.id + '/message', { prompt });
     ta.value = '';
   } catch (e) { driveBanner(e.message, 'bad'); }
+}
+
+// Stopping a turn mid-flight kills the agent's work, and on a phone "Stop turn" sits a
+// thumb-width from "Send" — a stray tap shouldn't be able to interrupt the agent. So the
+// button arms on the first tap (relabels to "Tap to confirm" + warning style) and only
+// posts the stop on a confirming second tap. The arm auto-disarms after a few seconds so
+// a forgotten first tap can't linger as a live trigger.
+let _driveStopTimer = null;
+function driveDisarmStop() {
+  if (_driveStopTimer) { clearTimeout(_driveStopTimer); _driveStopTimer = null; }
+  const btn = el('#dv-stop');
+  if (btn) { btn.classList.remove('armed'); btn.textContent = 'Stop turn'; }
+}
+function driveStopClick() {
+  if (!state.drive) return;
+  const btn = el('#dv-stop');
+  if (!btn || !btn.classList.contains('armed')) {
+    if (btn) { btn.classList.add('armed'); btn.textContent = 'Tap to confirm'; }
+    _driveStopTimer = setTimeout(driveDisarmStop, 4000);
+    return;
+  }
+  driveDisarmStop();
+  drivePost('/sessions/' + state.drive.id + '/stop').catch((e) => driveBanner(e.message, 'bad'));
 }
 
 function driveBusy() {
@@ -4639,7 +4662,12 @@ function driveRender(ev) {
 function driveOpenStream(id, after) {
   if (state.drive && state.drive.es) state.drive.es.close();
   if (state.drive) state.drive.lastSeq = after || 0;
-  const es = new EventSource('/api/agent/sessions/' + id + '/stream?after=' + (after || 0));
+  // EventSource can't carry the Bearer header our fetch helpers use, and the native
+  // app has no session cookie (PLAN_NATIVE_AUTH.md), so the stream would 403 in
+  // TestFlight and Drive would render nothing. Pass the admin token as a query param;
+  // the server folds it back into Authorization for the guard. See streamGuard.
+  const tok = state.token ? '&access_token=' + encodeURIComponent(state.token) : '';
+  const es = new EventSource('/api/agent/sessions/' + id + '/stream?after=' + (after || 0) + tok);
   es.onmessage = (m) => {
     if (!state.drive || state.drive.id !== id) return;
     let ev; try { ev = JSON.parse(m.data); } catch { return; }
