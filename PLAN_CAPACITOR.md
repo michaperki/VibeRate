@@ -4,6 +4,20 @@ The cheapest, lowest-friction path to a real App-Store iOS app, chosen because i
 the existing dev loop intact and never requires owning a Mac. Decided & scaffolded
 2026-06-22.
 
+> **STATUS: PAUSED / DORMANT (2026-06-23).** We stepped back from TestFlight as the
+> dogfooding surface. Every hard bug in the build lived at the WKWebView boundary — the
+> recurring tall header (safe-area double-count), the OAuth cookie-jar split, the blank
+> Drive stream — and fixing them cost real security debt (RCE-capable token, token-in-URL;
+> `PLAN_NATIVE_AUTH.md`). Daily dogfooding moved back to **mobile Safari / Add-to-Home-Screen
+> standalone PWA**, where `env(safe-area-inset-*)` and cookies just work (see `STORY.md`
+> Ch. 11). The scaffold below is **kept, not deleted** — it's config + CI pointing at the
+> live URL, cheap to park. The iOS-only cruft that had leaked into the shared web app (the
+> `?satdebug` diagnostic + the keyboard-close safe-area measurement loop) was removed from
+> `public/app.js`. **If reviving this path, do it properly:** deep-link OAuth (RFC 8252) to
+> retire the auth hacks, and reintroduce the WKWebView safe-area compensation (git
+> `b73e4af..5e45389`) only inside the wrapper, not the shared app. Everything below is the
+> original plan, preserved for that revival.
+
 ## The decision
 
 Wrap the existing web SPA in a **Capacitor** native shell and build it on a **cloud Mac

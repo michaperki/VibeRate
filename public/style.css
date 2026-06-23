@@ -1429,22 +1429,15 @@ body.is-mobile .dv-copy { opacity: .75; }
 
 body.is-mobile { --m-appbar-h: 52px; --m-brainbar-h: 47px; }
 
-/* --sat / --sab are the safe-area insets in px, computed by the inset-tracker in app.js
-   (mobileInit); the mobile chrome below sizes off them, falling back to live env() only
-   until app.js has a value. The wrapped-WKWebView bug (diagnosed on device, ?satdebug):
-   env(safe-area-inset-top) is a steady 47px throughout — it does NOT inflate. What moves
-   is window.innerHeight, which drops by exactly the top inset after the Drive composer's
-   keyboard closes and stays there: WKWebView starts applying the top safe area as a NATIVE
-   content inset, so the env()-driven padding stacks a second inset on top and the header
-   reads "tall". So --sat is not raw env() but env() MINUS the native inset already applied
-   (nativeTop = full-coverage innerHeight − current innerHeight, sampled keyboard-down):
-   native inset off → pad the full 47; native inset on → pad 0 and let the native one do
-   the job, keeping the visible offset at exactly one safe area. --sab takes the raw bottom
-   inset (the double-count is top-only). The var stays UNSET until app.js reads a non-zero
-   env() (WKWebView reports 0 for a tick at boot; a hard-frozen 0 once slid the header under
-   the status bar and bricked it). env() is also the fallback for plain mobile web, where
-   it's stable. (The #app-scroller fix killed the rubber-band trigger of the same native
-   inset; the keyboard is a separate one CSS can't gate.) */
+/* --sat / --sab are the safe-area insets in px. Nothing sets these vars anymore, so the
+   mobile chrome below always uses the live env(safe-area-inset-*) fallback — correct for
+   mobile Safari and the Add-to-Home-Screen standalone PWA (our dogfooding target), where
+   env() is stable. A JS tracker in app.js used to compute --sat to compensate for a
+   Capacitor/WKWebView "double-count" (the wrapper applied the top inset a second time as a
+   native content inset, making the header read tall after the keyboard closed); it was
+   removed 2026-06-23 with the step back from TestFlight — see app.js mobileInit and
+   PLAN_CAPACITOR.md. The vars are kept as the fallback's first arg so the compensation can
+   be reintroduced in one place if the Capacitor path is ever revived. */
 
 /* Kill the iOS rubber-band bounce on the document scroller. The overscroll zone at
    the top is what exposes/inflates the fixed app bar at scrollY 0 in TestFlight's

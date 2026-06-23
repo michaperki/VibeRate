@@ -5550,171 +5550,19 @@ async function boot() {
   const isMobile = () => body.classList.contains('is-mobile');
   const brainOpen = () => body.classList.contains('m-brain-open');
 
-  // --- compensate for WKWebView's native safe-area double-counting (the keyboard bug) ---
-  // The fixed app bar's height/padding (and #app's padding-top) are --sat-driven, falling
-  // back to env(safe-area-inset-top). DIAGNOSED ON DEVICE (?satdebug): env()/the probe is
-  // a rock-steady 47px the whole time — it never inflates. The two prior fixes chased a
-  // value that wasn't moving. What actually changes is window.innerHeight: it drops by
-  // exactly the top inset (810→763) after the composer keyboard CLOSES and stays there
-  // until the app restarts. WKWebView begins applying the top safe area as a *native*
-  // content inset (pushing our content down ~47px); our env()-driven padding then stacks a
-  // SECOND 47px on top, so the header gains a ~47px empty band and reads "tall". It's
-  // safe-area DOUBLE-COUNTING, not env() inflation.
+  // --- safe-area insets ---
+  // Handled entirely in CSS via env(safe-area-inset-*) (the mobile chrome reads
+  // var(--sat, env(...)) / var(--sab, env(...)), and nothing sets those vars, so the
+  // live env() value is always used). That's correct for mobile Safari and the
+  // Add-to-Home-Screen standalone PWA — our dogfooding target.
   //
-  // Fix: subtract whatever the native view is already insetting, so the visible offset is
-  // always exactly one safe area. nativeTop = screenFull − innerHeight (measured with the
-  // keyboard DOWN, where innerHeight reflects the native inset and nothing else); our
-  // padding = realTop − nativeTop. Native inset off (full height) → pad the full 47; native
-  // inset on → pad 0 and let the native inset do the job. screenFull is the largest
-  // keyboard-down innerHeight seen = the un-inset, full-coverage height (810 at boot).
-  // realTop/realBot come from the (here reliable) env() probe; 0-at-boot is rejected and we
-  // poll until it populates, so we never freeze the header to a hard 0 (the old brick).
-  const SAT_MAX = 70, SAB_MAX = 50; // largest real iOS portrait insets are ~59/34px.
-  let realTop = null, realBot = null, screenFull = 0;
-  function readInset(edge) {
-    const probe = document.createElement('div');
-    probe.style.cssText = 'position:fixed;left:0;width:0;visibility:hidden;pointer-events:none;'
-      + (edge === 'top'
-        ? 'top:0;height:env(safe-area-inset-top,0px)'
-        : 'bottom:0;height:env(safe-area-inset-bottom,0px)');
-    document.body.appendChild(probe);
-    const h = probe.getBoundingClientRect().height;
-    probe.remove();
-    return Math.round(h);
-  }
-  // Learn the true device insets from a sane probe reading. min() guards against a
-  // transient over-read latching too high; 0 (not yet populated) and > cap are rejected.
-  function learnInsets() {
-    const t = readInset('top'), b = readInset('bottom');
-    if (t > 0 && t <= SAT_MAX) realTop = realTop == null ? t : Math.min(realTop, t);
-    if (b > 0 && b <= SAB_MAX) realBot = realBot == null ? b : Math.min(realBot, b);
-    return realTop != null;
-  }
-  // Write the safe-area vars, compensating --sat for the native top inset. --sab isn't
-  // double-counted (the bug is top-only), so it just takes the learned bottom inset.
-  function applyInsets() {
-    const root = document.documentElement.style;
-    if (realBot != null) root.setProperty('--sab', realBot + 'px');
-    if (realTop == null) return; // not learned yet → CSS keeps the live env() fallback
-    const nativeTop = Math.max(0, screenFull - window.innerHeight);
-    const pad = Math.max(0, Math.min(realTop, realTop - nativeTop));
-    root.setProperty('--sat', pad + 'px');
-  }
-  // Keyboard up → innerHeight is dominated by the keyboard, not the inset, so the formula
-  // is meaningless; only sample geometry when it's down.
-  function kbDown() {
-    const vv = window.visualViewport;
-    return !vv || (window.innerHeight - vv.height) <= 120;
-  }
-  function syncSafeArea() {
-    learnInsets();
-    if (!kbDown()) return;
-    if (window.innerHeight > screenFull) screenFull = window.innerHeight; // full (un-inset) coverage
-    applyInsets();
-  }
-  // Boot: poll until env() populates (WKWebView reports 0 for a tick), then sync.
-  syncSafeArea();
-  if (realTop == null) {
-    let tries = 0;
-    const tick = setInterval(() => { syncSafeArea(); if (realTop != null || ++tries >= 20) clearInterval(tick); }, 250);
-  }
-  // Re-sync after every keyboard close — that's when WKWebView toggles the native inset
-  // and innerHeight settles to its new (reduced) value. A beat lets it settle first.
-  if (window.visualViewport) {
-    let kbWasUp = false;
-    window.visualViewport.addEventListener('resize', () => {
-      const up = (window.innerHeight - window.visualViewport.height) > 120;
-      if (kbWasUp && !up) setTimeout(syncSafeArea, 300); // keyboard just closed
-      kbWasUp = up;
-    });
-  }
-  // Orientation genuinely changes the insets and the full-coverage height; reset and
-  // re-establish. Clear --sat first so CSS falls back to live env() until a value lands.
-  window.addEventListener('orientationchange', () => setTimeout(() => {
-    realTop = realBot = null; screenFull = 0;
-    document.documentElement.style.removeProperty('--sat');
-    document.documentElement.style.removeProperty('--sab');
-    setTimeout(syncSafeArea, 250);
-  }, 350));
-
-  // --- TEMP on-device safe-area diagnostic ---
-  // The env()/probe-frozen approach has now failed twice on Mike's TestFlight device,
-  // which means our model of what the probe actually READS there is wrong. This pins a
-  // live readout to the bottom of the screen so we can see the real numbers across a
-  // keyboard open/close instead of guessing. The wrapped app loads a fixed URL (no query
-  // string reachable), so enabling is via a TRIPLE-TAP on the header title — persisted in
-  // localStorage so it survives the keyboard test — as well as ?satdebug for Safari. Tap
-  // the readout itself to hide for this session. Remove once diagnosed.
-  let satDbgEl = null, satDbgTimer = null;
-  function showSatDebug() {
-    if (satDbgEl) return;
-    const dbg = satDbgEl = document.createElement('div');
-    dbg.style.cssText = 'position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;'
-      + 'font:11px/1.35 ui-monospace,Menlo,monospace;background:rgba(0,0,0,.86);color:#0f0;'
-      + 'padding:7px 9px;border-radius:8px;white-space:pre;pointer-events:auto;'
-      + 'border:1px solid #0a0;max-height:42vh;overflow:auto';
-    dbg.addEventListener('click', hideSatDebug);
-    document.body.appendChild(dbg);
-    let kbCloses = 0, lastKbUp = false, peakProbe = 0;
-    const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '(unset)';
-    const paint = () => {
-      const vv = window.visualViewport;
-      const probe = readInset('top');
-      if (probe > peakProbe) peakProbe = probe;
-      const bar = document.getElementById('m-appbar');
-      const barRect = bar ? bar.getBoundingClientRect() : null;
-      const kbUp = vv ? (window.innerHeight - vv.height) > 120 : false;
-      if (lastKbUp && !kbUp) kbCloses++;
-      lastKbUp = kbUp;
-      dbg.textContent =
-        'innerH ' + window.innerHeight + '   vv.h ' + (vv ? Math.round(vv.height) : '—')
-        + '   vv.offTop ' + (vv ? Math.round(vv.offsetTop) : '—')
-        + '\nprobe(env-top) ' + probe + '   peak ' + peakProbe
-        + '   probe-bot ' + readInset('bottom')
-        + '\n--sat ' + cssVar('--sat') + '   --sab ' + cssVar('--sab')
-        + '\nappbar h ' + (barRect ? Math.round(barRect.height) : '—')
-        + '  top ' + (barRect ? Math.round(barRect.top) : '—')
-        + '   kbUp ' + kbUp + '   kbCloses ' + kbCloses
-        + '\nrealTop ' + realTop + '   realBot ' + realBot + '   screenFull ' + screenFull
-        + '   nativeTop ' + Math.max(0, screenFull - window.innerHeight)
-        + '\n(tap to hide; 3-tap title to toggle)';
-    };
-    paint();
-    satDbgTimer = setInterval(paint, 250);
-    dbg._paint = paint;
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', paint);
-      window.visualViewport.addEventListener('scroll', paint);
-    }
-  }
-  function hideSatDebug() {
-    if (satDbgTimer) clearInterval(satDbgTimer);
-    if (satDbgEl && window.visualViewport) {
-      window.visualViewport.removeEventListener('resize', satDbgEl._paint);
-      window.visualViewport.removeEventListener('scroll', satDbgEl._paint);
-    }
-    if (satDbgEl) satDbgEl.remove();
-    satDbgEl = satDbgTimer = null;
-  }
-  try {
-    if (/[?&]satdebug\b/.test(location.search) || localStorage.getItem('satdebug') === '1') showSatDebug();
-  } catch (_) {}
-  // Triple-tap the header title to toggle (works in the wrapped app, no URL needed).
-  (function wireSatDebugToggle() {
-    const title = document.getElementById('m-title');
-    if (!title) return;
-    let taps = 0, t = null;
-    title.addEventListener('click', () => {
-      taps++;
-      clearTimeout(t);
-      t = setTimeout(() => { taps = 0; }, 600);
-      if (taps >= 3) {
-        taps = 0; clearTimeout(t);
-        if (satDbgEl) { hideSatDebug(); try { localStorage.removeItem('satdebug'); } catch (_) {} }
-        else { showSatDebug(); try { localStorage.setItem('satdebug', '1'); } catch (_) {} }
-      }
-    });
-  })();
+  // History: a JS measurement loop used to compensate for WKWebView (Capacitor/TestFlight)
+  // applying the top inset a SECOND time as a native content inset — "safe-area
+  // double-counting", which made the header read tall after the keyboard closed. That
+  // whole apparatus (plus an on-device ?satdebug readout) was removed 2026-06-23 when we
+  // stepped back from TestFlight to Safari/PWA dogfooding — the bug only existed inside the
+  // webview wrapper. If the Capacitor path is ever revived, the compensation lives in git
+  // history (commits b73e4af..5e45389) and PLAN_CAPACITOR.md.
 
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');

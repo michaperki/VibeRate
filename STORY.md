@@ -414,6 +414,52 @@ these are the calibration notes to internalize, not the caricatures to repeat.
   fresh, or checkpoint the brain *before* the window compacts something away. Hold
   this loosely; context may not be a headline feature at all.
 
+## Chapter 11 — Stepping back from TestFlight (2026-06-23)
+
+The native-iOS bet (Capacitor + Codemagic → TestFlight, `PLAN_CAPACITOR.md`) was the
+cheapest path to an App-Store app *on paper*: wrap the SPA in a WKWebView pointed at the
+live Fly URL, no Mac, no rewrite. In practice the wrapper became a tar pit. Over a dozen
+commits (`b73e4af..5e45389`) fought a recurring **tall header** — the app bar gaining an
+empty ~47px band after the Drive composer's keyboard closed — through four different
+theories: stop double-applying env(), make `#app` the scroller, freeze the inset, track a
+min inset, and finally a JS loop that measured `innerHeight` deltas to subtract WKWebView's
+*native* content inset from our `env()` padding. It was still reproducible on Mike's device,
+and the measurement loop had started making the composer feel janky for everyone.
+
+The pattern, once named, was decisive: **every hard bug in the saga lived at the WKWebView
+boundary, none in the web app itself.**
+
+- Tall header = WKWebView applies the top safe-area a second time as a native content inset
+  → double-count (this chapter).
+- Sign-in fails = OAuth state-cookie split across two cookie jars, webview vs. external
+  browser (`PLAN_NATIVE_AUTH.md`).
+- Drive renders blank = `EventSource` can't send an auth header and the webview has no
+  session cookie (same doc).
+- Drive composer "freezes" = the safe-area measurement loop re-syncing on keyboard close.
+
+To make the wrapper work at all we'd also taken on real security debt that exists *only* to
+serve it: an account-linked token made **RCE-capable** (unlocks Drive = code execution),
+tokens passed **in URLs** (the SSE `?access_token=` hack), and account-scope broadening on a
+pasted token. A lot of structural compromise for a header that was still wrong.
+
+So we stepped back. **Mobile Safari — specifically Add-to-Home-Screen (standalone PWA) — is
+the dogfooding surface again.** It deletes all four bug classes at once: the PWA uses
+Safari's own viewport engine where `env(safe-area-inset-*)` is correct (no double-count, no
+JS loop), same-browser OAuth keeps its cookies, and the session cookie makes the Drive
+stream authenticate with no query-param tricks — while still giving an app icon and a
+chrome-less standalone window. The Capacitor scaffold is **kept dormant**, not deleted (it's
+just config + CI pointing at the live URL, cheap to park and to revive properly later via
+deep-link OAuth). What got removed was the iOS-specific cruft that had leaked into the shared
+web app: the `?satdebug` on-device diagnostic and the keyboard-close measurement loop
+(`public/app.js` mobileInit; CSS now relies on `env()` directly).
+
+The calibration note for future agents: this was **not** "we should have gone native." A
+Swift/RN rewrite is *more* work, throws away 5,700 lines of working UI, and drags a Mac back
+into the dev loop. The lesson is narrower and reusable — *the wrapper added a boundary that
+fought the web platform, and the value didn't justify the boundary.* When a thin-shell-over-web
+approach starts generating bugs that only exist at the shell seam, the cheap move is to
+remove the seam, not to keep patching it.
+
 ## Where it stands, and the open questions
 
 As of the reframe, VibeRate is a working, hosted, self-dogfooding mobile agent-first
