@@ -93,8 +93,10 @@ function contextFromTranscript(transcriptPath) {
 }
 
 // Map a raw CC hook payload to our compact stream event. Returns null for events we
-// don't surface, so the caller can no-op cleanly.
-function eventFromPayload(p) {
+// don't surface, so the caller can no-op cleanly. Exported for the WS3 smoke gate
+// (PLAN_HARNESS_VERSIONING.md) — the hook event-name coupling is one of the schema
+// surfaces a Claude release can break (§0 coupling inventory, item 4).
+export function eventFromPayload(p) {
   const name = p.hook_event_name || p.hookEventName || '';
   const t = Date.now();
   const sid = p.session_id || p.sessionId || null;

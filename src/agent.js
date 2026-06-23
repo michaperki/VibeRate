@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { recordLiveVersion } from './harness.js';
 
 const CLAUDE_BIN = process.env.VBRT_CLAUDE_BIN || 'claude';
 
@@ -406,6 +407,7 @@ function createSession({ cwd, permissionMode, projectSlug = null }) {
     // no per-session SSE required. type is fixed today (Drive only spawns claude).
     type: 'claude',
     model: null, // from the first system/init event
+    harnessVersion: null, // CLI version announced in system/init (WS1) — for the harness rail
     promptStartedAt: null, // turn-start stamp → the roster's ticking elapsed timer
     lastAction: null, // { verb, label, file } — the agent's most recent tool call
     currentPlan: null, // PLAN-ish doc basename the agent is advancing (planDocOf, sticky)
@@ -463,10 +465,21 @@ function handleRawEvent(session, obj) {
   if (type === 'system' && obj.subtype === 'init') {
     if (obj.session_id && !session.claudeSessionId) session.claudeSessionId = obj.session_id;
     if (obj.model) session.model = obj.model; // window size for the roster ctx meter
+    // The running CLI announces its version here (PLAN_HARNESS_VERSIONING.md WS1) —
+    // we used to discard it. Stash it on the session for the roster/cockpit and feed
+    // the harness module so the rail can corroborate "what's running" and catch a
+    // binary swapped under a long-lived server. Field name has drifted across
+    // releases, so probe the known spellings.
+    const ver = obj.version || obj.cli_version || obj.claude_code_version || (obj.cli && obj.cli.version) || null;
+    if (ver) {
+      session.harnessVersion = String(ver);
+      recordLiveVersion(session.type || 'claude', session.harnessVersion);
+    }
     emit(session, {
       kind: 'system',
       sessionId: obj.session_id || null,
       model: obj.model || null,
+      version: session.harnessVersion || null,
       tools: Array.isArray(obj.tools) ? obj.tools.length : null,
       raw: obj,
     });
@@ -903,6 +916,7 @@ function publicView(session) {
     // Cockpit roster enrichment (PLAN_COCKPIT.md §3.1).
     type: session.type || 'claude',
     model: session.model || null,
+    harnessVersion: session.harnessVersion || null,
     promptStartedAt: session.promptStartedAt || null,
     lastAction: session.lastAction || null,
     currentPlan: session.currentPlan || null,
@@ -911,4 +925,22 @@ function publicView(session) {
     ctxTokens: session.ctxTokens || 0,
     ctxPct: session.ctxPct || 0,
   };
+}
+
+// Test-only: replay a list of raw stream-json objects through the real event
+// normalizer (`handleRawEvent`) against a *detached* session — one that's never
+// registered in the `sessions` map and so never touches the roster — and return
+// the emitted UI events. The WS3 smoke gate (PLAN_HARNESS_VERSIONING.md) uses this
+// to assert the schema we parse still holds after a harness update, exercising the
+// load-bearing agent.js path (init / stream_event / assistant / result) without
+// spawning a real `claude`. Not part of the runtime control flow.
+export function __replayForTest(objs) {
+  const session = {
+    id: '__test__', type: 'claude', seq: 0, events: [], subscribers: new Set(),
+    status: 'starting', model: null, harnessVersion: null, claudeSessionId: null,
+    lastAction: null, currentPlan: null, onSubscription: false,
+    streamedText: false, streamedThinking: false, ctxTokens: 0, ctxPct: 0, lastEventAt: 0,
+  };
+  for (const obj of Array.isArray(objs) ? objs : []) handleRawEvent(session, obj);
+  return { events: session.events, session };
 }

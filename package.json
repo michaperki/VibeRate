@@ -9,6 +9,9 @@
   "scripts": {
     "start": "node bin/vbrt.js serve",
     "serve": "node bin/vbrt.js serve",
+    "test": "node test/harness-smoke.test.mjs",
+    "test:harness": "node test/harness-smoke.test.mjs",
+    "bump-harness": "node bin/vbrt.js harness bump",
     "ios:add": "cap add ios",
     "ios:sync": "cap sync ios",
     "ios:assets": "capacitor-assets generate --ios"

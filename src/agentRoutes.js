@@ -8,6 +8,7 @@
 
 import fs from 'node:fs';
 import { startSession, adoptSession, sendMessage, stopSession, endSession, subscribe, subscribeRoster, getSession, listSessions, registerAsk, resolveAsk, recordReport } from './agent.js';
+import { harnessReport, invalidateHost } from './harness.js';
 import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
@@ -103,6 +104,21 @@ export function mountAgent(app, opts = {}) {
   // Is the runtime usable here? (UI uses this to show a clear banner.)
   app.get('/api/agent/health', guard, (_req, res) => {
     res.json({ ok: true, bin: process.env.VBRT_CLAUDE_BIN || 'claude', defaultCwd });
+  });
+
+  // Harness rail data (PLAN_HARNESS_VERSIONING.md WS1/WS5): per harness — installed
+  // version + source, upstream latest + release date, and drift ("N behind" /
+  // outdated). The read surface over the version we now capture, plus the npm-
+  // registry "latest" poll (cached in harness.js). Operator-scoped like the rest of
+  // the control plane — it describes *this instance's* binaries. `?refresh=host`
+  // forces a re-sample (use after a deploy that swapped the binary).
+  app.get('/api/agent/harness', guard, async (req, res) => {
+    try {
+      if (req.query.refresh === 'host') invalidateHost();
+      res.json(await harnessReport());
+    } catch (err) {
+      fail(res, err);
+    }
   });
 
   app.get('/api/agent/sessions', guard, (_req, res) => {

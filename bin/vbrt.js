@@ -3,7 +3,9 @@
 // that need them, so `vbrt push` runs with only Node builtins + fetch — which is
 // what lets the skill bundle ship without node_modules.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { discoverSessions } from '../src/discover.js';
 import { parseClaude, parseCodex } from '../src/parsers.js';
@@ -824,6 +826,132 @@ async function cmdHooks(args = []) {
   console.log(C.dim('Run `vbrt watch` and the dashboard ticker will follow the agent live.\n'));
 }
 
+// `vbrt harness` — the operator's window onto the coding-agent CLI we spawn
+// (PLAN_HARNESS_VERSIONING.md WS4). `vbrt harness` (status) shows installed vs
+// upstream-latest + drift; `vbrt harness bump` is the "dead simple + quick safety
+// check" update loop: install the candidate to a scratch prefix, run the smoke
+// gate, print the changelog diff with permission canaries highlighted, and bump the
+// deploy's cache-bust so the next `fly deploy` truly re-pulls @latest.
+async function cmdHarness(args = []) {
+  const sub = args.find((a) => !a.startsWith('--')) || 'status';
+  const harness = await import('../src/harness.js');
+  const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+  const report = await harness.harnessReport();
+  const claude = report.harnesses.claude;
+
+  const drift = (h) => h.behind == null ? C.dim('—') : h.behind === 0 ? C.green('up to date') : C.yellow(`${h.behind} behind`);
+  const printStatus = () => {
+    console.log(`\n${C.bold('vbrt harness')} — coding-agent CLI versions on this instance\n`);
+    for (const h of Object.values(report.harnesses)) {
+      if (!h.available && !h.latest) continue;
+      const inst = h.installed ? C.cyan(h.installed) : C.dim('(not installed)');
+      const src = h.source ? C.dim(` [${h.source}]`) : '';
+      console.log(`  ${C.bold(h.label.padEnd(12))} ${inst}${src}  ${C.dim('→ latest')} ${h.latest || C.dim('?')}  ${drift(h)}`);
+      if (h.releaseDate) console.log(C.dim(`               latest released ${fmtDate(h.releaseDate)}`));
+    }
+  };
+
+  if (sub === 'status') {
+    printStatus();
+    if (claude.outdated) console.log(C.dim(`\n  Update with ${C.bold('vbrt harness bump')} (runs the smoke gate first).\n`));
+    else console.log('');
+    return;
+  }
+
+  if (sub !== 'bump') {
+    console.log(C.yellow(`Unknown: vbrt harness ${sub}. Use \`status\` or \`bump\`.`));
+    process.exitCode = 1;
+    return;
+  }
+
+  // ---- bump ----
+  printStatus();
+  const target = args.find((a, i) => args[i - 1] === '--to') || claude.latest;
+  if (!target) {
+    console.log(C.yellow('\n✗ Could not resolve a candidate version (registry unreachable). Try again later.\n'));
+    process.exitCode = 1;
+    return;
+  }
+  if (claude.installed && harness.cmpSemver(claude.installed, target) >= 0 && !args.includes('--force')) {
+    console.log(C.green(`\n✓ Already on ${claude.installed} (latest ${target}) — nothing to bump.`));
+    console.log(C.dim('  Re-run with --force to bump the cache-bust anyway.\n'));
+    return;
+  }
+
+  // 1) Changelog diff with canaries — "the dangerous kind of drift" up front.
+  console.log(`\n${C.bold('① changelog')} ${C.dim(`${claude.installed || '?'} → ${target}`)}`);
+  const cl = await harness.changelogDrift('claude', claude.installed, target);
+  if (!cl.ok) {
+    console.log(C.dim('  (changelog unavailable — network or format change; proceeding on the smoke gate)'));
+  } else if (!cl.entries.length) {
+    console.log(C.dim('  (no changelog entries found in range)'));
+  } else {
+    for (const e of cl.entries.slice(0, 12)) {
+      console.log(`  ${C.cyan(e.version)}${e.canary && e.canary.length ? C.yellow('  ⚠ canary') : ''}`);
+      for (const l of e.lines.slice(0, 6)) console.log(`    ${CANARY_HL(l)}`);
+    }
+    if (cl.canaries.length) {
+      console.log(C.yellow(`\n  ⚠ ${cl.canaries.length} canary line(s) — permission/tool/schema words appear in this range.`));
+      console.log(C.dim('    Re-check src/agent.js + parsers.js + hooks.js against these before shipping.'));
+    } else {
+      console.log(C.green('\n  ✓ no permission/tool/schema canaries in this range.'));
+    }
+  }
+
+  // 2) Scratch-install the candidate and confirm it runs (catches a broken release).
+  if (!args.includes('--no-install')) {
+    console.log(`\n${C.bold('② scratch install')} ${C.dim(`@anthropic-ai/claude-code@${target}`)}`);
+    const scratch = path.join(os.tmpdir(), `vbrt-harness-${target}`);
+    try {
+      execFileSync('npm', ['install', '-g', `@anthropic-ai/claude-code@${target}`, '--prefix', scratch], { stdio: 'ignore' });
+      const bin = path.join(scratch, 'bin', 'claude');
+      const got = execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim();
+      console.log(C.green(`  ✓ installs + runs: ${got}`));
+    } catch (err) {
+      console.log(C.yellow(`  ✗ candidate failed to install/run: ${String(err.message || err).split('\n')[0]}`));
+      console.log(C.dim('  Aborting bump — do not ship a release that won\'t even start.\n'));
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // 3) The smoke gate: our parser assumptions still hold (golden fixtures).
+  console.log(`\n${C.bold('③ smoke gate')} ${C.dim('(golden-transcript schema check)')}`);
+  try {
+    execFileSync('node', [path.join(repoRoot, 'test', 'harness-smoke.test.mjs')], { stdio: 'inherit', cwd: repoRoot });
+  } catch {
+    console.log(C.yellow('\n✗ Smoke gate FAILED — the parsed schema no longer holds. Fix the parsers'));
+    console.log(C.yellow('  before bumping. The harness is NOT updated.\n'));
+    process.exitCode = 1;
+    return;
+  }
+
+  // 4) Green → bump the deploy's cache-bust so `fly deploy` re-pulls @latest.
+  const flyPath = path.join(repoRoot, 'fly.toml');
+  try {
+    const toml = fs.readFileSync(flyPath, 'utf8');
+    const m = toml.match(/(CLAUDE_CACHE_BUST\s*=\s*")(\d+)(")/);
+    if (!m) throw new Error('CLAUDE_CACHE_BUST not found in fly.toml');
+    const next = String(Number(m[2]) + 1);
+    fs.writeFileSync(flyPath, toml.replace(m[0], `${m[1]}${next}${m[3]}`));
+    console.log(`\n${C.bold('④ cache-bust')} ${C.green(`bumped CLAUDE_CACHE_BUST ${m[2]} → ${next}`)} in fly.toml`);
+  } catch (err) {
+    console.log(C.yellow(`\n✗ Could not bump fly.toml: ${err.message}`));
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(C.green(`\n✓ Safe to ship ${target}.`));
+  console.log(C.dim('  Commit the fly.toml bump, then deploy:'));
+  console.log(`    ${C.cyan('git commit -am "Harness: bump Claude Code to ' + target + '" && fly deploy')}\n`);
+}
+
+// Highlight canary words inline so they pop in the changelog dump.
+function CANARY_HL(line) {
+  return String(line).replace(/\b(permission|breaking|removed?|deprecat|renamed?|tool[\s-]?name|stream[\s-]?json|schema)\b/gi, (w) => C.yellow(w));
+}
+
 async function cmdServe(args) {
   // Precedence: --port flag > PORT env (cloud hosts inject it) > local default.
   const portArg = args.find((a) => /^--port=/.test(a));
@@ -992,6 +1120,8 @@ ${C.bold('vbrt')} — browse old Codex & Claude Code sessions as projects
   ${C.cyan('vbrt status')}        Where things stand: watch, project URL, evidence, outbox, push needed?
   ${C.cyan('vbrt serve')}         Start the local web viewer (default port 4317)
   ${C.cyan('vbrt serve --port=N')} Use a custom port
+  ${C.cyan('vbrt harness')}        Show the installed Claude Code / Codex version vs upstream-latest + drift
+  ${C.cyan('vbrt harness bump')}   Safely update the harness: smoke-gate + changelog canaries, then bump the deploy
   ${C.cyan('vbrt help')}          Show this help
 `);
 }
@@ -1032,6 +1162,9 @@ async function main() {
       break;
     case 'serve':
       await cmdServe(rest);
+      break;
+    case 'harness':
+      await cmdHarness(rest);
       break;
     case 'help':
     case '--help':

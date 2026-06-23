@@ -30,6 +30,7 @@ test fixture.
 - `UI_FEEDBACK.md` — synthesis of two external UI reviews (2026-06-22), prioritized by reviewer agreement + prescriptive fixes; feeds `PLAN_MOBILE.md`
 - `DEMO_PLAN.md` — demo & trial plan (the "steering" story; how we show/trial the tool)
 - `PLAN_COCKPIT.md` — change-map for migrating the project home from today's dense Activity dashboard to the calm "cockpit" (Now / Latest / Next + demoted Full timeline); grounds every current-state claim in `public/app.js` + `src/` and flags the new per-agent-telemetry/transport gaps
+- `PLAN_HARNESS_VERSIONING.md` — keeping the Claude Code / Codex harness on latest **without** silently breaking on upstream schema drift: surface the running version (already in the `system/init` event, currently discarded), make "latest" deterministic (today a redeploy updates it only on a Docker layer-cache miss), smoke-gate updates with a golden-transcript test, and feed the cockpit's "harness rail" centerpiece. The concrete answer to `STORY.md` Ch.10's upstream-drift risk.
 - `AUTH.md` — web-account sign-in (separate from Claude credentials)
 - `SEED.md` — the original genesis prompt (a brain node, kept as history)
 - `archive/` — retired/historical brain docs (dogfooding experiment logs, the resolved Drive ingest-reconciliation saga, concluded research). Out of the live brain by design; see `archive/README.md`. Drive + the reader being one conversation lives in `archive/drive-reconciliation/DRIVE_CONVO_RECONCILIATION.md`.

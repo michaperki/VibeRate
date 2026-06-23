@@ -5,6 +5,13 @@ app = "vbrt"
 primary_region = "fra"
 
 [build]
+  # Harness auto-latest tripwire (PLAN_HARNESS_VERSIONING.md WS2). Bumping this value
+  # busts the Dockerfile's `claude` install layer, so the next `fly deploy` is
+  # GUARANTEED to re-pull @latest (instead of nondeterministically reusing a cached
+  # layer). `vbrt harness bump` (WS4) increments it for you after the smoke gate
+  # passes, making each harness update a deliberate, version-controlled commit.
+  [build.args]
+    CLAUDE_CACHE_BUST = "1"
 
 [env]
   PORT = "8080"

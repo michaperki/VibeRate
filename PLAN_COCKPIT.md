@@ -176,6 +176,12 @@ behind a link.
 | **Next** | plan rows (progress bars) | 2–3 plans closest to done, each `name · N left · pct` | Per-**plan** completion |
 | **Full timeline** | (link only) | The **existing** dense Activity + ribbon + brain | Unchanged — today's `overviewHeader` + `renderRibbon` + `renderCenterpiece` |
 
+> **Harness rail (candidate 4th zone).** A per-harness strip — Claude / Codex icon,
+> running version, release date, "N behind" / "⚠ permission changes" drift badge —
+> proposed as a calm centerpiece on the home. Data + drift logic are owned by
+> `PLAN_HARNESS_VERSIONING.md` (WS5); this plan owns where it sits in the cockpit's
+> information architecture. Decide placement when sequencing §7.
+
 ---
 
 ## 3. Gap analysis (core)

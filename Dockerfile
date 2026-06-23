@@ -47,7 +47,21 @@ RUN npm ci --omit=dev
 RUN npx playwright install chromium
 
 # The Claude Code CLI, on PATH as `claude` — what src/agent.js spawns (Fork A).
-RUN npm install -g @anthropic-ai/claude-code
+#
+# AUTO-LATEST, DETERMINISTICALLY (PLAN_HARNESS_VERSIONING.md WS2). This `RUN` text
+# never changes, so Docker would re-run it only on a cache *miss* — meaning a
+# redeploy updates Claude Code nondeterministically (warm cache → old version kept).
+# `CLAUDE_CACHE_BUST` makes "I am updating the harness" a deliberate, logged act:
+# bump it (via `vbrt harness bump`, WS4) and this layer re-pulls @latest every time.
+# We also record the resolved version into the image (/opt/vbrt/harness.json) so the
+# server (src/harness.js) and the harness rail know what's installed before any
+# session runs — no `claude --version` subprocess needed at boot.
+ARG CLAUDE_CACHE_BUST=0
+RUN echo "harness cache-bust: ${CLAUDE_CACHE_BUST}" \
+  && npm install -g @anthropic-ai/claude-code \
+  && mkdir -p /opt/vbrt \
+  && printf '{"claude":"%s"}\n' "$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" > /opt/vbrt/harness.json \
+  && cat /opt/vbrt/harness.json
 
 # App source (see .dockerignore for what's excluded).
 COPY . .
