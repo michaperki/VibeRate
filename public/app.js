@@ -5550,6 +5550,41 @@ async function boot() {
   const isMobile = () => body.classList.contains('is-mobile');
   const brainOpen = () => body.classList.contains('m-brain-open');
 
+  // --- freeze the safe-area insets into CSS vars (WKWebView keyboard fix) ---
+  // The fixed app bar's height/padding (and #app's padding-top) are driven by
+  // env(safe-area-inset-top). In the wrapped WKWebView, focusing the Drive composer
+  // raises the keyboard, which scrolls/insets the native scroll view; on dismiss
+  // WebKit leaves env(safe-area-inset-top) reading ~2x until the next reflow — so
+  // *closing* the text box double-tall'd the header (the bug Mike pinned). The
+  // #app-scroller change removed the rubber-band trigger of the same inset, but the
+  // keyboard is a separate trigger that CSS overflow can't gate. The real inset only
+  // changes on orientation, so read it once here — at boot, keyboard down, env()
+  // honest — via a probe, freeze it into --sat/--sab, and let the chrome size off the
+  // frozen var (see style.css). A keyboard-close resize then can't re-inflate it.
+  // Re-read on orientationchange (a legitimate inset change), never on resize/the
+  // keyboard event.
+  function freezeSafeAreaInsets() {
+    const read = (edge) => {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;left:0;width:0;visibility:hidden;pointer-events:none;'
+        + (edge === 'top'
+          ? 'top:0;height:env(safe-area-inset-top,0px)'
+          : 'bottom:0;height:env(safe-area-inset-bottom,0px)');
+      document.body.appendChild(probe);
+      const h = probe.getBoundingClientRect().height;
+      probe.remove();
+      return Math.round(h);
+    };
+    const root = document.documentElement.style;
+    root.setProperty('--sat', read('top') + 'px');
+    root.setProperty('--sab', read('bottom') + 'px');
+  }
+  freezeSafeAreaInsets();
+  // A rotation genuinely changes the insets; re-read after it settles. (No resize
+  // listener on purpose — that's what the keyboard fires, and re-reading then would
+  // reintroduce the exact inflation we're freezing out.)
+  window.addEventListener('orientationchange', () => setTimeout(freezeSafeAreaInsets, 300));
+
   // --- drawer / sheet / brain overlay (one backdrop, mutually exclusive) ---
   const closeDrawer = () => body.classList.remove('m-drawer-open');
   const closeSheet = () => body.classList.remove('m-sheet-open');

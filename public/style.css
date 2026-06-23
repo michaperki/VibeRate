@@ -1429,6 +1429,15 @@ body.is-mobile .dv-copy { opacity: .75; }
 
 body.is-mobile { --m-appbar-h: 52px; --m-brainbar-h: 47px; }
 
+/* --sat / --sab are the safe-area insets, frozen once at boot by freezeSafeAreaInsets()
+   in app.js (when the keyboard is down and env() is honest). The mobile chrome below
+   sizes off the frozen var, not raw env(): in the wrapped WKWebView, dismissing the
+   Drive composer's keyboard leaves env(safe-area-inset-top) reading ~2x until the next
+   reflow, which double-tall'd the env()-driven fixed app bar on text-box close. A
+   constant var can't be re-inflated by that keyboard resize. env() is the fallback for
+   plain mobile web, where it's stable. (The #app-scroller fix killed the rubber-band
+   trigger of the same native inset; the keyboard is a separate one CSS can't gate.) */
+
 /* Kill the iOS rubber-band bounce on the document scroller. The overscroll zone at
    the top is what exposes/inflates the fixed app bar at scrollY 0 in TestFlight's
    WKWebView (it settles the instant you scroll). Harmless on desktop/Safari. */
@@ -1448,8 +1457,8 @@ body.is-mobile select { font-size: 16px; }
 body.is-mobile #m-appbar {
   display: flex; align-items: center; gap: 8px;
   position: fixed; top: 0; left: 0; right: 0; z-index: 300;
-  height: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
-  padding: env(safe-area-inset-top, 0px) 10px 0;
+  height: calc(var(--m-appbar-h) + var(--sat, env(safe-area-inset-top, 0px)));
+  padding: var(--sat, env(safe-area-inset-top, 0px)) 10px 0;
   background: var(--panel); border-bottom: 1px solid var(--border);
   /* iOS WKWebView (TestFlight) mis-paints a `position:fixed; top:0` bar while the
      document sits at scrollY 0 / inside the rubber-band zone: the safe-area band
@@ -1490,7 +1499,7 @@ body.is-mobile.m-driving #m-follow { display: none; }
 body.is-mobile.m-driving #m-brainbar {
   display: flex; align-items: center; gap: 8px;
   position: fixed; left: 0; right: 0; z-index: 290;
-  top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
+  top: calc(var(--m-appbar-h) + var(--sat, env(safe-area-inset-top, 0px)));
   height: var(--m-brainbar-h); padding: 0 10px;
   background: var(--panel); border-bottom: 1px solid var(--border);
   transform: translateZ(0); will-change: transform; /* same WKWebView fixed-bar repaint fix as #m-appbar */
@@ -1522,16 +1531,16 @@ body.is-mobile { height: 100%; overflow: hidden; }
 body.is-mobile #app {
   display: block; height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden;
   overscroll-behavior: none; -webkit-overflow-scrolling: touch;
-  padding-top: calc(var(--m-appbar-h) + env(safe-area-inset-top, 0px));
+  padding-top: calc(var(--m-appbar-h) + var(--sat, env(safe-area-inset-top, 0px)));
 }
-body.is-mobile.m-driving #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px)); }
+body.is-mobile.m-driving #app { padding-top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + var(--sat, env(safe-area-inset-top, 0px))); }
 body.is-mobile #main { display: block; min-width: 0; }
 body.is-mobile .pane { height: auto; min-height: 40dvh; }
 /* #app scrolls on mobile, so #conversation must NOT stay a nested scroll container.
    Let the Drive sticky stack resolve against #app and keep the transcript in one
    continuous mobile flow. */
 body.is-mobile #conversation { width: 100%; padding: 0; overflow: visible; }
-body.is-mobile #home { padding: 16px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+body.is-mobile #home { padding: 16px 14px calc(24px + var(--sab, env(safe-area-inset-bottom, 0px))); }
 
 /* On mobile the persistent chrome (app bar + brain strip) owns navigation, so the
    in-flow Drive toolbar shouldn't pin behind the fixed header — let it scroll away,
@@ -1599,7 +1608,7 @@ body.is-mobile #sidebar {
   display: flex; position: fixed; top: 0; bottom: 0; left: 0; z-index: 410;
   width: min(82vw, 300px); transform: translateX(-100%);
   transition: transform .26s cubic-bezier(.2,.8,.2,1);
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--sat, env(safe-area-inset-top, 0px));
   box-shadow: 0 0 40px rgba(0,0,0,.5);
 }
 body.is-mobile.m-drawer-open #sidebar { transform: translateX(0); }
@@ -1610,7 +1619,7 @@ body.is-mobile.view-project #sessions {
   width: auto; z-index: 420; max-height: 80dvh; border-right: 0;
   border-top: 1px solid var(--border); border-radius: 16px 16px 0 0;
   transform: translateY(110%); transition: transform .28s cubic-bezier(.2,.8,.2,1);
-  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(12px + var(--sab, env(safe-area-inset-bottom, 0px)));
   box-shadow: 0 -10px 40px rgba(0,0,0,.5);
 }
 body.is-mobile.m-sheet-open #sessions { transform: translateY(0); }
@@ -1634,7 +1643,7 @@ body.is-mobile.m-drawer-open #m-backdrop, body.is-mobile.m-sheet-open #m-backdro
 /* Brain expand overlay — mounts the real centerpiece SVG (renderCenterpiece). */
 body.is-mobile.m-brain-open #m-brain-overlay {
   display: block; position: fixed; left: 0; right: 0; z-index: 280;
-  top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + env(safe-area-inset-top, 0px));
+  top: calc(var(--m-appbar-h) + var(--m-brainbar-h) + var(--sat, env(safe-area-inset-top, 0px)));
   height: 58dvh; background: var(--bg); border-bottom: 1px solid var(--border);
   overflow: auto; box-shadow: 0 18px 40px rgba(0,0,0,.5);
   animation: m-brain-slide .3s cubic-bezier(.2,.8,.2,1);
@@ -1654,4 +1663,4 @@ body.is-mobile.m-brain-open #m-brain-overlay {
 /* touch targets ≥ 44px on the controls that turn into thumb targets */
 body.is-mobile .lay-btn, body.is-mobile .filter, body.is-mobile .rail-toggle button { min-height: 34px; }
 body.is-mobile .nav button, body.is-mobile .dv-actions button { min-height: 40px; }
-body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-brainbar-h) - env(safe-area-inset-top, 0px)); }
+body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-brainbar-h) - var(--sat, env(safe-area-inset-top, 0px))); }
