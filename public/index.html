@@ -4,6 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>VibeRate</title>
+
+    <!-- PWA: Add-to-Home-Screen standalone app (our iOS dogfooding surface; STORY.md Ch.11).
+         black-translucent lets content run under the status bar so the app bar's
+         env(safe-area-inset-top) padding seats the header below the notch. -->
+    <meta name="theme-color" content="#0f1115" />
+    <meta name="application-name" content="VibeRate" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="VibeRate" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
