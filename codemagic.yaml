@@ -68,6 +68,23 @@ workflows:
           echo "=== bundle id after fix ==="
           grep -m3 PRODUCT_BUNDLE_IDENTIFIER ios/App/App.xcodeproj/project.pbxproj || true
           xcode-project use-profiles
+      - name: Bump CFBundleVersion above the latest TestFlight build
+        script: |
+          set -e
+          # App Store Connect rejects re-uploading a CFBundleVersion it already has
+          # (the first build went up as "1", so a second "1" 409s with
+          # ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE). Capacitor hardcodes
+          # CURRENT_PROJECT_VERSION = 1 in the pbxproj, and Info.plist's CFBundleVersion
+          # is $(CURRENT_PROJECT_VERSION) — so derive the next number from whatever is
+          # already on TestFlight and bump it. This stays strictly monotonic across
+          # re-runs without us hand-editing the version each time.
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          case "$LATEST" in ""|*[!0-9]*) LATEST=0;; esac
+          NEW=$((LATEST + 1))
+          echo "Latest TestFlight build=$LATEST -> setting CFBundleVersion=$NEW"
+          sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $NEW;/g" \
+            ios/App/App.xcodeproj/project.pbxproj
+          grep -m3 CURRENT_PROJECT_VERSION ios/App/App.xcodeproj/project.pbxproj || true
       - name: Build signed IPA
         script: |
           xcode-project build-ipa \

@@ -95,6 +95,9 @@ on your iPhone via the TestFlight app. Internal testers skip App Review.
       Apple ID `6782960153` (wired into `codemagic.yaml`).
 - [x] You: App Store Connect API key → added to Codemagic as `VibeRateASC`; repo connected.
 - [x] Build compiles, signs, uploads to App Store Connect, and finishes processing.
+- [x] Build number auto-bumps above the latest TestFlight build (CI derives it from
+      `get-latest-testflight-build-number`), so re-uploads no longer 409 on a duplicate
+      `CFBundleVersion` (Capacitor hardcodes it to `1`).
 - [ ] You: create internal TestFlight group `Internal Testers` (Manual distribution) — see
       step 3a; the publish step can't find it until you do. Build & signing already work;
       this is the last gate before the build lands on your phone.
