@@ -1137,6 +1137,8 @@ body.is-mobile .dvb-stage { height: 320px; }
   padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
 }
 .dv-actions button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+/* Armed "Stop turn" — first tap flips it to a caution state; second tap actually stops. */
+.dv-actions button#dv-stop.armed { background: #b9472e; color: #fff; border-color: #b9472e; }
 .dv-actions button:disabled { opacity: .45; cursor: default; }
 .dv-banner { margin: 0 28px 12px; padding: 9px 12px; border-radius: 8px; font-size: 13px; }
 .dv-banner.bad { background: #2a1416; color: #ef6f6f; border: 1px solid #4a2024; }

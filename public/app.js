@@ -4251,6 +4251,7 @@ function driveSetStatus(status) {
   // relabels to "Queue" to signal the message will land after the current turn.
   if (send) { send.disabled = false; send.textContent = busy ? 'Queue' : 'Send'; }
   if (stop) stop.disabled = !busy;
+  if (!busy) driveDisarmStop(); // turn settled → drop any pending "Tap to confirm" arm
   // The composer footer carries the "Claude is working…" indicator (spinner +
   // live activity label + elapsed time on task). Show it while a turn is in
   // flight; hide it the moment the turn settles.

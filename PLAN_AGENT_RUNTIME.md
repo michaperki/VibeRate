@@ -176,6 +176,12 @@ validates against Mike's daily driver and reuses the JSONL pipeline immediately.
 - [ ] **Approvals + interrupt** on the owned session. *(Important but single-tenant
       today — Mike is the only admin-gated driver. Becomes blocking when onboarding
       opens Drive to non-operators; see `ONBOARDING.md`.)*
+  - The composer's **"Stop turn"** is the interrupt control. On mobile it sits a
+    thumb-width from **Send**, and stopping kills the agent's in-flight work — so the
+    button is **two-tap armed**: first tap flips it to a red "Tap to confirm," a second
+    tap within ~4s actually posts `/stop`; it auto-disarms on timeout and when the turn
+    settles. (`driveStopClick` in `public/app.js`; first verified live from the
+    TestFlight build, 2026-06-23.)
 - [ ] ~~**Dual-provider** unified event model~~ *(deferred post-pivot — Claude-first;
       no now-cluster item needs Codex. Normalizing app-server JSON-RPC + CLI
       stream-json into one schema waits until a second provider is demanded.)*
