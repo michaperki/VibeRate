@@ -81,7 +81,12 @@ These need your Apple identity / secrets, so they can't be scaffolded by the age
    with the name 'Internal Testers'"*; if you instead route through external review (by
    adding `submit_to_testflight: true`) Apple additionally demands a feedback email +
    reviewer contact info under TestFlight → Test Information. Internal direct-publish
-   needs none of that.
+   needs none of that. **Export compliance** is also required before a build is
+   assignable: a build with no `ITSAppUsesNonExemptEncryption` answer is flagged
+   "Missing Compliance" and the publish fails with *"Build is not assignable. - Build
+   is not in an internally testable state."* `codemagic.yaml` injects
+   `ITSAppUsesNonExemptEncryption = false` into the generated `Info.plist` each build
+   (VibeRate only uses exempt HTTPS/TLS), so you don't have to answer it in the UI.
 4. **Push key (APNs)** — in Apple Developer → Keys, create an APNs Auth Key (`.p8`) for
    push. You'll feed it to whatever sends pushes (your Fly server) when wiring the
    notification backend — separate task, not needed for the first build.

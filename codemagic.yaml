@@ -38,6 +38,20 @@ workflows:
           # We build App.xcodeproj directly; xcodebuild resolves SPM deps itself.
           echo "=== ios/App contents (expect App.xcodeproj, no workspace) ==="
           ls -la ios/App
+      - name: Declare export-compliance (no non-exempt encryption)
+        script: |
+          set -e
+          # Without ITSAppUsesNonExemptEncryption, App Store Connect flags every
+          # build as "Missing Compliance" and refuses to assign it to internal
+          # testers — the publish then fails with "Build is not assignable. - Build
+          # is not in an internally testable state." VibeRate is a WKWebView shell
+          # over standard HTTPS/TLS, which is exempt encryption, so the truthful
+          # answer is NO. Capacitor's generated Info.plist omits the key, and CI
+          # regenerates ios/ each run, so we inject it here every build.
+          PLIST="ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" \
+            || /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$PLIST"
       - name: Generate app icons & splash (only if you've added assets/icon.png)
         script: |
           if [ -f "assets/icon.png" ]; then npx capacitor-assets generate --ios; else echo "No assets/icon.png yet — using default icon. See PLAN_CAPACITOR.md."; fi
