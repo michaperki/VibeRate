@@ -45,6 +45,23 @@ export function upsertUser({ provider, providerId, email, name }) {
   return user;
 }
 
+// Find the user that has claimed a given owner hash (or null). Lets an
+// account-linked machine token act with the account's full project scope.
+export function findUserByOwnerHash(ownerHash) {
+  let files = [];
+  try {
+    files = fs.readdirSync(usersDir());
+  } catch {
+    return null; // no users dir yet
+  }
+  for (const f of files) {
+    if (!f.endsWith('.json')) continue;
+    const u = readJson(path.join(usersDir(), f), null);
+    if (u && Array.isArray(u.ownerHashes) && u.ownerHashes.includes(ownerHash)) return u;
+  }
+  return null;
+}
+
 // Bind a machine-token owner hash to a user (idempotent). Returns the user.
 export function linkOwner(id, ownerHash) {
   const file = path.join(usersDir(), `${id}.json`);

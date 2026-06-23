@@ -25,6 +25,7 @@ test fixture.
 - `PLAN_DRIVE_WORKSPACES.md` — binding a project to a real checkout on the host
 - `PLAN_MOBILE.md` — the mobile-unified plan (responsive port; Variant A chat + brain header)
 - `PLAN_CAPACITOR.md` — native iOS via Capacitor + Codemagic (wrap the SPA, cloud-Mac build → TestFlight; no Mac needed). Scaffolded 2026-06-22.
+- `PLAN_NATIVE_AUTH.md` — why social sign-in fails in the wrapped iOS app (OAuth state-cookie context split) and the token-sign-in workaround. 2026-06-23.
 - `PROJECT_VIEW_PLAN.md` — detailed viewer/brain planning (§G holds the earlier 2026-06 legibility pass)
 - `UI_FEEDBACK.md` — synthesis of two external UI reviews (2026-06-22), prioritized by reviewer agreement + prescriptive fixes; feeds `PLAN_MOBILE.md`
 - `DEMO_PLAN.md` — demo & trial plan (the "steering" story; how we show/trial the tool)

@@ -10,7 +10,7 @@ import { getRatingSummary, getUserVote, voteCard } from './ratings.js';
 import { BUNDLE_SCHEMA } from './bundle.js';
 import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCookie } from './auth.js';
 import { mountAuth, currentUser } from './oauth.js';
-import { linkOwner } from './accounts.js';
+import { linkOwner, findUserByOwnerHash } from './accounts.js';
 import { mountAgent } from './agentRoutes.js';
 import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl, setIngestHook, setTranscriptLoader } from './agent.js';
 import { ingestDriveTurn, loadDriveTranscript } from './driveIngest.js';
@@ -45,7 +45,14 @@ function currentOwners(req) {
   const user = currentUser(req);
   if (user) return user.ownerHashes || [];
   const token = bearer(req);
-  return token ? [hashToken(token)] : null;
+  if (!token) return null;
+  // A bare machine token normally scopes to just its own pushes. But if the token
+  // has been linked to an account (e.g. minted via /api/tokens, or used to sign in
+  // on a device where the OAuth redirect can't complete — see PLAN_NATIVE_AUTH.md),
+  // resolve it to the account's full project scope so token sign-in matches the web.
+  const h = hashToken(token);
+  const acct = findUserByOwnerHash(h);
+  return acct ? acct.ownerHashes || [] : [h];
 }
 
 // Short-lived, project-scoped view grants. A push returns a signed `view` token so
