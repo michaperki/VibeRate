@@ -280,6 +280,14 @@ and largely shipped — they're the read/understand half of the loop.
     `result`, so the pill climbs as context fills and settles at the exact turn-end
     figure. Ground truth, not a delta approximation; no transcript/ingest bloat (the
     events are SSE-only, in-memory).
+    - **🐛 Follow-up — the pill is inconsistent (2026-06-23, Mike).** It bounces
+      mid-session (suspected sub-agent `message_start` usage leaking in), changes across
+      resume (the adopt path re-seeds no usage/model, and the window defaults to 200k
+      when the model is unknown), and silently drops on auto-compaction without telling
+      the user. Mike also wants the **token count shown in the header pill itself**
+      (K-formatted, ticking up, always visible alongside idle/bypass), not just the %.
+      Full root-cause research + fix list in `PROJECT_VIEW_PLAN.md` §I ("Context meter
+      is inconsistent — make it stable + always-on").
 - **Prompt-unit rail** — `Sessions | Prompts` toggle, default Prompts; prompt rows
   show source, session color, timestamp, and outcome chips; live mode
   slides new prompt-units into the rail. ✅ Shipped first pass. (Intent auto-tagging
