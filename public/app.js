@@ -1421,6 +1421,43 @@ function renderNowCard() {
     </section>`;
 }
 
+// Attribute a commit to the agent that produced it (PLAN_COCKPIT.md §3.2). There's
+// no commit→agent link in the data model, so we correlate by time: a commit "belongs"
+// to the session whose turn-window contains it (allowing a short pre-roll and a longer
+// post-roll, since commits usually land at or just after a turn ends). On overlap pick
+// the closest window (inside = distance 0), then the innermost (latest-starting)
+// session. Returns the session's source or null.
+function commitSource(c, sessions) {
+  const PRE = 2 * 60 * 1000, POST = 12 * 60 * 1000;
+  const dist = (s) => (c.t < s.start ? s.start - c.t : c.t > s.end ? c.t - s.end : 0);
+  let best = null, bestD = Infinity;
+  for (const s of sessions) {
+    if (c.t < s.start - PRE || c.t > s.end + POST) continue;
+    const d = dist(s);
+    if (d < bestD || (d === bestD && (!best || s.start > best.start))) { best = s; bestD = d; }
+  }
+  return best ? best.source : null;
+}
+
+// Roll a list of commit sources into a single attribution: the dominant source and
+// whether more than one agent contributed (so a burst can read "mixed").
+function rollupSources(srcs) {
+  const counts = {};
+  for (const s of srcs) if (s) counts[s] = (counts[s] || 0) + 1;
+  const keys = Object.keys(counts);
+  if (!keys.length) return { source: null, mixed: false };
+  keys.sort((a, b) => counts[b] - counts[a]);
+  return { source: keys[0], mixed: keys.length > 1 };
+}
+
+// A small colored agent label for an attributed event (calm: a dot + the source name).
+function agentBadge(source, mixed) {
+  if (!source) return '';
+  const label = mixed ? 'mixed' : source;
+  const color = mixed ? 'var(--muted)' : SRC_COLOR[source] || 'var(--accent)';
+  return `<span class="ck-ev-agent" style="color:${color}" title="attributed to ${esc(label)} by commit timing"><i style="background:${color}"></i>${esc(label)}</span>`;
+}
+
 // Build the calm "Latest" event list from ingested history: brain-doc changes,
 // commit bursts (≥2 commits within a window), lone non-brain commits, and convos.
 function cockpitEvents(sessions) {
@@ -1432,7 +1469,7 @@ function cockpitEvents(sessions) {
     const brainHashes = new Set();
     for (const c of commits) {
       const bd = brainDocsOf(c, brainSet);
-      if (bd.length) { brainHashes.add(c.hash); events.push({ t: c.t, kind: 'brain', subject: c.subject, docs: bd.map((d) => docName(d).split('/').pop()), hash: c.hash }); }
+      if (bd.length) { brainHashes.add(c.hash); events.push({ t: c.t, kind: 'brain', subject: c.subject, docs: bd.map((d) => docName(d).split('/').pop()), hash: c.hash, source: commitSource(c, sessions) }); }
     }
     const sorted = [...commits].sort((a, b) => a.t - b.t);
     const GAP = 45 * 60 * 1000;
@@ -1443,8 +1480,12 @@ function cockpitEvents(sessions) {
       else { burst = { commits: [c], last: c.t }; bursts.push(burst); }
     }
     for (const b of bursts) {
-      if (b.commits.length >= 2) events.push({ t: b.last, kind: 'commits', count: b.commits.length, subjects: b.commits.map((c) => c.subject) });
-      else if (!brainHashes.has(b.commits[0].hash)) events.push({ t: b.commits[0].t, kind: 'commit', subject: b.commits[0].subject });
+      if (b.commits.length >= 2) {
+        const { source, mixed } = rollupSources(b.commits.map((c) => commitSource(c, sessions)));
+        events.push({ t: b.last, kind: 'commits', count: b.commits.length, subjects: b.commits.map((c) => c.subject), source, mixed });
+      } else if (!brainHashes.has(b.commits[0].hash)) {
+        events.push({ t: b.commits[0].t, kind: 'commit', subject: b.commits[0].subject, source: commitSource(b.commits[0], sessions) });
+      }
     }
   }
   return events.sort((a, b) => b.t - a.t);
@@ -1455,17 +1496,17 @@ function eventRowHtml(e) {
     return `<div class="ck-ev brain" data-bh-doc="${esc(e.docs[0])}" title="Open ${esc(e.docs[0])} in the reader">
         <span class="ck-ev-icon brain">◆</span>
         <div class="ck-ev-main"><div class="ck-ev-title">${esc(e.docs.join(', '))}</div><div class="ck-ev-sub">${esc(e.subject)}</div></div>
-        <span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
+        ${agentBadge(e.source)}<span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
   if (e.kind === 'commits')
     return `<div class="ck-ev commits" data-burst title="Tap to list the commits">
         <span class="ck-ev-icon">⎇</span>
         <div class="ck-ev-main"><div class="ck-ev-title">${e.count} ${plw(e.count, 'commit')}</div><div class="ck-ev-sub ck-burst-list" hidden>${e.subjects.map((s) => `<div>· ${esc(s)}</div>`).join('')}</div></div>
-        <span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
+        ${agentBadge(e.source, e.mixed)}<span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
   if (e.kind === 'commit')
     return `<div class="ck-ev commit">
         <span class="ck-ev-icon">⎇</span>
         <div class="ck-ev-main"><div class="ck-ev-title">${esc(e.subject)}</div></div>
-        <span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
+        ${agentBadge(e.source)}<span class="ck-ev-ago">${fmtAgo(e.t)}</span></div>`;
   return `<div class="ck-ev convo" data-open="${esc(e.id)}" title="Open this conversation">
       <span class="ck-ev-icon" style="color:${SRC_COLOR[e.source] || 'var(--accent)'}">💬</span>
       <div class="ck-ev-main"><div class="ck-ev-title">${e.count} ${plw(e.count, 'message')}</div><div class="ck-ev-sub">${esc(e.title || '')}</div></div>

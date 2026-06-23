@@ -14,10 +14,18 @@ the design rationale. What landed against the sequencing in §7:
   (§3.1c) remains the future optimization.
 - **§7.3–6 Now / Latest / Next / sparkline / route cutover — done** in `public/app.js`
   (`renderCockpit` and friends, ~`:1294`) + cockpit CSS in `public/style.css`.
+- **§3.2 commit→agent attribution — done (2026-06-23, client-side).** "Latest" rows now
+  carry an agent badge: `commitSource()` (`app.js`) correlates each commit's `t` to the
+  session whose turn-window contains it (short pre-roll, longer post-roll; on overlap the
+  closest window then the innermost/latest-starting session wins), and `rollupSources()`
+  reduces a burst to its dominant source — labelled **`mixed`** when more than one agent
+  contributed. Brain, commit, and commit-burst rows render a colored `agentBadge()`
+  (claude/codex/`mixed`); unattributable commits (no session window) show **no** badge
+  rather than a guess. No server/data-model change — pure reduction over `git.json` +
+  `timelineSessions()`.
 - **Still open (as flagged in §3 / §6):** live **agent type** is hardcoded `claude` (Drive
-  only spawns claude); **session↔plan** association and **commit→agent** attribution are not
-  captured, so commit-burst rows carry no agent label; the two-worlds clock skew (live
-  runtime vs 2 s ingest poll) is unresolved.
+  only spawns claude); **session↔plan** association is not captured; the two-worlds clock
+  skew (live runtime vs 2 s ingest poll) is unresolved.
 
 The target design was the mockup `viberate-cockpit.jsx`. Every current-state claim below
 cites a real file/symbol; inferences are marked **[assume]**.
@@ -167,10 +175,13 @@ ticking timers + context meters across many agents; it's new server surface in
 ### 3.2 Event feed ("Latest")
 - **Commit bursts ("18 commits").** Commits are available with `{hash,t,subject,files,
   isMerge,isRevert,docs[]}` (`git.js:18`). Grouping into bursts by **time window** is a
-  pure client-side reduction over `commits[].t`. **But commits carry no agent attribution**
-  — "18 commits by claude·1" requires correlating commit time-windows to sessions by
-  `cwd`+timestamp **[assume]**, or new commit→agent metadata. **Gap: agent attribution on
-  commits** (data model / ingest).
+  pure client-side reduction over `commits[].t`. ~~But commits carry no agent attribution.~~
+  **RESOLVED (2026-06-23):** the time-window correlation flagged here as **[assume]** is
+  shipped — `commitSource()` maps a commit to the session whose `[start, end]` (+grace)
+  window it falls in, `rollupSources()` picks a burst's dominant source (or `mixed`), and
+  `agentBadge()` labels the row. No commit→agent ingest metadata was needed; attribution is
+  a heuristic over existing timestamps, so a commit outside any session window stays
+  **unlabelled** (correct — better than a false guess).
 - **Brain-doc changes as discrete events.** **Available.** Each commit's `docs:[{name,
   status}]` (`git.js`) plus `dochistory.json` (`extractDocHistory()` `src/git.js:79`, keyed
   by path → `[{hash,t,status,content}]`) yields a subject + hash + file + content per
@@ -264,9 +275,11 @@ Mockup pieces are React; the work is to author equivalent **render functions** i
   disagree (a commit exists in git.json only after ingest; an agent is "working" in the
   runtime before any commit lands). The cockpit header ("active 13m ago" next to live
   tickers) must define which clock wins.
-- **Not currently captured (upstream work):** live-session **agent type**; a **`waiting`**
-  status; **session↔plan** association; **commit→agent** attribution. Each is runtime/data-
-  model work, not UI.
+- **Not currently captured (upstream work):** live-session **agent type**; **session↔plan**
+  association. (The **`waiting`** status shipped with the cockpit; **commit→agent**
+  attribution shipped 2026-06-23 as a client-side time-window heuristic — see §3.2 — so it
+  needed no data-model work after all.) The remaining two are genuine runtime/data-model
+  gaps, not UI.
 
 ## 7. Suggested sequencing
 1. **Unblock the roster data (runtime work).** Enrich `publicView`/`listSessions`
