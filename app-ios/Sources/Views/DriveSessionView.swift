@@ -28,6 +28,8 @@ struct DriveSessionView: View {
     @State private var ready = false                 // initial connect resolved
     @State private var assistantOpen = false         // last bubble is an in-progress assistant block
     @State private var pendingEcho: String?          // optimistic prompt awaiting its stream echo
+    @State private var eventCount = 0                // diagnostics: events seen on this stream
+    @State private var streamConnected = false       // SSE opened and is delivering
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -40,12 +42,19 @@ struct DriveSessionView: View {
         .navigationTitle(project.name ?? project.slug)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top) {
-            Text(status)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(6)
-                .background(.bar)
+            HStack(spacing: 8) {
+                Text(status).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                // Diagnostic: ⚡ + live event count once the stream connects, a dot while
+                // it hasn't. If this stays "·" the stream never opened; if it climbs but no
+                // bubbles appear, events are arriving but not rendering.
+                Text(streamConnected ? "⚡\(eventCount)" : "·")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(6)
+            .background(.bar)
         }
         .task { await connect() }
         .onDisappear { streamTask?.cancel() }
@@ -127,29 +136,82 @@ struct DriveSessionView: View {
     // MARK: - Networking
 
     private func connect() async {
-        // The cockpit picks the agent now: attach to the tapped session, or — for a
-        // fresh "New agent" — don't attach to anything and let the first send start one.
-        if let id = attachTo {
-            sessionId = id
-            status = humanStatus(initialStatus)
-            openStream(id)
-        } else {
+        do {
+            // 1. The cockpit handed us a specific agent — attach straight to it.
+            if let id = attachTo {
+                sessionId = id
+                status = humanStatus(initialStatus)
+                openStream(id)
+                ready = true
+                // Best-effort: learn this session's durable id so we can adopt it later
+                // if a redeploy wipes the live record (don't block the composer on it).
+                if let s = try? await client.session(id: id), let cid = s.claudeSessionId { store(cid) }
+                return
+            }
+            // 2. No target — find a live session for this project. Prefer one that's
+            //    actually running/waiting over a stale idle record (the wrong-session
+            //    case that streams an empty buffer).
+            let mine = try await client.agentSessions().filter { $0.projectSlug == project.slug }
+            if let s = mine.first(where: { isLive($0.status) }) ?? mine.first {
+                sessionId = s.id
+                if let cid = s.claudeSessionId { store(cid) }
+                status = humanStatus(s.status)
+                openStream(s.id)
+                ready = true
+                return
+            }
+            // 3. Nothing live — adopt the last session we drove here (survives the
+            //    redeploy that push-to-main triggers; transcript is still on disk).
+            if let cid = stored() {
+                status = "Reconnecting…"
+                let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
+                sessionId = adopted.id
+                status = humanStatus(adopted.status)
+                openStream(adopted.id)
+                ready = true
+                return
+            }
             status = "No agent running yet — send a message to start one."
+        } catch {
+            status = friendly(error)
         }
         ready = true
     }
 
+    private func isLive(_ s: String?) -> Bool {
+        ["working", "running", "starting", "waiting", "waiting_for_input", "blocked"].contains(s ?? "")
+    }
+
+    // A durable per-project handle so a conversation survives an app relaunch or a
+    // server redeploy: we adopt by claudeSessionId when no live session is found.
+    private func storeKey() -> String { "drive.cid.\(project.slug)" }
+    private func stored() -> String? { UserDefaults.standard.string(forKey: storeKey()) }
+    private func store(_ cid: String) { UserDefaults.standard.set(cid, forKey: storeKey()) }
+
     private func openStream(_ id: String) {
         streamTask?.cancel()
-        let url = APIConfig.url("/api/agent/sessions/\(id)/stream")
+        eventCount = 0
+        streamConnected = false
+        // `?after=0` asks the server to replay the whole buffered transcript before live
+        // events (subscribe() backfills everything with seq > 0) — so opening a convo
+        // re-paints its history instead of starting blank.
+        let url = APIConfig.url("/api/agent/sessions/\(id)/stream?after=0")
         let sse = SSEClient(url: url, token: token)
         streamTask = Task { @MainActor in
             do {
-                for try await event in sse.events() { ingest(event.data) }
+                for try await event in sse.events() {
+                    streamConnected = true
+                    eventCount += 1
+                    ingest(event.data)
+                }
+                // The server closed the stream cleanly. If we never got a single event,
+                // say so plainly — that means the session has no transcript on this id.
+                if eventCount == 0 { status = "Connected, but no transcript came back." }
             } catch is CancellationError {
                 // we re-opened the stream — not an error to surface
             } catch {
-                status = "Connection lost — leave and reopen to retry."
+                streamConnected = false
+                status = "Stream error: \(friendly(error))"
             }
         }
     }
@@ -173,6 +235,7 @@ struct DriveSessionView: View {
             } else {
                 let session = try await client.startSession(projectSlug: project.slug, prompt: text)
                 sessionId = session.id
+                if let cid = session.claudeSessionId { store(cid) }
                 status = humanStatus(session.status)
                 openStream(session.id)
             }
@@ -212,8 +275,21 @@ struct DriveSessionView: View {
             }
         case "tool_use":
             if let n = obj["name"] as? String {
-                bubbles.append(Bubble(role: .tool, text: "→ \(n)"))
+                let input = obj["input"] as? [String: Any]
+                let file = (input?["file_path"] as? String) ?? (input?["path"] as? String)
+                let suffix = file.map { " " + ($0 as NSString).lastPathComponent } ?? ""
+                bubbles.append(Bubble(role: .tool, text: "→ \(n)\(suffix)"))
                 assistantOpen = false
+            }
+        case "tool_result":
+            // Show a short slice of tool output so a tool-heavy turn visibly progresses
+            // instead of looking frozen between assistant replies.
+            if let t = obj["text"] as? String {
+                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    bubbles.append(Bubble(role: .tool, text: "⤷ " + String(trimmed.prefix(240))))
+                    assistantOpen = false
+                }
             }
         case "block_stop", "turn_end", "result", "stopped":
             assistantOpen = false

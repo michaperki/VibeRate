@@ -69,6 +69,23 @@ struct APIClient {
         return try await send(request("/api/agent/sessions/\(sessionId)/message", method: "POST", body: body), as: AgentSession.self)
     }
 
+    /// Re-adopt a session whose in-memory record a server redeploy wiped (push-to-main
+    /// restarts the box). The durable claude transcript is still on disk, so this rebinds
+    /// a fresh handle and replays it — then `?after=0` on the stream backfills the convo.
+    @discardableResult
+    func adopt(claudeSessionId: String, projectSlug: String?) async throws -> AgentSession {
+        var payload = ["claudeSessionId": claudeSessionId]
+        if let projectSlug { payload["projectSlug"] = projectSlug }
+        let body = try JSONEncoder().encode(payload)
+        return try await send(request("/api/agent/sessions/adopt", method: "POST", body: body), as: AgentSession.self)
+    }
+
+    /// Fetch one session's full record (incl. `claudeSessionId`), e.g. to persist a
+    /// durable handle after the cockpit hands us a session id to attach to.
+    func session(id: String) async throws -> AgentSession {
+        try await send(request("/api/agent/sessions/\(id)"), as: AgentSession.self)
+    }
+
     func projects() async throws -> [Project] {
         try await send(request("/api/projects"), as: [Project].self)
     }
