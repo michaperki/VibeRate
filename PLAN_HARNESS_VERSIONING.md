@@ -47,13 +47,27 @@ The version-plumbing, deterministic-latest, smoke-gate, and one-command bump are
 | **WS2** deterministic latest | ✅ shipped | `Dockerfile` `ARG CLAUDE_CACHE_BUST` busts the `claude` install layer and bakes the resolved version to `/opt/vbrt/harness.json`; `fly.toml` `[build.args] CLAUDE_CACHE_BUST` makes the bust a tracked, deploy-read value. |
 | **WS3** smoke-gate | ✅ shipped | `test/harness-smoke.test.mjs` + `test/fixtures/claude-stream.jsonl` & `claude-transcript.jsonl`. Pipes golden fixtures through the **real** parsers (`agent.js` `__replayForTest`, `parsers.parseClaude`, `hooks.eventFromPayload`) and asserts the §0 coupling list. `npm test`. |
 | **WS4** one-command bump | ✅ shipped | `vbrt harness` (status) / `vbrt harness bump`: changelog-diff w/ permission canaries → scratch-install the candidate → smoke-gate → bump `CLAUDE_CACHE_BUST`. `npm run bump-harness`. Drift/changelog helpers in `harness.js` (`changelogDrift`, `cmpSemver`, `behindCount`). |
-| **WS5** harness rail | ◑ data only | Data + drift computed by `harnessReport()` and served at `/api/agent/harness`; the cockpit-home rail component is `PLAN_COCKPIT.md`'s to render. |
+| **WS5** harness rail | ✅ shipped | Render landed in the **overarching workspace home** (not the per-project cockpit — see the placement note below): `renderHarnessRail`/`renderHarnessCard`/`loadHarnessRail` in `public/app.js`, mounted at `#harness-rail` in `bootDashboard`, gated by `ensureDriveProbe()` (admin/drive rights), styled in `style.css` (`.harness-rail`/`.harness-card`). Per harness: installed version + source (host/build/live), drift badge (✓ up to date · N behind · latest unknown · not installed), latest version + release age, and a copy-to-clipboard `npm run bump-harness` when outdated. Data still from `/api/agent/harness` (`harnessReport()`). |
 | **WS6** runtime swap admin | ⏸ deferred | Untouched; the `VBRT_CLAUDE_BIN` seam is preserved. |
 
 Verified live: `vbrt harness` reads claude **2.1.185** (host) vs latest **2.1.186**
 ("1 behind"); the full `bump` flow runs the changelog canary scan + 13-check smoke
 gate green and bumps the cache-bust. The `/api/agent/harness` route mounts under the
 same admin/loopback guard as the rest of the control plane.
+
+**Placement note (2026-06-24, Mike):** the rail lives in the **overarching workspace
+home** (`#ws-overview` sibling), not a per-project cockpit, because the harness is
+*instance-global* — one Fly host, one `claude`/`codex` binary shared by every project.
+Version + drift are a property of the instance, so a per-project cockpit would repeat
+the same card on every project. (The cockpit `PLAN_COCKPIT.md` "Now/Latest/Next" stays
+per-project; the harness rail is the one home-level, cross-project element.)
+
+**Follow-up (not yet wired):** the drift badge shows "N behind" but **not** the "⚠
+permission changes in 2.1.18x" canary the WS5 spec calls for. The canary data already
+exists (`changelogDrift` → `canaries`, used by the `bump` CLI) — surfacing it in the
+rail just needs `harnessReport()` to fold a (cached) changelog scan into each harness's
+payload, then a `⚠` variant of `.hc-badge`. Deferred as a cheap enhancement; the
+behind-count is the core "are we drifting" signal and ships today.
 
 ---
 

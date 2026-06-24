@@ -112,9 +112,16 @@ alongside the tradeoffs above.
 
 ## Status
 
+**Resolved for the current (PWA) path; the proper fix is PARKED with native (2026-06-24).**
+Token sign-in is the supported way into the app today and the three workarounds below all
+shipped, so this plan needs nothing while daily dogfooding lives on mobile Safari / PWA
+(`STORY.md` Ch. 11). The one open item is the deep-link OAuth rewrite, which only matters
+if the native wrapper is revived — it's listed as a parked revival note, **not** a checkbox
+todo, so it stops reading as live work-remaining.
+
 - [x] Documented root cause (cookie context split; both providers; webview block).
 - [x] Token sign-in grants full account scope (`currentOwners` + `findUserByOwnerHash`).
 - [x] Drive unlocked in the app via admin-linked token (`adminEmailFor` in the guard).
 - [x] Drive live stream authenticates in the app via `?access_token=` (`streamGuard`).
-- [ ] Deep-link or native OAuth — deferred with onboarding (also retires the
-      RCE-capable-token tradeoff above).
+- ◻ (parked, revives with native) Deep-link or native OAuth — deferred with onboarding;
+  also retires the RCE-capable-token tradeoff above.

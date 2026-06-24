@@ -176,11 +176,17 @@ behind a link.
 | **Next** | plan rows (progress bars) | 2–3 plans closest to done, each `name · N left · pct` | Per-**plan** completion |
 | **Full timeline** | (link only) | The **existing** dense Activity + ribbon + brain | Unchanged — today's `overviewHeader` + `renderRibbon` + `renderCenterpiece` |
 
-> **Harness rail (candidate 4th zone).** A per-harness strip — Claude / Codex icon,
-> running version, release date, "N behind" / "⚠ permission changes" drift badge —
-> proposed as a calm centerpiece on the home. Data + drift logic are owned by
-> `PLAN_HARNESS_VERSIONING.md` (WS5); this plan owns where it sits in the cockpit's
-> information architecture. Decide placement when sequencing §7.
+> **Harness rail — SHIPPED (2026-06-24), and it lives at the *workspace* home, not the
+> per-project cockpit.** A per-harness strip — Claude / Codex mark, running version +
+> source, release date, "N behind" / up-to-date drift badge, copy-to-clipboard bump
+> command. **Placement decision (Mike):** the harness is *instance-global* (one host, one
+> `claude`/`codex` binary shared by every project), so the rail sits in the overarching
+> workspace home (`renderHarnessRail` in `public/app.js`), **not** the per-project cockpit
+> — a project cockpit would repeat the identical card on every project. The cockpit's
+> Now/Latest/Next stays per-project; the harness rail is the cross-project home element.
+> Data + drift logic owned by `PLAN_HARNESS_VERSIONING.md` (WS5, now shipped). The "⚠
+> permission changes" canary variant of the badge is the one remaining enhancement
+> (tracked in WS5's follow-up note).
 
 ---
 

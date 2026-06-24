@@ -124,6 +124,15 @@ on your iPhone via the TestFlight app. Internal testers skip App Review.
 
 ## Status / next
 
+**This plan is PARKED (2026-06-24).** Everything that was *buildable* shipped (scaffold,
+app registration, signing, upload, build-number auto-bump). The remaining steps below are
+**not pending work** — they're the revival checklist if/when the App Store push is called
+for (deferred behind the brain rethink, convos-mobile parity, the demo, and pricing; see
+the dormant banner up top and `STORY.md` Ch. 11). They are intentionally **not** checkbox
+todos so they stop counting as live work-remaining against this plan's ring.
+
+What shipped:
+
 - [x] Capacitor + Codemagic scaffold committed-ready in the repo.
 - [x] App registered: name **VibeRate IDE**, bundle `com.viberate.app`, App Store Connect
       Apple ID `6782960153` (wired into `codemagic.yaml`).
@@ -132,10 +141,13 @@ on your iPhone via the TestFlight app. Internal testers skip App Review.
 - [x] Build number auto-bumps above the latest TestFlight build (CI derives it from
       `get-latest-testflight-build-number`), so re-uploads no longer 409 on a duplicate
       `CFBundleVersion` (Capacitor hardcodes it to `1`).
-- [ ] You: create internal TestFlight group `Internal Testers` (Manual distribution) — see
-      step 3a; the publish step can't find it until you do. Build & signing already work;
-      this is the last gate before the build lands on your phone.
-- [ ] You: add `assets/icon.png`.
-- [ ] First Codemagic build → TestFlight install.
-- [ ] Wire APNs push end to end (Fly server → device) — the "agent needs you" notification.
-- [ ] Submit for App Review (lead with push/native value for the 4.2 guardrail).
+
+Revival checklist (parked — only if the App Store push is revived):
+
+- ◻ You: create internal TestFlight group `Internal Testers` (Manual distribution) — see
+  step 3a; the publish step can't find it until you do. Build & signing already work;
+  this was the last gate before the build lands on your phone.
+- ◻ You: add `assets/icon.png`.
+- ◻ First Codemagic build → TestFlight install.
+- ◻ Wire APNs push end to end (Fly server → device) — the "agent needs you" notification.
+- ◻ Submit for App Review (lead with push/native value for the 4.2 guardrail).

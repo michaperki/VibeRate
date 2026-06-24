@@ -336,8 +336,10 @@ combination) driven by a scripted event stream, compare, then decide.
     (`messages.create`), **not** via the Batches API yet, and prompt-caches the rubric but
     classifies one prompt per request. Batches/backfill remain the order-of-magnitude lever
     if volume grows; the per-prompt incremental path is what's wired today.
-- [ ] **Prompt-quality-through-consequences** signals (needed clarification?
-  caused rework? referenced docs? survived later commits?).
+- ⚰️ *Retired (2026-06-24, graveyard):* **Prompt-quality-through-consequences** signals
+  (needed clarification? caused rework? survived later commits?) — a viewer-era scoring
+  ambition that predates the Drive pivot; not on the path to a first user. Revive only if
+  prompt-quality analytics becomes a deliberate goal.
 - [x] *Decision (mock → resolved):* outcome-rail placement — **per-archetype hybrid**,
   not one global mode. The rail is polymorphic about its own *placement*, the same way
   it's polymorphic about *content*: rich archetypes (screenshot redesign, spec/diff
@@ -418,10 +420,12 @@ combination) driven by a scripted event stream, compare, then decide.
   (`renderArchetype`); the only remainder is mirroring that pill **into the rail row**.
 - [ ] **Progressive / summary-first loading** (sessions up to ~1,300 msgs / 1.6 MB).
 - [ ] **Search + filters** (prompt/response text, files, commands, outcome, …).
-- [ ] **Conversation minimap.**
 - [ ] **Deep links + state restoration** (stable URLs per session/turn/card).
-- [ ] **Work episodes** — group related sessions into named efforts.
 - [ ] **Auto intent-based session titles.**
+- ⚰️ *Retired (2026-06-24, graveyard):* **Conversation minimap** and **Work episodes**
+  (group related sessions into named efforts) — viewer-era reading aids from before the
+  Drive pivot; the product is now drive-first and neither blocks a first user. Revive only
+  if deep session-reading ergonomics resurface as a goal.
 
 ### E. Capture enrichment — *bigger build*
 - [ ] **Evidence-capture skill** (Slice 5): screenshots for frontend, test/diff/

@@ -5890,6 +5890,7 @@ async function bootDashboard() {
       <header class="home-head"><h1>Your workspace</h1>
         <p class="dim-note">Signed in as ${who}. <button class="linkbtn" id="signout">sign out</button>${connect}</p></header>
       <div id="cli-connect"></div>
+      <div id="harness-rail"></div>
       <div id="ws-overview"></div>
     </div>`;
   el('#signout').onclick = async () => {
@@ -5918,6 +5919,7 @@ async function bootDashboard() {
         cc.disabled = false;
       }
     };
+  loadHarnessRail(); // instance-global; fills in when admin (drive rights), silent otherwise
   try {
     const projects = await loadProjects(); // sidebar; throws '401' if not authorized
     const ws = await api('/api/workspace');
@@ -5982,6 +5984,97 @@ function renderWorkspaceSection(ws, projects = []) {
       <div class="ov-stats">${statLine}</div>
     </section>
     ${recentBlock}`;
+}
+
+// The harness rail (PLAN_HARNESS_VERSIONING.md WS5). The coding-agent CLI is
+// *instance-global* — one host, one `claude`/`codex` binary shared by every
+// project — so its version + drift live in the overarching workspace home, not a
+// per-project cockpit. The data route (`/api/agent/harness`) is admin/loopback
+// guarded (it describes this instance's binaries), so we render only when the
+// caller has drive rights; a 403/absent runtime leaves the rail silent.
+async function loadHarnessRail() {
+  const node = el('#harness-rail');
+  if (!node) return;
+  if (!(await ensureDriveProbe())) return; // read-only / non-admin → no rail
+  let report;
+  try {
+    report = await driveApi('/harness');
+  } catch {
+    return; // runtime unavailable — stay quiet rather than show a broken card
+  }
+  node.innerHTML = renderHarnessRail(report);
+  node.querySelectorAll('.copyable').forEach((c) => {
+    c.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(c.textContent);
+        const prev = c.getAttribute('title');
+        c.classList.add('copied');
+        c.setAttribute('title', 'copied!');
+        setTimeout(() => { c.classList.remove('copied'); c.setAttribute('title', prev || 'copy'); }, 1200);
+      } catch { /* clipboard blocked — no-op */ }
+    };
+  });
+}
+
+// Render the per-harness drift cards. `report` = { harnesses: { claude, codex }, sampledAt }.
+function renderHarnessRail(report) {
+  const order = ['claude', 'codex'];
+  const hs = (report && report.harnesses) || {};
+  const cards = order
+    .map((k) => hs[k])
+    .filter(Boolean)
+    .map(renderHarnessCard)
+    .join('');
+  if (!cards) return '';
+  return `
+    <section class="home-section harness-rail">
+      <h2>⚙️ Coding-agent harness <span class="dim-note">the CLI every project drives on this instance</span></h2>
+      <div class="harness-cards">${cards}</div>
+    </section>`;
+}
+
+// One harness card: installed version + where it came from, drift vs. upstream
+// latest, and (when behind) the one-command bump. `h` = a status object from
+// harnessReport() (src/harness.js statusFor).
+function renderHarnessCard(h) {
+  const mark = h.name === 'claude' ? '✶' : h.name === 'codex' ? '◆' : '●';
+  // Not installed (e.g. Codex on a Claude-only box) — show it as a known-absent
+  // slot rather than omitting it, so "we don't run Codex here" is legible.
+  if (!h.available) {
+    return `<div class="harness-card off">
+      <div class="hc-top"><span class="hc-mark">${mark}</span><span class="hc-label">${esc(h.label)}</span></div>
+      <div class="hc-ver dim-note">not installed</div>
+    </div>`;
+  }
+  // Drift badge: up to date (0 behind) / N behind / unknown (no upstream data).
+  let badge;
+  if (h.behind == null) badge = `<span class="hc-badge unknown">latest unknown</span>`;
+  else if (h.behind === 0) badge = `<span class="hc-badge ok">✓ up to date</span>`;
+  else badge = `<span class="hc-badge behind">${h.behind} behind</span>`;
+
+  const srcLabel = { host: 'on host', build: 'baked in image', live: 'from live session' }[h.source] || h.source || '';
+  const src = srcLabel ? `<span class="hc-src">${esc(srcLabel)}</span>` : '';
+  const instDate = h.installedReleaseDate ? ` · ${fmtAgo(Date.parse(h.installedReleaseDate))}` : '';
+  const latestLine =
+    h.outdated && h.latest
+      ? `<div class="hc-latest">latest <code>${esc(h.latest)}</code>${h.releaseDate ? ` · ${fmtAgo(Date.parse(h.releaseDate))}` : ''}</div>`
+      : '';
+  // When behind, the safe primary action is the one-command bump (WS4) — we don't
+  // trigger a deploy from the browser; we hand over the command to run.
+  const bump = h.outdated
+    ? `<div class="hc-bump"><span class="dim-note">update:</span> <code class="copyable" title="copy">npm run bump-harness</code></div>`
+    : '';
+
+  return `<div class="harness-card${h.outdated ? ' is-behind' : ''}">
+    <div class="hc-top">
+      <span class="hc-mark">${mark}</span>
+      <span class="hc-label">${esc(h.label)}</span>
+      ${badge}
+    </div>
+    <div class="hc-ver"><code>${esc(h.installed || '—')}</code> ${src}<span class="hc-date">${instDate}</span></div>
+    ${latestLine}
+    ${bump}
+  </div>`;
 }
 
 // A prompt card: the before-context (collapsed), the prompt (the atom), and a
