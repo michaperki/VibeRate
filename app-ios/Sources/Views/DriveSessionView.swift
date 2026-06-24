@@ -41,6 +41,7 @@ struct DriveSessionView: View {
     @State private var eventCount = 0                // diagnostics: events seen on this stream
     @State private var streamHTTP: Int?              // diagnostics: stream response status
     @State private var lastSeq = 0                   // highest event seq seen — resume point for reconnect
+    @State private var historyLoaded = false         // a fresh open has backfilled the transcript
     @State private var awaitingResponse = false      // sent a prompt, nothing has streamed back yet
     @State private var showSetup = false             // a fresh project needs its workspace cloned first
     @State private var queuedPrompt: String?         // the prompt to re-send once the workspace is ready
@@ -57,17 +58,19 @@ struct DriveSessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 8) {
-                Text(status).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                // Diagnostic. "·" = no response yet (never connected). "↯200" = stream
-                // open but zero events (right id, empty buffer, or a stalled feed).
-                // "⚠403" etc = the stream was rejected. "⚡N" = events flowing.
-                Text(streamIndicator)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                Text(status).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 8)
+                // Plain-language stream state (dot + words) instead of the old cryptic
+                // ⚡/↯/⚠ glyphs: "Connecting…", "Stream connected", "History loaded",
+                // "Disconnected". The dot color carries the same at a glance.
+                HStack(spacing: 4) {
+                    Circle().fill(connectionColor).frame(width: 6, height: 6)
+                    Text(connectionLabel).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity)
-            .padding(6)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
             .background(.bar)
         }
         .task { await connect() }
@@ -92,11 +95,8 @@ struct DriveSessionView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if bubbles.isEmpty {
-                        Text("Nothing here yet. Send a message to steer the agent.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 40)
+                        if forceNew { newAgentEmptyState }
+                        else { idleEmptyState }
                     }
                     ForEach(bubbles) { b in
                         bubbleView(b)
@@ -119,6 +119,61 @@ struct DriveSessionView: View {
         }
     }
 
+    // MARK: - Empty states
+
+    /// Shown when attached/resumed but the transcript hasn't painted yet.
+    private var idleEmptyState: some View {
+        Text("Nothing here yet. Send a message to steer the agent.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 40)
+    }
+
+    /// Starter prompts for a brand-new agent — (chip label, prompt sent). Gives the blank
+    /// state something to do and shows what "driving" looks like.
+    private let starters: [(String, String)] = [
+        ("Review the repo", "Review the repo and summarize how it's structured and what it does."),
+        ("Continue the last plan", "Find the most recently worked PLAN_*.md and continue advancing it to completion."),
+        ("Fix an iOS bug", "Audit the native iOS app (app-ios/) for a bug and fix it."),
+        ("Summarize current state", "Summarize the current state of this project: what's shipped, what's in progress, and what's next."),
+    ]
+
+    /// The new-agent landing: project context + starter chips, so the screen reads as
+    /// "a fresh agent you're about to start", not a blank conversation.
+    private var newAgentEmptyState: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("New agent", systemImage: "sparkles")
+                    .font(.headline)
+                Text("Drive a fresh agent in \(project.name ?? project.slug). Type a message below, or start with one of these:")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+                ForEach(starters, id: \.0) { chip in
+                    Button { startWith(chip.1) } label: {
+                        Text(chip.0)
+                            .font(.footnote.weight(.medium))
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .padding(.horizontal, 8)
+                            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!ready || sending)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 24)
+    }
+
+    /// Fill the composer with a starter prompt and send it — starts the agent.
+    private func startWith(_ prompt: String) {
+        draft = prompt
+        Task { @MainActor in await send() }
+    }
+
     @ViewBuilder
     private func bubbleView(_ b: Bubble) -> some View {
         switch b.role {
@@ -132,9 +187,7 @@ struct DriveSessionView: View {
             MarkdownView(text: b.text)
                 .textSelection(.enabled)
         case .tool:
-            Text(b.text)
-                .font(.system(.footnote, design: .monospaced))
-                .foregroundStyle(.secondary)
+            toolChip(b.text)
         case .thinking:
             // Claude's live extended thinking — the same line-by-line reasoning the
             // terminal shows, streamed as it happens. Rendered dimmed/italic to read as
@@ -154,6 +207,29 @@ struct DriveSessionView: View {
                 .font(.footnote)
                 .foregroundStyle(.red)
         }
+    }
+
+    /// A tool call ("→ Read PLAN.md") or its result ("⤷ …output…") rendered as a compact
+    /// chip — visible but quiet, so a tool-heavy turn reads as a list of steps rather than
+    /// a wall of mono text that crowds out the agent's actual replies.
+    @ViewBuilder
+    private func toolChip(_ text: String) -> some View {
+        let isResult = text.hasPrefix("⤷")
+        let body = text.hasPrefix("→ ") ? String(text.dropFirst(2))
+                 : text.hasPrefix("⤷ ") ? String(text.dropFirst(2))
+                 : text
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: isResult ? "arrow.turn.down.right" : "wrench.and.screwdriver")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(body)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(isResult ? 3 : 2)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
     }
 
     /// Show a "Working…" row whenever the agent is busy but nothing is actively
@@ -223,7 +299,7 @@ struct DriveSessionView: View {
             //     adopt exactly that claude id (replays its on-disk transcript). This is
             //     the deliberate-resume path, distinct from the step-3 best-effort adopt.
             if let cid = resumeCid {
-                status = "Reconnecting…"
+                status = "Resuming agent…"
                 let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
                 sessionId = adopted.id
                 store(cid)
@@ -247,7 +323,7 @@ struct DriveSessionView: View {
             // 3. Nothing live — adopt the last session we drove here (survives the
             //    redeploy that push-to-main triggers; transcript is still on disk).
             if let cid = stored() {
-                status = "Reconnecting…"
+                status = "Resuming agent…"
                 let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
                 sessionId = adopted.id
                 status = humanStatus(adopted.status)
@@ -272,11 +348,21 @@ struct DriveSessionView: View {
     private func stored() -> String? { UserDefaults.standard.string(forKey: storeKey()) }
     private func store(_ cid: String) { UserDefaults.standard.set(cid, forKey: storeKey()) }
 
-    /// "·" no response · "↯200" connected, 0 events · "⚠<code>" rejected · "⚡N" flowing.
-    private var streamIndicator: String {
-        if eventCount > 0 { return "⚡\(eventCount)" }
-        if let code = streamHTTP { return (200..<300).contains(code) ? "↯\(code)" : "⚠\(code)" }
-        return "·"
+    /// Plain-language stream state for the header. "Connecting…" before the socket opens,
+    /// "Connected" once it's open but quiet, "Stream connected" while events flow live,
+    /// "History loaded" once a fresh open has backfilled the transcript, "Disconnected" on
+    /// a rejected stream.
+    private var connectionLabel: String {
+        if let code = streamHTTP, !(200..<300).contains(code) { return "Disconnected" }
+        if eventCount == 0 { return streamHTTP == nil ? "Connecting…" : "Connected" }
+        if assistantOpen || thinkingOpen || awaitingResponse { return "Stream connected" }
+        return historyLoaded ? "History loaded" : "Stream connected"
+    }
+
+    private var connectionColor: Color {
+        if let code = streamHTTP, !(200..<300).contains(code) { return .red }
+        if eventCount == 0 && streamHTTP == nil { return .orange }
+        return .green
     }
 
     /// Open the live SSE stream. `after` is the seq to resume past: 0 on a fresh open
@@ -293,6 +379,7 @@ struct DriveSessionView: View {
             do {
                 for try await event in sse.events() {
                     eventCount += 1
+                    if after == 0 { historyLoaded = true }   // a fresh open backfilled history
                     if let idStr = event.id, let n = Int(idStr) { lastSeq = n }
                     ingest(event.data)
                 }

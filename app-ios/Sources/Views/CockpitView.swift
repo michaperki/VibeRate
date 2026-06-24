@@ -60,9 +60,11 @@ struct CockpitView: View {
                             .buttonStyle(.plain)
                         }
                     } header: {
-                        Text(summary(store.agents))
+                        // The noun is the label ("Agents" / "2 agents"); the status mix
+                        // ("1 working · 1 idle") is detail in the footer, not the heading.
+                        Text(agentCountLabel(store.agents))
                     } footer: {
-                        Text("Tap an agent to drive it.").font(.caption2)
+                        Text(agentsFooter(store.agents)).font(.caption2)
                     }
                 }
                 conversationsSection
@@ -77,7 +79,10 @@ struct CockpitView: View {
                 Button {
                     driveTarget = DriveTarget()   // all-nil → forceNew
                 } label: {
+                    // Title + icon so the + unmistakably means "start a new agent",
+                    // not "add" something ambiguous.
                     Label("New agent", systemImage: "plus.circle.fill")
+                        .labelStyle(.titleAndIcon)
                 }
             }
         }
@@ -160,17 +165,23 @@ struct CockpitView: View {
         .listRowSeparator(.hidden)
     }
 
-    /// "2 working · 1 waiting · 3 idle" — the Now header line.
-    private func summary(_ agents: [RosterAgent]) -> String {
+    /// "Agent" / "2 agents" — the section's noun label (replaces the bare "2 idle").
+    private func agentCountLabel(_ agents: [RosterAgent]) -> String {
+        agents.count == 1 ? "Agent" : "\(agents.count) agents"
+    }
+
+    /// The status breakdown ("1 working · 1 idle") plus the tap hint, as footer detail.
+    private func agentsFooter(_ agents: [RosterAgent]) -> String {
         func count(_ pred: (String?) -> Bool) -> Int { agents.filter { pred($0.status) }.count }
-        let working = count { $0 == "working" || $0 == "running" || $0 == "starting" }
-        let waiting = count { $0 == "waiting" || $0 == "waiting_for_input" || $0 == "blocked" }
+        let working = count { ["working", "running", "starting"].contains($0 ?? "") }
+        let waiting = count { ["waiting", "waiting_for_input", "blocked"].contains($0 ?? "") }
         let idle = agents.count - working - waiting
         var parts: [String] = []
         if working > 0 { parts.append("\(working) working") }
-        if waiting > 0 { parts.append("\(waiting) waiting") }
+        if waiting > 0 { parts.append("\(waiting) needs input") }
         if idle > 0 { parts.append("\(idle) idle") }
-        return parts.isEmpty ? "Now" : parts.joined(separator: " · ")
+        let mix = parts.joined(separator: " · ")
+        return mix.isEmpty ? "Tap an agent to drive it." : "\(mix) · Tap an agent to drive it."
     }
 }
 
@@ -190,37 +201,40 @@ private struct AgentRow: View {
                 Spacer(minLength: 8)
                 if let elapsed { Text(elapsed).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
             }
-            if agent.plan != nil || (agent.ctxPct ?? 0) > 0 {
-                HStack(spacing: 8) {
-                    if let plan = agent.plan {
-                        Label(plan, systemImage: "diamond.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    if let pct = agent.ctxPct, pct > 0 { CtxMeter(pct: pct) }
+            HStack(spacing: 8) {
+                // Explicit status word — not just the colored dot — so "what state is
+                // this agent in" never has to be inferred.
+                StatusPill(text: statusLabel, color: statusColor)
+                if let plan = agent.plan {
+                    Label(plan, systemImage: "diamond.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+                Spacer(minLength: 8)
+                if let pct = agent.ctxPct, pct > 0 { CtxMeter(label: "Context", pct: pct) }
             }
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 
-    /// The agent's current action ("edit agent.js"), else its title, else a status word.
+    /// The agent's current action ("edit agent.js"), else its title, else a neutral line
+    /// (the status itself is carried by the pill below, so we don't repeat it here).
     private var primaryLine: String {
         if let a = agent.lastAction, let label = a.label, !label.isEmpty {
             let verb = (a.verb ?? "").isEmpty ? "" : "\(a.verb!) "
             return "\(verb)\(label)"
         }
         if let title = agent.title, !title.isEmpty { return title }
-        return humanStatus
+        return "No recent activity"
     }
 
-    private var humanStatus: String {
+    /// The status as a short label for the pill: "Working" / "Needs input" / "Error" / "Idle".
+    private var statusLabel: String {
         switch agent.status {
-        case "working", "running", "starting": return "Working…"
-        case "waiting", "waiting_for_input", "blocked": return "Waiting for you"
+        case "working", "running", "starting": return "Working"
+        case "waiting", "waiting_for_input", "blocked": return "Needs input"
         case "error", "failed": return "Error"
         default: return "Idle"
         }
@@ -247,41 +261,75 @@ private struct AgentRow: View {
     }
 }
 
-/// One past conversation: preview title, a "running" tag if it's still live, message
-/// count, and how long ago it was last active.
+/// One past conversation, styled deliberately *unlike* a live agent row (leading
+/// history icon + a trailing Resume/Open affordance, no live meters) so the two
+/// sections don't blur together. Metadata — status, message count, last-active —
+/// disambiguates rows whose titles all truncate to the same prefix.
 private struct ConversationRow: View {
     let session: WorkspaceSession
     let now: Date
 
+    private var isLive: Bool { session.liveId != nil }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.subheadline)
-                .lineLimit(1)
-            HStack(spacing: 8) {
-                if session.liveId != nil {
-                    Label("running", systemImage: "circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
-                        .labelStyle(.titleAndIcon)
-                }
-                if let t = session.userTurns, t > 0 {
-                    Text("\(t) message\(t == 1 ? "" : "s")")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if let rel = relative {
-                    Text(rel).font(.caption2).foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Image(systemName: isLive ? "waveform.circle.fill" : "clock.arrow.circlepath")
+                .font(.title3)
+                .foregroundStyle(isLive ? Color.green : .secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                HStack(spacing: 10) {
+                    Text(statusLabel)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(statusColor)
+                    if let t = session.userTurns, t > 0 {
+                        Label("\(t)", systemImage: "bubble.left")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let rel = relative {
+                        Label(rel, systemImage: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            Spacer(minLength: 8)
+            // The action this row performs — explicit, so resuming reads as a choice.
+            Text(isLive ? "Open" : "Resume")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tint)
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
         .contentShape(Rectangle())
     }
 
     private var title: String {
         if let t = session.title, !t.isEmpty { return t }
         return "Untitled conversation"
+    }
+
+    /// A live convo shows its running state; an offline one is explicitly "Resumable".
+    private var statusLabel: String {
+        guard isLive else { return "Resumable" }
+        switch session.status {
+        case "waiting", "waiting_for_input", "blocked": return "Needs input"
+        case "working", "running", "starting": return "Working"
+        default: return "Running"
+        }
+    }
+
+    private var statusColor: Color {
+        guard isLive else { return .secondary }
+        switch session.status {
+        case "waiting", "waiting_for_input", "blocked": return .orange
+        default: return .green
+        }
     }
 
     /// "5m ago" from the ms-epoch `lastAt`. Ticks off the cockpit's shared `now`.
@@ -295,13 +343,32 @@ private struct ConversationRow: View {
     }
 }
 
-/// A compact context-window fill bar (green → orange → red as the window fills).
+/// A small status word in a tinted capsule — gives every agent row an explicit state
+/// label, not just a colored dot.
+private struct StatusPill: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.16), in: Capsule())
+            .foregroundStyle(color)
+    }
+}
+
+/// A labeled context-window fill bar (green → orange → red as the window fills). The
+/// label is required — a bare "100%" is meaningless, "Context 100%" is not.
 private struct CtxMeter: View {
+    var label: String = "Context"
     let pct: Int
-    private let width: CGFloat = 44
+    private let width: CGFloat = 40
 
     var body: some View {
         HStack(spacing: 5) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.2)).frame(width: width, height: 5)
                 Capsule().fill(color).frame(width: width * CGFloat(min(pct, 100)) / 100, height: 5)

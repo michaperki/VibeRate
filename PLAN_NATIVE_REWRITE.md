@@ -299,6 +299,28 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       stays separate and unmistakable. New `WorkspaceSession` model + `workspaceSessions` on
       `APIClient`. *No server change — the workspace-sessions endpoint already shipped.*
       **Pending Codemagic build + on-device verify.**
+- [x] **State-machine legibility pass** (2026-06-24) — the screens around projects /
+      agents / sessions / conversations blurred together; this makes "where am I" obvious
+      without touching the dark/rounded/big-type visual direction or the compact inline
+      header. (a) **Cockpit section labels**: the "Now" header now reads the noun ("Agents"
+      / "2 agents") with the working/needs-input/idle mix demoted to the footer — replacing
+      the bare, ambiguous "2 idle". (b) **Labeled meters**: `CtxMeter` is now "Context NN%"
+      (a bare percentage is meaningless); every agent row carries an explicit **status pill**
+      ("Working" / "Needs input" / "Error" / "Idle"), not just a colored dot. (c) **`+` =
+      "New agent"** (title+icon in the toolbar, not a bare plus). (d) **Conversations rows
+      restyled distinct from live agent rows** — leading history icon, status word
+      ("Resumable" / "Working" / "Needs input"), message-count + last-active metadata to
+      disambiguate same-prefix truncated titles, and a trailing **Resume / Open** affordance
+      so resuming reads as a deliberate choice. (e) **Drive status bar** replaces the cryptic
+      `⚡N`/`↯200`/`⚠403` glyphs with plain words + a dot: "Connecting…" → "Connected" →
+      "Stream connected" / "History loaded" / "Disconnected"; resume paths say "Resuming
+      agent…". (f) **New-agent empty state** is no longer blank: project context + four
+      starter chips ("Review the repo", "Continue the last plan", "Fix an iOS bug",
+      "Summarize current state") that start the agent on tap. (g) **Tool-call lines → compact
+      chips** (icon + monospaced, tinted card, line-clamped) so a tool-heavy turn reads as
+      quiet steps, not a wall of mono text. `CockpitView.swift` + `DriveSessionView.swift`
+      (+ `ProjectsView.swift`: "N conversations", "Live agent"). *No server change.*
+      **Pending Codemagic build + on-device verify** (the Linux box can't compile Swift).
 - ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
       plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same
       `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.

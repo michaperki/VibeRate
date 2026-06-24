@@ -22,10 +22,10 @@ struct ProjectsView: View {
                             Text(project.name ?? project.slug).font(.headline)
                             HStack(spacing: 10) {
                                 if project.streaming == true {
-                                    Label("live", systemImage: "dot.radiowaves.left.and.right")
+                                    Label("Live agent", systemImage: "dot.radiowaves.left.and.right")
                                         .foregroundStyle(.green)
                                 }
-                                Text("\(project.sessionCount) sessions")
+                                Text("\(project.sessionCount) conversation\(project.sessionCount == 1 ? "" : "s")")
                                 if let vis = project.visibility { Text(vis) }
                             }
                             .font(.caption)
