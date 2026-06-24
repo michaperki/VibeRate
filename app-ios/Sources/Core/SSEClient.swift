@@ -44,6 +44,10 @@ final class SSEClient: NSObject, URLSessionDataDelegate {
             var req = URLRequest(url: url)
             req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            // Refuse compression: URLSession transparently buffers a gzipped body until it
+            // can decode a block, which on a slow SSE trickle holds events back. (The server
+            // already skips gzip on text/event-stream — this is belt-and-suspenders.)
+            req.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
             req.timeoutInterval = 3600
             if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
 
@@ -51,6 +55,10 @@ final class SSEClient: NSObject, URLSessionDataDelegate {
             config.timeoutIntervalForRequest = 3600
             config.timeoutIntervalForResource = 86_400
             config.waitsForConnectivity = true
+            // No caching: the URL loading system can buffer a response body to write it to
+            // the cache, delaying the per-chunk delegate callbacks an endless stream needs.
+            config.urlCache = nil
+            config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
             self.session = session
 

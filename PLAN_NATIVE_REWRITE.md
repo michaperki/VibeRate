@@ -229,9 +229,28 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       stack into labelled key/value cards on the phone, mirroring the web's `data-label`
       CSS. Streamed and backfilled assistant text share the one `.assistant` path, so
       they render identically.
-- ◻ Rich transcript rendering — `thinking` is still skipped on the phone (`tool_use`/
-      `tool_result` now render); fold thinking in next, plus diffs.
+- [x] **Live thinking + stream auto-reconnect** (2026-06-24) — two coupled fixes.
+      (a) *Live thinking*: Claude's extended thinking already streamed to the phone
+      (`thinking_start`/`thinking_delta`/`thinking`, `src/agent.js:563`) but `ingest()`
+      dropped it. It now renders as an ephemeral dimmed `✦` trace — the same line-by-line
+      reasoning the terminal shows, streamed live and cleared at the turn boundary so the
+      transcript stays clean (mirrors the web Drive view, `public/app.js:5300`). Free
+      insight: thinking is a byproduct of the model reasoning, not something the agent
+      spends tokens reporting (that's what `mcp__viberate__report` is for — coarse
+      plan/roster status, deliberately separate). (b) *Auto-reconnect*: the native
+      `SSEClient` had none, so once the server closed an idle/deployed connection, live
+      events stopped and only reappeared when the user re-entered the chat (a manual
+      reconnect via `?after=0`) — the "messages refresh instead of stream" bug. The
+      browser's `EventSource` reconnects for free; `DriveSessionView.openStream` now does
+      too, resuming from `lastSeq` (`?after=<seq>` → server backfills only the gap via the
+      `id:`/Last-Event-ID dedupe, `agentRoutes.js:357`), skipping a 4xx so it can't
+      hot-loop. Plus `SSEClient` refuses gzip + caching so URLSession can't buffer the
+      trickle. *Both text and thinking ride the same stream, so this unblocks both.*
 - ◻ Optimistic-send polish: a "Working…" spinner row while the agent runs between events.
+- ◻ **New agent from the phone** — the `+` in CockpitView already opens a fresh Drive,
+      but `POST /api/agent/sessions` 409s if the project's workspace isn't cloned
+      (`agentRoutes.js:182`) and there's no setup affordance on iOS. Add a workspace-setup
+      step (`POST /api/agent/workspace/:slug/setup`) so a fresh project can start an agent.
 - ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
       plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same
       `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.

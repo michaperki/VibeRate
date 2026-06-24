@@ -13,7 +13,7 @@ struct DriveSessionView: View {
     var initialStatus: String? = nil
 
     struct Bubble: Identifiable {
-        enum Role { case user, assistant, tool, error }
+        enum Role { case user, assistant, tool, thinking, error }
         let id = UUID()
         let role: Role
         var text: String
@@ -27,9 +27,11 @@ struct DriveSessionView: View {
     @State private var sending = false
     @State private var ready = false                 // initial connect resolved
     @State private var assistantOpen = false         // last bubble is an in-progress assistant block
+    @State private var thinkingOpen = false          // last bubble is an in-progress thinking block
     @State private var pendingEcho: String?          // optimistic prompt awaiting its stream echo
     @State private var eventCount = 0                // diagnostics: events seen on this stream
     @State private var streamHTTP: Int?              // diagnostics: stream response status
+    @State private var lastSeq = 0                   // highest event seq seen — resume point for reconnect
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -106,6 +108,20 @@ struct DriveSessionView: View {
             Text(b.text)
                 .font(.system(.footnote, design: .monospaced))
                 .foregroundStyle(.secondary)
+        case .thinking:
+            // Claude's live extended thinking — the same line-by-line reasoning the
+            // terminal shows, streamed as it happens. Rendered dimmed/italic to read as
+            // meta, and cleared at the turn boundary (see clearThinking) so a finished
+            // turn leaves a clean transcript — matching the web Drive view.
+            HStack(alignment: .top, spacing: 6) {
+                Text("✦").font(.footnote).foregroundStyle(.tertiary)
+                Text(b.text)
+                    .font(.footnote)
+                    .italic()
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            .padding(.vertical, 2)
         case .error:
             Text(b.text)
                 .font(.footnote)
@@ -195,30 +211,48 @@ struct DriveSessionView: View {
         return "·"
     }
 
-    private func openStream(_ id: String) {
+    /// Open the live SSE stream. `after` is the seq to resume past: 0 on a fresh open
+    /// (the server replays the whole buffered transcript so the convo re-paints its
+    /// history), or `lastSeq` on a reconnect (it backfills only the gap, no dupes).
+    private func openStream(_ id: String, after: Int = 0) {
         streamTask?.cancel()
-        eventCount = 0
+        if after == 0 { eventCount = 0; lastSeq = 0 }
         streamHTTP = nil
-        // `?after=0` asks the server to replay the whole buffered transcript before live
-        // events (subscribe() backfills everything with seq > 0) — so opening a convo
-        // re-paints its history instead of starting blank.
-        let url = APIConfig.url("/api/agent/sessions/\(id)/stream?after=0")
+        let url = APIConfig.url("/api/agent/sessions/\(id)/stream?after=\(after)")
         let sse = SSEClient(url: url, token: token)
         sse.onOpen = { code in Task { @MainActor in streamHTTP = code } }
         streamTask = Task { @MainActor in
             do {
                 for try await event in sse.events() {
                     eventCount += 1
+                    if let idStr = event.id, let n = Int(idStr) { lastSeq = n }
                     ingest(event.data)
                 }
-                // Stream closed cleanly. Zero events on this id means an empty buffer.
-                if eventCount == 0 { status = "Connected, but no transcript came back." }
+                // Stream closed by the server (idle drop / deploy cycle). Zero events on a
+                // *fresh* open means an empty buffer; otherwise reconnect to keep updates
+                // flowing — the native client has no auto-reconnect, so without this live
+                // events stop after the first backfill and only reappear on re-entry.
+                if eventCount == 0 && after == 0 { status = "Connected, but no transcript came back." }
+                await reconnect(id)
             } catch is CancellationError {
-                // we re-opened the stream — not an error to surface
+                // we re-opened the stream or left the view — not an error to surface
             } catch {
                 status = "Stream error: \(friendly(error))"
+                await reconnect(id)
             }
         }
+    }
+
+    /// Re-open a dropped stream, resuming from `lastSeq`. This is what the browser's
+    /// `EventSource` does for free; URLSession doesn't, so a healthy stream that the
+    /// server closes (idle/deploy) would otherwise go silent until the user re-enters.
+    /// Skips a rejected stream (auth/routing) so a 4xx doesn't hot-loop.
+    private func reconnect(_ id: String) async {
+        if Task.isCancelled { return }
+        if let code = streamHTTP, !(200..<300).contains(code) { return }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        if Task.isCancelled { return }
+        openStream(id, after: lastSeq)
     }
 
     private func send() async {
@@ -267,10 +301,23 @@ struct DriveSessionView: View {
                 if t == pendingEcho { pendingEcho = nil }          // our own optimistic bubble
                 else { bubbles.append(Bubble(role: .user, text: t)) }
                 assistantOpen = false
+                clearThinking()
+            }
+        case "thinking_start":
+            bubbles.append(Bubble(role: .thinking, text: ""))
+            thinkingOpen = true
+            status = "Thinking…"
+        case "thinking_delta":
+            if let t = obj["text"] as? String { appendThinking(t) }
+        case "thinking":
+            if let t = obj["text"] as? String, !t.isEmpty {
+                bubbles.append(Bubble(role: .thinking, text: t))
+                thinkingOpen = false
             }
         case "assistant_text_start":
             bubbles.append(Bubble(role: .assistant, text: ""))
             assistantOpen = true
+            thinkingOpen = false
         case "assistant_text_delta":
             if let t = obj["text"] as? String { appendAssistant(t) }
         case "assistant_text":
@@ -296,8 +343,13 @@ struct DriveSessionView: View {
                     assistantOpen = false
                 }
             }
-        case "block_stop", "turn_end", "result", "stopped":
+        case "block_stop":
             assistantOpen = false
+        case "turn_end", "result", "stopped":
+            // Turn over — drop the ephemeral thinking trace, leaving a clean transcript
+            // of prompts, replies, and tool activity (matches the web Drive view).
+            assistantOpen = false
+            clearThinking()
         case "status":
             if let s = obj["status"] as? String { status = humanStatus(s) }
         case "error":
@@ -315,6 +367,25 @@ struct DriveSessionView: View {
             bubbles.append(Bubble(role: .assistant, text: delta))
             assistantOpen = true
         }
+    }
+
+    /// Coalesce streamed `thinking_delta`s into one growing thinking bubble, the same way
+    /// `appendAssistant` does for reply text.
+    private func appendThinking(_ delta: String) {
+        if thinkingOpen, var last = bubbles.last, last.role == .thinking {
+            last.text += delta
+            bubbles[bubbles.count - 1] = last
+        } else {
+            bubbles.append(Bubble(role: .thinking, text: delta))
+            thinkingOpen = true
+        }
+    }
+
+    /// Remove the ephemeral thinking trace at a turn boundary so it streams live but
+    /// doesn't pile up in the transcript.
+    private func clearThinking() {
+        bubbles.removeAll { $0.role == .thinking }
+        thinkingOpen = false
     }
 
     /// Turn raw session/status strings into something a first-time user understands —
