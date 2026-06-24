@@ -1,57 +1,118 @@
 import Foundation
 
-/// A minimal Server-Sent-Events reader built on `URLSession.bytes`. The key win over
-/// the web app: this CAN set an `Authorization` header (browser `EventSource` can't),
-/// so the native client talks to the admin-guarded `/stream` route directly — the
-/// `?access_token=`-in-URL hack the wrapper needed simply doesn't exist here
-/// (PLAN_NATIVE_AUTH.md).
-struct SSEClient {
-    let url: URL
-    let token: String?
-
+/// A Server-Sent-Events reader for the VibeRate stream routes. The key win over the web
+/// app: this sets an `Authorization` header (browser `EventSource` can't), so the native
+/// client talks to the admin-guarded `/stream` routes directly — no `?access_token=` hack.
+///
+/// **Why a `URLSessionDataDelegate` and not `URLSession.bytes(for:).lines`:** `.bytes`
+/// buffers a streaming response and doesn't yield lines until the body completes — but an
+/// SSE stream never completes, so `for try await line in bytes.lines` hangs forever,
+/// delivering zero events while the connection sits open (the "·, nothing ever renders"
+/// bug). The delegate gets each `didReceive data` chunk as it arrives, so we parse frames
+/// incrementally. This is the standard way to consume SSE on URLSession.
+final class SSEClient: NSObject, URLSessionDataDelegate {
     struct Event {
         let id: String?
         let data: String
     }
 
+    /// Fires once with the HTTP status as soon as the response headers arrive — a
+    /// diagnostic so the UI can show "connected (200), awaiting events" vs an error code,
+    /// distinct from "never connected".
+    var onOpen: ((Int) -> Void)?
+
+    private let url: URL
+    private let token: String?
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var continuation: AsyncThrowingStream<Event, Error>.Continuation?
+
+    // SSE frame accumulation (touched only on the delegate's serial queue).
+    private var buffer = Data()
+    private var curId: String?
+    private var curData: [String] = []
+
+    init(url: URL, token: String?) {
+        self.url = url
+        self.token = token
+    }
+
     func events() -> AsyncThrowingStream<Event, Error> {
         AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    var req = URLRequest(url: url)
-                    req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    req.timeoutInterval = 3600
-                    if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            self.continuation = continuation
 
-                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
-                    if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                        throw APIError.http(http.statusCode, "stream rejected")
-                    }
+            var req = URLRequest(url: url)
+            req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            req.timeoutInterval = 3600
+            if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
 
-                    var id: String?
-                    var dataLines: [String] = []
-                    for try await line in bytes.lines {
-                        if line.isEmpty {                       // blank line = dispatch the event
-                            if !dataLines.isEmpty {
-                                continuation.yield(Event(id: id, data: dataLines.joined(separator: "\n")))
-                            }
-                            id = nil
-                            dataLines = []
-                            continue
-                        }
-                        if line.hasPrefix(":") { continue }     // comment / heartbeat
-                        if line.hasPrefix("id:") {
-                            id = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                        } else if line.hasPrefix("data:") {
-                            dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 3600
+            config.timeoutIntervalForResource = 86_400
+            config.waitsForConnectivity = true
+            let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+            self.session = session
+
+            let task = session.dataTask(with: req)
+            self.task = task
+            continuation.onTermination = { [weak self] _ in
+                self?.task?.cancel()
+                self?.session?.invalidateAndCancel()   // breaks URLSession→delegate retain
             }
-            continuation.onTermination = { _ in task.cancel() }
+            task.resume()
+        }
+    }
+
+    // MARK: - URLSessionDataDelegate
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        if let http = response as? HTTPURLResponse {
+            onOpen?(http.statusCode)
+            if !(200..<300).contains(http.statusCode) {
+                continuation?.finish(throwing: APIError.http(http.statusCode, "stream rejected"))
+                completionHandler(.cancel)
+                return
+            }
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        buffer.append(data)
+        // Drain complete lines (delimited by \n) as they arrive.
+        while let nl = buffer.firstIndex(of: 0x0A) {
+            let lineData = buffer.subdata(in: buffer.startIndex..<nl)
+            buffer.removeSubrange(buffer.startIndex...nl)
+            var line = String(data: lineData, encoding: .utf8) ?? ""
+            if line.hasSuffix("\r") { line.removeLast() }   // tolerate CRLF
+            handle(line)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error { continuation?.finish(throwing: error) }
+        else { continuation?.finish() }
+    }
+
+    // MARK: - SSE parsing
+
+    private func handle(_ line: String) {
+        if line.isEmpty {                       // blank line = dispatch the event
+            if !curData.isEmpty {
+                continuation?.yield(Event(id: curId, data: curData.joined(separator: "\n")))
+            }
+            curId = nil
+            curData = []
+            return
+        }
+        if line.hasPrefix(":") { return }       // comment / heartbeat
+        if line.hasPrefix("id:") {
+            curId = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("data:") {
+            curData.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
         }
     }
 }

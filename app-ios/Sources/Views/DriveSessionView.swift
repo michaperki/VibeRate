@@ -29,7 +29,7 @@ struct DriveSessionView: View {
     @State private var assistantOpen = false         // last bubble is an in-progress assistant block
     @State private var pendingEcho: String?          // optimistic prompt awaiting its stream echo
     @State private var eventCount = 0                // diagnostics: events seen on this stream
-    @State private var streamConnected = false       // SSE opened and is delivering
+    @State private var streamHTTP: Int?              // diagnostics: stream response status
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -45,10 +45,10 @@ struct DriveSessionView: View {
             HStack(spacing: 8) {
                 Text(status).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                // Diagnostic: ⚡ + live event count once the stream connects, a dot while
-                // it hasn't. If this stays "·" the stream never opened; if it climbs but no
-                // bubbles appear, events are arriving but not rendering.
-                Text(streamConnected ? "⚡\(eventCount)" : "·")
+                // Diagnostic. "·" = no response yet (never connected). "↯200" = stream
+                // open but zero events (right id, empty buffer, or a stalled feed).
+                // "⚠403" etc = the stream was rejected. "⚡N" = events flowing.
+                Text(streamIndicator)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -188,29 +188,34 @@ struct DriveSessionView: View {
     private func stored() -> String? { UserDefaults.standard.string(forKey: storeKey()) }
     private func store(_ cid: String) { UserDefaults.standard.set(cid, forKey: storeKey()) }
 
+    /// "·" no response · "↯200" connected, 0 events · "⚠<code>" rejected · "⚡N" flowing.
+    private var streamIndicator: String {
+        if eventCount > 0 { return "⚡\(eventCount)" }
+        if let code = streamHTTP { return (200..<300).contains(code) ? "↯\(code)" : "⚠\(code)" }
+        return "·"
+    }
+
     private func openStream(_ id: String) {
         streamTask?.cancel()
         eventCount = 0
-        streamConnected = false
+        streamHTTP = nil
         // `?after=0` asks the server to replay the whole buffered transcript before live
         // events (subscribe() backfills everything with seq > 0) — so opening a convo
         // re-paints its history instead of starting blank.
         let url = APIConfig.url("/api/agent/sessions/\(id)/stream?after=0")
         let sse = SSEClient(url: url, token: token)
+        sse.onOpen = { code in Task { @MainActor in streamHTTP = code } }
         streamTask = Task { @MainActor in
             do {
                 for try await event in sse.events() {
-                    streamConnected = true
                     eventCount += 1
                     ingest(event.data)
                 }
-                // The server closed the stream cleanly. If we never got a single event,
-                // say so plainly — that means the session has no transcript on this id.
+                // Stream closed cleanly. Zero events on this id means an empty buffer.
                 if eventCount == 0 { status = "Connected, but no transcript came back." }
             } catch is CancellationError {
                 // we re-opened the stream — not an error to surface
             } catch {
-                streamConnected = false
                 status = "Stream error: \(friendly(error))"
             }
         }
