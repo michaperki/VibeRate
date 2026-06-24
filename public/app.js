@@ -4982,7 +4982,12 @@ async function resumeDrive(slug) {
           claudeSessionId: da.claudeSessionId,
           cwd: da.cwd,
           projectSlug: da.project,
-          permissionMode: da.permissionMode,
+          // A redeploy wipes the in-memory session, so `da.permissionMode` is often
+          // empty on a cold reconnect — without this the server adopt defaults to
+          // 'default' (ask-before-write) and the resumed agent silently loses write
+          // access ("suddenly no write permissions"). Drive is bypass-by-contract
+          // (same fallback as the start modal + the iOS app), so resume into bypass.
+          permissionMode: da.permissionMode || 'bypassPermissions',
         });
       } catch {
         // Truly unrecoverable (no transcript on disk). Drop the handle and show the
