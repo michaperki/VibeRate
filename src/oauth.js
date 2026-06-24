@@ -1,5 +1,5 @@
-import { upsertUser, getUser, setGithubConnection, clearGithubConnection, getGithubToken, linkOwner } from './accounts.js';
-import { signValue, verifyValue, readCookie, setCookie, clearCookie, newToken, hashToken } from './auth.js';
+import { upsertUser, getUser, setGithubConnection, clearGithubConnection, getGithubToken, linkOwner, findUserByOwnerHash } from './accounts.js';
+import { signValue, verifyValue, readCookie, setCookie, clearCookie, newToken, hashToken, bearer } from './auth.js';
 
 // Social sign-in for the web dashboard. Standard OAuth2 web flow, hand-rolled on
 // fetch (no deps). The CLI never touches this — it keeps using its machine token;
@@ -53,6 +53,20 @@ export function configuredProviders() {
 export function currentUser(req) {
   const sess = verifyValue(readCookie(req, 'vbrt_sid'));
   return sess && sess.uid ? getUser(sess.uid) : null;
+}
+
+// The account for a request from EITHER the web session cookie OR an account-linked
+// bearer token. The native app (and pasted-token sign-in) has no cookie — only the
+// bearer token the native exchange minted and linked via linkOwner — so any endpoint
+// that must work for the phone has to resolve the token too. Without this, native
+// OAuth completes, saves its token, then `/api/me` 401s and the app bounces back to
+// the sign-in screen (looks like "the login button doesn't work"). See PLAN_NATIVE_AUTH.md.
+export function currentAccount(req) {
+  const u = currentUser(req);
+  if (u) return u;
+  const tok = bearer(req);
+  if (!tok) return null;
+  return findUserByOwnerHash(hashToken(tok)) || null;
 }
 
 const SESSION_AGE = 30 * 24 * 3600 * 1000;
@@ -141,7 +155,8 @@ export function mountAuth(app) {
   });
 
   app.get('/api/me', (req, res) => {
-    const u = currentUser(req);
+    // Cookie session OR account-linked bearer token — the native app only has the latter.
+    const u = currentAccount(req);
     if (!u) return res.status(401).json({ error: 'not signed in' });
     res.json({ id: u.id, email: u.email, name: u.name, provider: u.provider, projectCount: (u.ownerHashes || []).length });
   });

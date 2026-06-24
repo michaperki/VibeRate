@@ -34,10 +34,10 @@ app-ios/
       AuthModel.swift      ASWebAuthenticationSession → deep-link → token exchange
     Views/
       RootView.swift       loading / signed-out / signed-in switch
-      SignInView.swift     GitHub / Google buttons
+      SignInView.swift     GitHub / Google buttons + "use an access token" fallback
       ProjectsView.swift   GET /api/projects
       DriveSessionView.swift  live SSE transcript (read-only)
-  Assets.xcassets/         AppIcon (placeholder) + AccentColor
+  Assets.xcassets/         AppIcon (branded "V", 1024 no-alpha) + AccentColor
 ```
 
 `VibeRate.xcodeproj` and `Support/Info.plist` are **generated** (gitignored) — `xcodegen`
@@ -57,6 +57,24 @@ xcodegen generate
 open VibeRate.xcodeproj
 ```
 
+### CI gotchas the first deploy hit (don't re-learn these)
+
+- **Don't set `working_directory: app-ios` on the `ios-native` workflow.** `xcode-project
+  build-ipa` exports the IPA to the **clone-root** `build/ios/ipa/` no matter what, so with
+  a working directory the publish glob looked in `app-ios/build/ios/ipa/`, found nothing, and
+  shipped a **green build with zero upload**. Run from the clone root; only `cd app-ios` for
+  `xcodegen generate`.
+- **App icon is required to pass App Store validation** (error 90023). The `AppIcon.appiconset`
+  needs an actual PNG with a `filename` in `Contents.json`, and the 1024 marketing icon must
+  be **flattened (no alpha)** — generate it with ffmpeg on the Drive box, no Mac needed:
+  `ffmpeg -f lavfi -i "gradients=s=1024x1024:..." -frames:v 1 -vf drawtext=... -pix_fmt rgb24 AppIcon.png`.
+- **iPhone-only** (`TARGETED_DEVICE_FAMILY: "1"`). Targeting iPad too (`1,2`) makes Apple demand
+  a 152×152 iPad icon (90023) **and** all four interface orientations for iPad multitasking
+  (90474). Phone-first app → drop iPad, both gates clear at once.
+- A Swift-only push currently **also redeploys the Fly server** — `fly-deploy.yml` isn't
+  path-filtered off `app-ios/**` (the Drive token can't push `.github/workflows/`). Harmless,
+  just an extra deploy.
+
 ## Auth flow (RFC 8252 deep-link OAuth)
 
 1. Tap a provider → `ASWebAuthenticationSession` opens
@@ -71,6 +89,12 @@ open VibeRate.xcodeproj
 Server side lives in `../src/oauth.js` (the `native` branch of the OAuth callback +
 `/auth/native/:provider/start` + `/api/auth/native/exchange`).
 
+> **Note (2026-06-24):** the token from step 3 only works because `/api/me` now resolves an
+> account-linked bearer token (`currentAccount`), not just the web session cookie — otherwise
+> OAuth completes but `me()` 401s and the app looks "stuck" on sign-in. If the social buttons
+> ever fail on a device, **"Use an access token instead"** on the sign-in screen is the
+> guaranteed fallback (paste a token minted in the web app). See `../PLAN_NATIVE_AUTH.md`.
+
 ## Next slices
 
 - Send a Drive prompt (`POST /api/agent/sessions/:id/message`) + optimistic bubble.
@@ -78,4 +102,4 @@ Server side lives in `../src/oauth.js` (the `native` branch of the OAuth callbac
 - Cockpit roster via `/api/agent/roster/stream`.
 - Brain view (`/api/projects/:slug/docs`).
 - APNs push ("your agent is asking a question / finished") for the App Store 4.2 guardrail.
-- Real app icon (`Assets.xcassets/AppIcon.appiconset`).
+- Polish the app icon (currently a generated branded "V" placeholder — fine for TestFlight).

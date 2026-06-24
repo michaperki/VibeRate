@@ -69,6 +69,17 @@ Web sign-in is untouched (it still requires the state cookie). Security posture 
 single-user RCE-capable-admin-token tradeoff already accepted in `PLAN_NATIVE_AUTH.md`;
 revisit at multi-user.
 
+> **Bearer-token gotcha (fixed 2026-06-24).** The native flow ends by calling `/api/me`
+> with the minted bearer token, but `/api/me` originally authenticated via `currentUser`
+> — the **session cookie only**. The phone has no cookie, so OAuth would complete, save its
+> token, then `me()` 401'd and the app fell back to the sign-in screen — indistinguishable
+> from "the login button doesn't work." Fix: `currentAccount(req)` in `src/oauth.js`
+> resolves the account from the cookie **or** an account-linked bearer token
+> (`findUserByOwnerHash`), and `/api/me` uses it. This is a *server* fix, so it unblocks the
+> OAuth buttons in the build **already on the phone** — no new TestFlight build needed for
+> that part. A pasted-token fallback ("Use an access token instead", mirroring the PWA) was
+> also added to `SignInView` and rides the same fixed path.
+
 ### First milestone (shipped as the template)
 
 The thinnest end-to-end proof of the whole pipe: **OAuth sign-in → projects list
@@ -81,24 +92,64 @@ Native **flips the loop slower**. Capacitor's webview pulled the live URL, so fe
 needed no rebuild. Native needs a **~10–15 min Codemagic build per UI change** to reach the
 phone, and the **Linux Drive box can't compile Swift** — Codemagic is the compiler, the
 device is the verifier. New loop: Drive writes Swift → push `app-ios/**` → Codemagic builds
-→ TestFlight → install. (`fly-deploy.yml` ignores `app-ios/**` so a Swift-only push doesn't
-also redeploy/restart the server.)
+→ TestFlight → install.
+
+> **Heads-up:** `fly-deploy.yml` does **not** path-filter `app-ios/**` (the filter was
+> dropped — the Drive box's GitHub token lacks `workflow` scope, so it can't push
+> `.github/workflows/`). So a Swift-only push **also redeploys/restarts the server**.
+> Harmless (the server rebuilds from the same tree), just an extra ~couple-minute deploy.
+> Apply the `paths-ignore: ['app-ios/**']` filter from a checkout whose token has
+> `workflow` scope when convenient.
+
+## First-deploy log — what broke getting to TestFlight (2026-06-24)
+
+The scaffold built locally-clean but the first real `ios-native` runs surfaced three
+bugs, each a *green build that shipped nothing* or *a build Apple rejected*. Order found:
+
+1. **IPA never uploaded (silent).** `ios-native` had `working_directory: app-ios`, but
+   `xcode-project build-ipa` always exports the IPA to the **clone-root** `build/ios/ipa/`
+   (relative to `$CM_BUILD_DIR`, ignoring `working_directory`), while the artifact/publish
+   glob resolved under `app-ios/build/ios/ipa/`. Publishing found no IPA → uploaded nothing
+   → **still reported success.** Symptom: nothing new in App Store Connect; phone stuck on
+   the old Capacitor build. **Fix (`48cd5f0`):** run from the clone root like the proven
+   `ios-release`; only `cd app-ios` for the XcodeGen step; clone-root artifact path. *Lesson:
+   the artifact glob must match where `build-ipa` actually exports — never relocate it with
+   `working_directory`.*
+2. **Apple rejected the bundle (90023 + 90474).** Missing app icon (the `AppIcon.appiconset`
+   had a 1024 slot but no PNG), and Portrait-only orientation isn't allowed when targeting
+   iPad. **Fix (`4c10aed`):** generated a real 1024×1024 marketing icon on the Linux box with
+   **ffmpeg** (gradient + bold "V", `-pix_fmt rgb24` to strip alpha — Apple rejects alpha on
+   the marketing icon) and wired its `filename` into `Contents.json`; switched to
+   **iPhone-only** (`TARGETED_DEVICE_FAMILY: "1"`), which clears both the iPad-icon and
+   iPad-orientation gates at once. *Lesson: icon generation needs no Mac; for a phone-first
+   app, iPhone-only dodges iPad App Store gates.*
+3. **OAuth "didn't work" after a clean build.** See the bearer-token gotcha in the Auth
+   section above — `/api/me` was cookie-only, so native OAuth completed then 401'd. Fixed
+   server-side (`currentAccount`), unblocking the already-installed build.
+
+(Also noted along the way: the prior Drive session diagnosed #1 correctly but its edit tools
+were blocked by permission prompts that never surfaced to the human — resolved by re-doing
+the edits under bypass permissions.)
 
 ## Status / next
 
-Scaffolded 2026-06-24. The starting template builds the first milestone; everything below
-is incremental.
+Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixes above.
 
 - [x] `app-ios/` SwiftUI skeleton: token-in-Keychain, APIClient, SSEClient, sign-in →
       projects → live transcript.
 - [x] Server: native deep-link OAuth (`/auth/native/:provider/start`, callback `native`
       branch, `/api/auth/native/exchange`) — additive, web flow untouched.
 - [x] `ios-native` Codemagic workflow (XcodeGen → sign → bump → IPA → Internal Testers),
-      gated to `app-ios/` changes; `fly-deploy.yml` path-filtered off `app-ios/**`.
+      gated to `app-ios/` changes. **Builds + uploads green as of `4c10aed`.**
+- [x] Real app icon (branded "V"); iPhone-only to pass App Store validation.
+- [x] `/api/me` accepts an account-linked bearer token (`currentAccount`) so native OAuth
+      actually signs in; pasted-token fallback added to `SignInView`.
 - [x] `PLAN_NATIVE_REWRITE.md` + `CLAUDE.md` index link.
-- ◻ You (one-time): confirm the `Internal Testers` group exists (Manual distribution), then
-      trigger the `ios-native` workflow in Codemagic for the first build.
-- ◻ Add a real app icon (`Assets.xcassets/AppIcon.appiconset` or `assets/icon.png`).
+- ◻ You (one-time): confirm the `Internal Testers` group exists (Manual distribution).
+- ◻ Confirm a provider redirect URI `https://vbrt.fly.dev/auth/{github,google}/callback`
+      is registered in the GitHub/Google OAuth apps — the only remaining server-side OAuth
+      variable the Drive box can't inspect (the token fallback works regardless).
+- ◻ Apply `paths-ignore: ['app-ios/**']` to `fly-deploy.yml` (needs a `workflow`-scoped token).
 - ◻ Send a Drive prompt from the app (`POST /api/agent/sessions/:id/message`) + optimistic bubble.
 - ◻ Rich transcript rendering (thinking / tool I/O / diffs) instead of one line per event.
 - ◻ Cockpit roster (`/api/agent/roster/stream`) + brain view (`/api/projects/:slug/docs`).

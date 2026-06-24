@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SignInView: View {
     @Environment(AuthModel.self) private var auth
+    @State private var showToken = false
+    @State private var tokenText = ""
 
     var body: some View {
         VStack(spacing: 24) {
@@ -36,6 +38,29 @@ struct SignInView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
+
+            // Fallback path: paste an access token from the web app. Always works,
+            // even if the social buttons misbehave on a device.
+            VStack(spacing: 12) {
+                if showToken {
+                    SecureField("Paste your access token", text: $tokenText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                    Button("Sign in with token") {
+                        Task { await auth.signInWithToken(tokenText) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(tokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text("Create one in the web app, then paste it here.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Use an access token instead") { showToken = true }
+                        .font(.footnote)
+                }
+            }
+            .padding(.horizontal, 32)
             Spacer()
         }
         .padding()

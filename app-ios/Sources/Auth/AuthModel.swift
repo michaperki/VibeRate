@@ -70,6 +70,22 @@ final class AuthModel: NSObject, ASWebAuthenticationPresentationContextProviding
         }
     }
 
+    /// Fallback sign-in: paste an account-linked access token (minted in the web app).
+    /// Bypasses OAuth entirely — the same supported path the web/PWA build offers, and
+    /// the guaranteed way in if the social buttons misbehave on a given device.
+    func signInWithToken(_ raw: String) async {
+        let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        errorMessage = nil
+        do {
+            let me = try await APIClient(token: token).me()
+            TokenStore.save(token)
+            state = .signedIn(me)
+        } catch {
+            errorMessage = "That token didn't work: \(error.localizedDescription)"
+        }
+    }
+
     func signOut() {
         TokenStore.clear()
         state = .signedOut

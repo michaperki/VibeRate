@@ -112,16 +112,28 @@ alongside the tradeoffs above.
 
 ## Status
 
-**Resolved for the current (PWA) path; the proper fix is PARKED with native (2026-06-24).**
-Token sign-in is the supported way into the app today and the three workarounds below all
-shipped, so this plan needs nothing while daily dogfooding lives on mobile Safari / PWA
-(`STORY.md` Ch. 11). The one open item is the deep-link OAuth rewrite, which only matters
-if the native wrapper is revived — it's listed as a parked revival note, **not** a checkbox
-todo, so it stops reading as live work-remaining.
+**Deep-link OAuth is now SHIPPED in the native SwiftUI app (2026-06-24)** — the "proper fix"
+above was built, not parked, when Mike revived native as a rewrite (`PLAN_NATIVE_REWRITE.md`).
+The cookie-split bug class is gone: the native flow is cookie-free (signed `state` carries the
+`viberate://` callback; a one-time code is exchanged for an account-linked bearer token). The
+old PWA workarounds (`?access_token=` SSE, admin-linked-token Drive) are retired by the native
+client's `URLSession.bytes` auth header.
+
+> **Bearer-token regression found + fixed (2026-06-24).** After the rewrite, native OAuth
+> would complete but the app still bounced to sign-in. Cause: `/api/me` authenticated via
+> the **session cookie only** (`currentUser`), and the phone has no cookie — only the bearer
+> token the exchange minted. So `me()` 401'd. Fix: `currentAccount(req)` resolves the account
+> from the cookie **or** an account-linked bearer token (`findUserByOwnerHash`); `/api/me`
+> uses it. Server-side, so it fixes the build already installed. Belt-and-suspenders: a
+> pasted-token fallback ("Use an access token instead") was added to the native `SignInView`,
+> mirroring the PWA — the guaranteed way in if a device's social buttons misbehave.
 
 - [x] Documented root cause (cookie context split; both providers; webview block).
 - [x] Token sign-in grants full account scope (`currentOwners` + `findUserByOwnerHash`).
 - [x] Drive unlocked in the app via admin-linked token (`adminEmailFor` in the guard).
 - [x] Drive live stream authenticates in the app via `?access_token=` (`streamGuard`).
-- ◻ (parked, revives with native) Deep-link or native OAuth — deferred with onboarding;
-  also retires the RCE-capable-token tradeoff above.
+- [x] **Deep-link OAuth shipped** in `app-ios/` (native, cookie-free; `src/oauth.js` `native` branch).
+- [x] `/api/me` honors an account-linked bearer token (`currentAccount`) — native sign-in works.
+- [x] Pasted-token fallback in the native `SignInView`.
+- ◻ Verify the provider OAuth apps register `https://vbrt.fly.dev/auth/{github,google}/callback`
+  (the redirect URI the server emits — the only OAuth variable not inspectable from the Drive box).
