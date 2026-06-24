@@ -405,7 +405,9 @@ async function loadProjects() {
   const projects = await api('/api/projects');
   const box = el('#projects');
   if (projects.length === 0) {
-    box.innerHTML = '<div class="empty">No projects yet.<br>Run <code>vbrt add</code> in a folder.</div>';
+    box.innerHTML = '<div class="empty">No projects yet.<br><button class="linkbtn" id="np-empty">＋ New project</button> from a repo, or run <code>vbrt push</code> in a folder.</div>';
+    const npe = el('#np-empty');
+    if (npe) npe.onclick = () => openNewProjectModal();
     return projects;
   }
   const dash = document.body.classList.contains('workspace');
@@ -4342,6 +4344,70 @@ function driveShell(title, metaHtml, bodyHtml) {
 // workspace (the checkout on the host). Ready → prompt form; otherwise → a one-time
 // "set up workspace" (clone) step. Stops the bundle live-poll so it can't repaint
 // over us (the SSE gives liveness once a session is live).
+// "New project" — the no-terminal counterpart to `vbrt push` (ONBOARDING.md Fork 2).
+// Create a project from a Git repo URL, kick off the one-time clone, then drop the
+// user straight into Drive on it. Project creation is account-scoped (/api/projects/
+// new); the clone is admin-scoped (drivePost → /workspace/:slug/setup), so a creator
+// without drive rights still gets the project — refreshDriveWorkspace just shows the
+// setup card instead of the cloning spinner.
+function openNewProjectModal() {
+  const prev = el('.memo-modal'); if (prev) prev.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'memo-modal newproj-modal';
+  wrap.innerHTML = `
+    <div class="memo-backdrop"></div>
+    <div class="memo-panel">
+      <div class="memo-head">
+        <span class="memo-title">＋ New project</span>
+        <button class="memo-close" title="Close">✕</button>
+      </div>
+      <div class="dv-body dv-start">
+        <p class="dim-note">Create a project from a Git repo — no terminal, no <code>vbrt push</code>.
+          We clone it onto the host once and you can Drive it right away. Captured convos
+          and the brain fill in as the agent works.</p>
+        <div id="np-banner" class="dv-banner hidden bad"></div>
+        <label for="np-name">Name <span class="dim-note">(optional — defaults to the repo name)</span></label>
+        <input id="np-name" placeholder="my-project" />
+        <label for="np-repo">Git repository</label>
+        <input id="np-repo" placeholder="https://github.com/owner/repo.git" />
+        <label for="np-branch">Branch <span class="dim-note">(optional — default branch if blank)</span></label>
+        <input id="np-branch" placeholder="main" />
+        <div class="dv-warn">Private repos need a <code>GITHUB_TOKEN</code> secret on the instance.</div>
+        <div class="dv-actions"><button id="np-create">Create &amp; Drive</button></div>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector('.memo-backdrop').onclick = close;
+  wrap.querySelector('.memo-close').onclick = close;
+  const banner = (msg) => { const b = el('#np-banner'); b.textContent = msg; b.classList.remove('hidden'); };
+  el('#np-create').addEventListener('click', async () => {
+    const name = el('#np-name').value.trim();
+    const repo = el('#np-repo').value.trim();
+    const branch = el('#np-branch').value.trim();
+    if (!repo) return banner('a Git repository URL is required');
+    if (!(/^https:\/\/\S+$/.test(repo) || /^git@[\w.-]+:\S+$/.test(repo))) {
+      return banner('use an https:// or git@ repo URL');
+    }
+    el('#np-create').disabled = true;
+    try {
+      const { id } = await apiPost('/api/projects/new', { name: name || undefined, repo, branch: branch || undefined });
+      // Start the one-time clone now (admin-guarded). If the caller lacks drive
+      // rights the setup card will offer it instead — so swallow that failure.
+      try { await drivePost('/workspace/' + encodeURIComponent(id) + '/setup', { repo, branch: branch || undefined }); } catch { /* setup card handles it */ }
+      close();
+      await loadProjects();
+      await selectProject(id);
+      openDriveForProject(id);
+    } catch (e) {
+      const msg = String(e.message) === '401' ? 'sign in to create a project' : (e.message || 'could not create the project');
+      banner(msg);
+      el('#np-create').disabled = false;
+    }
+  });
+  setTimeout(() => { const r = el('#np-repo'); if (r) r.focus(); }, 0);
+}
+
 function openDriveForProject(slug) {
   stopLive();
   if (state._drivePoll) { clearTimeout(state._drivePoll); state._drivePoll = null; }
@@ -5888,7 +5954,7 @@ async function bootDashboard() {
   el('#home').innerHTML = `
     <div class="home-wrap">
       <header class="home-head"><h1>Your workspace</h1>
-        <p class="dim-note">Signed in as ${who}. <button class="linkbtn" id="signout">sign out</button>${connect}</p></header>
+        <p class="dim-note">Signed in as ${who}. <button class="linkbtn" id="new-project">＋ New project</button> · <button class="linkbtn" id="signout">sign out</button>${connect}</p></header>
       <div id="cli-connect"></div>
       <div id="harness-rail"></div>
       <div id="ws-overview"></div>
@@ -5903,6 +5969,8 @@ async function bootDashboard() {
     state.token = null;
     location.href = me ? '/' : '/app';
   };
+  const np = el('#new-project');
+  if (np) np.onclick = () => openNewProjectModal();
   const cc = el('#connect-cli');
   if (cc)
     cc.onclick = async () => {

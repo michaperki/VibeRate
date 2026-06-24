@@ -161,6 +161,17 @@ anyone but the operator using VibeRate to actually drive.
    app** — today `workspaces.js` only **clones an existing repo**; we also need a
    **scaffold-a-new-project** path. Decide the forks, then make first-run on a phone
    one obvious flow.
+   - **No-terminal "New project" button** ✅ *(Fork 2 existing-app, Slice 1 — shipped
+     2026-06-24)* — minting a project no longer requires `vbrt push` from a terminal. A
+     **New project** entry in the workspace home (`app.js` `openNewProjectModal`) takes a
+     repo URL → `POST /api/projects/new` (`server.js` → `createProject`, `storage.js`)
+     mints the project record (account-scoped; private by default) → the modal kicks the
+     one-time clone (admin-gated `/workspace/:slug/setup`) and drops you into Drive.
+     Deliberately decoupled: project *creation* is account-scoped, the *clone* stays
+     admin-scoped, so this shipped **without** any progress on Fork 1 (credentials/
+     billing). **Remaining:** Slice 2 = per-user GitHub token + repo picker (one-tap for
+     private repos, replaces the instance `GITHUB_TOKEN`); Slice 3 = scaffold-a-new-app
+     for repo-less users (`createProject` already mints the record). See `ONBOARDING.md`.
 2. **Fleet / multi-agent session management** — the unit of work is shifting from
    one session to *several agents in flight*. The root cause of "only the most-recent
    Drive session resumes" was that the client kept a single `vbrt_drive_active`

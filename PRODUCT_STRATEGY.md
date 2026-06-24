@@ -88,9 +88,14 @@ working" on their phone. Two sub-questions, both open:
    Claude) as the clean, ToS-safe path, possibly alongside **BYO** (user supplies
    their own key/login) for faster time-to-market. BYO an OAuth/subscription token
    risks Anthropic's ToS and needs legal clarity before we ship it.
-2. **New app vs. existing app.** Today Drive only **clones an existing repo**
-   (`workspaces.js`). We also need a **start-from-scratch** path (scaffold a new
-   project + brain) for users without a repo yet.
+2. **New app vs. existing app.** The existing-repo path is now no-terminal: a
+   **"New project"** button creates a project from a repo URL and clones it
+   (`createProject` + `workspaces.js`), no `vbrt push` required (shipped 2026-06-24;
+   `ONBOARDING.md` Fork 2 Slice 1). Project *creation* is account-scoped while the
+   *clone* stays admin-scoped, so this landed without touching the credentials fork.
+   Still missing: per-user GitHub auth + a repo picker (one-tap private clones), and a
+   **start-from-scratch** path (scaffold a new project + brain) for users without a
+   repo yet.
 
 These are genuine forks, not yet decided — `ONBOARDING.md` lays out the options and
 tradeoffs. Do not invent a default in product copy until they're picked.

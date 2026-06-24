@@ -76,6 +76,36 @@ export function ingestBundle(bundle, { owner = null, visibility = null } = {}) {
   return { id, updated: !!existing, visibility: manifest && manifest.visibility };
 }
 
+// Mint an EMPTY project from the dashboard "New project" button — no `vbrt push`,
+// no capture bundle. This is Fork 2's existing-app onboarding path (ONBOARDING.md):
+// the project is born from a repo URL alone, its Convos/brain rails start empty and
+// fill as Drive runs (ingestDriveSession). Mirrors ingestBundle's id scheme (an
+// unguessable base64url slug = the share secret) and ownership, but writes a bare
+// manifest instead of a bundle. `repoUrl` is the clone prefill the workspace setup
+// reads (getWorkspace → suggestedRepo). `cwd` is null: there is no local checkout —
+// the only checkout is the Drive workspace, bound later via setWorkspace. Returns
+// { id }.
+export function createProject({ name = null, repoUrl = null, owner = null, visibility = null } = {}) {
+  const id = crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars, unlisted — same as ingestBundle
+  const dir = projectDir(id);
+  ensureDir(dir);
+  const now = new Date().toISOString();
+  const manifest = {
+    slug: id,
+    cwd: null,
+    name: name || id,
+    createdAt: now,
+    updatedAt: now,
+    origin: 'created', // born from the dashboard, not a push — distinguishes it in tooling
+    sessions: [],
+  };
+  if (repoUrl) manifest.repoUrl = repoUrl;
+  if (owner) manifest.owner = owner;
+  manifest.visibility = visibility === 'public' ? 'public' : 'private';
+  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(manifest, null, 2));
+  return { id };
+}
+
 // Fold a single Drive-produced session into an EXISTING project (keyed by slug),
 // without touching the project's repo identity (cwd/owner/visibility/repoUrl). A
 // driven session runs in a checkout on the host whose path differs from the

@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listProjects, getProject, getSession, getActivity, getTicker, getGit, getDocs, getDocHistory, getMemory, getEvidence, getClassify, saveClassify, getWorkspaceRollup, ingestBundle, setVisibility } from './storage.js';
+import { listProjects, getProject, getSession, getActivity, getTicker, getGit, getDocs, getDocHistory, getMemory, getEvidence, getClassify, saveClassify, getWorkspaceRollup, ingestBundle, createProject, setVisibility } from './storage.js';
 import { classifyUnits, hasKey } from './classify.js';
 import { getProjectMemory } from './workspace.js';
 import { getContext } from './context.js';
@@ -171,6 +171,49 @@ export function startServer(port = 4317) {
     const owners = currentOwners(req);
     if (!owners) return res.status(401).json({ error: 'auth required' });
     res.json(listProjects(owners));
+  });
+
+  // Create a project from a repo URL — the dashboard "New project" button, the
+  // no-terminal counterpart to `vbrt push` (ONBOARDING.md Fork 2, existing-app
+  // path). This only mints the project record + repo hint; the actual checkout is
+  // cloned by the admin-guarded /api/agent/workspace/:slug/setup, so project
+  // *creation* (account-scoped) stays decoupled from *driving* (admin-scoped) —
+  // you can create a project without yet having drive rights. Hosted: owned by the
+  // caller's account (or bare token); a signed-in account with no linked owner hash
+  // yet gets one minted+linked so the project shows up under it. Local: unscoped.
+  app.post('/api/projects/new', (req, res) => {
+    const { name, repo, branch } = req.body || {};
+    // A repo URL is optional at create time (you can paste it in the setup card),
+    // but if given, reject anything that isn't a real remote so we don't store junk.
+    if (repo != null && !(typeof repo === 'string' && (/^https:\/\/\S+$/.test(repo) || /^git@[\w.-]+:\S+$/.test(repo)))) {
+      return res.status(400).json({ error: 'repo must be an https:// or git@ URL' });
+    }
+    let owner = null;
+    if (HOSTED) {
+      const user = currentUser(req);
+      const token = bearer(req);
+      if (user) {
+        owner = (user.ownerHashes && user.ownerHashes[0]) || null;
+        if (!owner) { owner = hashToken(newToken()); linkOwner(user.id, owner); } // web-first account, no CLI token yet
+      } else if (token) {
+        owner = hashToken(token);
+      } else {
+        return res.status(401).json({ error: 'sign in to create a project' });
+      }
+    }
+    try {
+      const { id } = createProject({
+        name: name ? String(name).slice(0, 200) : null,
+        repoUrl: repo || null,
+        owner,
+        visibility: HOSTED ? 'private' : 'public',
+      });
+      // branch is a workspace-setup concern, not stored on the bare manifest; the
+      // client passes it straight on to the clone call. Echo it back for convenience.
+      res.status(201).json({ id, url: `${req.protocol}://${req.get('host')}/p/${id}`, branch: branch || null });
+    } catch (err) {
+      res.status(500).json({ error: String(err.message || err) });
+    }
   });
 
   // Claim flow: bind a machine token's projects to the signed-in account.
