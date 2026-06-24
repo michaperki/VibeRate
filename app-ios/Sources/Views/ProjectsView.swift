@@ -25,7 +25,7 @@ struct ProjectsView: View {
                                     Label("live", systemImage: "dot.radiowaves.left.and.right")
                                         .foregroundStyle(.green)
                                 }
-                                Text("\(project.sessions ?? 0) sessions")
+                                Text("\(project.sessionCount) sessions")
                                 if let vis = project.visibility { Text(vis) }
                             }
                             .font(.caption)

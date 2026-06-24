@@ -126,6 +126,12 @@ bugs, each a *green build that shipped nothing* or *a build Apple rejected*. Ord
 3. **OAuth "didn't work" after a clean build.** See the bearer-token gotcha in the Auth
    section above — `/api/me` was cookie-only, so native OAuth completed then 401'd. Fixed
    server-side (`currentAccount`), unblocking the already-installed build.
+4. **Projects list failed to decode.** The `Project` Swift model typed `sessions` as `Int`
+   (assumed a count), but `/api/projects` returns the raw manifest where `sessions` is an
+   **array** of capture objects → `DecodingError.typeMismatch … [0].sessions expected Int,
+   found array`. Fix: decode `sessions: [ProjectSession]?` and expose `sessionCount`. *Lesson:
+   match Swift `Codable` types to the server's actual JSON, not the field name's implied
+   meaning — the API sends manifests, not view-models.*
 
 (Also noted along the way: the prior Drive session diagnosed #1 correctly but its edit tools
 were blocked by permission prompts that never surfaced to the human — resolved by re-doing
