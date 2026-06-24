@@ -1796,7 +1796,8 @@ body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-
 /* Cockpit-as-control-center: start a new agent / rejoin the resumable one from the
    Now card itself. Mirrors the rail's ✦ Drive language so the action reads the same
    wherever you launch from. */
-.ck-now-actions { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 10px; }
+.ck-now-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--border); padding-top: 10px; }
+.ck-now-hint { font-size: 11.5px; color: var(--muted); margin-left: auto; }
 .ck-act {
   background: transparent; color: var(--accent); border: 1px solid var(--accent);
   border-radius: 7px; padding: 6px 13px; font: inherit; font-weight: 600; font-size: 12px; cursor: pointer;

@@ -461,3 +461,18 @@ so, and the cockpit had no launcher.
   durable handle, not every on-disk session — acceptable, but note the scope.
 - A hard signal in the roster row distinguishing "running process" from "in-memory but idle"
   vs "adoptable from disk" (today: status dot + the paused/running copy on the Now card).
+
+### §X.1 — follow-up (same day): launcher wiring + multi-agent semantics
+Two issues surfaced after the first pass:
+- **The Cockpit "Return to Drive" / "New agent" buttons went dead** (worked only from a
+  convo's Drive panel). Cause: `renderNowInPlace()` rebuilds the whole `.cockpit-now` card
+  on every roster SSE frame (incl. the snapshot right after connect) but only re-ran
+  `wireRoster` — the launcher handlers, wired once in `wireCockpit`, were discarded on the
+  first live frame. Fix: factored `wireNowActions(root)` and call it from both `wireCockpit`
+  and `renderNowInPlace`.
+- **"Which agent does a global Return-to-Drive mean?"** With ≥1 live agent it's ambiguous —
+  `state.driveActive` is just the most-recent handle. Resolved by scope: the standalone
+  button now shows **only** in the single-target case (a paused/adoptable session, no live
+  roster). Once any agent is running, the **roster rows are the reconnect targets** (tap a
+  row → that specific agent opens in Drive via `openRosterAgent`), with a "Tap an agent to
+  reconnect" hint. "New agent" is always available.
