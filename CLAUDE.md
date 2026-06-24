@@ -44,6 +44,25 @@ Driven sessions run in a barebones container (`node:20-slim`, see `Dockerfile`) 
 **fresh clone** under `/data/workspaces/<slug>` — not a full dev box. Past sessions
 burned turns rediscovering these facts; don't.
 
+- **You are running on the deploy target — `git push origin main` restarts *you*, and
+  is the last thing a turn does.** This repo dogfoods itself: a push to `main` fires the
+  Fly auto-deploy (`.github/workflows/fly-deploy.yml` → `flyctl deploy`), which rebuilds
+  and **restarts the very machine this Drive session runs on**. So the push *ends the
+  session* — there is no "after" to verify from. Two consequences:
+  - **Don't verify after pushing.** You won't be alive to. The human is the verifier once
+    it's live — don't poll production in a sleep-loop, don't curl `vbrt.fly.dev`, don't
+    "wait for the deploy and check." Push, tell the human what to look at, and stop.
+  - **Don't over-verify before pushing.** Cheap, local *correctness* checks earn their
+    keep — `node --check` on changed files, a quick logic/unit assertion, a `git diff`
+    audit so you don't sweep in unrelated work. But **skip the expensive redundant runtime
+    checks**: don't boot a second copy of the server you're already inside
+    (`vbrt serve` / `node src/server.js` on another port) to smoke-test routes — it
+    duplicates this process and routinely 404s on gated APIs; don't Playwright-capture the
+    live app to confirm a change "works." The default loop is: make the change, run a fast
+    static check, push, and let the human confirm in the live app and report back. If a UI
+    change genuinely needs eyes *before* shipping, use the `$VBRT_PREVIEW_BASE` preview
+    route (below) — not a booted server, and not production. When you're unsure whether a
+    change is safe to ship unverified, **ask the human — don't loop trying to prove it.**
 - **`python` is absent — this is a Node project.** Parse JSON/JSONL and write scripts
   in `node`, never `python3`.
 - **Deps auto-install on clone now** — Drive runs `npm install` after cloning a
