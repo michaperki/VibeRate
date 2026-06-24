@@ -184,6 +184,17 @@ anyone but the operator using VibeRate to actually drive.
      configured (local). **Remaining:** Slice 3 = scaffold-a-new-app for repo-less users
      (`createProject` already mints the record); later, a GitHub App for finer scopes.
      See `ONBOARDING.md`.
+   - **Runtime guidance travels with the runtime** ✅ *(shipped 2026-06-24)* — the first
+     "clone someone else's repo and Drive it" dogfood (daber) exposed that Drive injects
+     the preview/container *env* into every clone but the *instructions* for using it
+     lived only in VibeRate's own `CLAUDE.md` — so the agent inherited the tools, missed
+     the recipe (rebuilt a preview server from scratch, never touched `$VBRT_PREVIEW_BASE`),
+     and OOM'd the box. `driveRuntimeGuidance()` (`agent.js`) now appends a hosted-gated,
+     stack-aware preamble (preview/screenshot recipe, container facts, `NODE_ENV` dev-dep
+     trap for npm projects) to every driven turn, and `boxResourceNote()` warns when the
+     box is genuinely low on RAM/disk. So Drive on a third-party repo inherits the recipe,
+     not just the env. Still open: a *hard* box guard (machine bump / `node_modules` cap)
+     and an optional per-project run-skill. See `PLAN_DRIVE_RUNTIME_GUIDANCE.md`.
 2. **Fleet / multi-agent session management** — the unit of work is shifting from
    one session to *several agents in flight*. The root cause of "only the most-recent
    Drive session resumes" was that the client kept a single `vbrt_drive_active`

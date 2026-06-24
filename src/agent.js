@@ -302,6 +302,60 @@ function childEnv(session) {
   return env;
 }
 
+// A live note about the box's resources, included in the runtime guidance only when
+// something is actually tight — so it's a real warning, not constant noise. The
+// daber dogfood OOM'd the container with a full monorepo dev-dep install + Vite +
+// headless Chromium on a ~1GB box; this tells the agent, at spawn time, when it
+// genuinely can't afford that. statfsSync exists on the node:20-slim runtime.
+function boxResourceNote(session) {
+  try {
+    const freeMb = Math.round(os.freemem() / (1024 * 1024));
+    let diskFreeMb = null;
+    if (typeof fs.statfsSync === 'function' && session && session.cwd) {
+      const s = fs.statfsSync(session.cwd);
+      diskFreeMb = Math.round((Number(s.bavail) * Number(s.bsize)) / (1024 * 1024));
+    }
+    const tight = freeMb < 300 || (diskFreeMb != null && diskFreeMb < 500);
+    if (!tight) return null;
+    const have = [`~${freeMb}MB RAM free`];
+    if (diskFreeMb != null) have.push(`~${diskFreeMb}MB disk free`);
+    return `- HEADS UP — the box is low on resources right now (${have.join(', ')}). Do NOT run a large dependency install or stand up a dev server + headless browser; it can OOM the container. Use $VBRT_PREVIEW_BASE to show/inspect work, and clean up (kill stray servers, drop unneeded node_modules) before any install you can't avoid.`;
+  } catch {
+    return null;
+  }
+}
+
+// Repo-agnostic "Drive runtime" guidance appended to a driven turn's system prompt
+// (PLAN_DRIVE_RUNTIME_GUIDANCE.md). The runtime injects preview/container *env* into
+// every clone, but the *instructions* for using it lived only in VibeRate's own
+// CLAUDE.md — so an agent driving a third-party repo inherited the tools yet missed
+// the recipe (daber: rebuilt a preview server from scratch, never touched
+// $VBRT_PREVIEW_BASE or `vbrt shot`, and OOM'd the box). This makes the guidance
+// travel with the runtime instead of the repo. Gated to the hosted box (VBRT_HOSTED):
+// a local `vbrt serve` agent runs on the user's own machine where these container
+// facts (node:20-slim, no python, port 8080 taken) are wrong and their own CLAUDE.md
+// already applies. Kept tight — it rides every turn's system prompt.
+function driveRuntimeGuidance(session) {
+  if (process.env.VBRT_HOSTED !== '1') return null;
+  const lines = [
+    'DRIVE RUNTIME — you are a coding agent inside VibeRate Drive: a fresh clone on a small hosted container (node:20-slim), not a full dev box. Operational facts that may NOT be in this repo\'s own docs:',
+    '- Show the human what you built WITHOUT shipping it: any file you write in this workspace is served live at $VBRT_PREVIEW_BASE/<path> (that env var is already set) — zero commit/push/redeploy. Hand them that URL for any prototype, mock, or page. Only commit+push when the change is meant to ship.',
+    '- See your OWN UI work — you are headless and cannot refresh the app the human sees: preview the page at $VBRT_PREVIEW_BASE/<path>, screenshot it with the baked-in Playwright Chromium, and Read the PNG to inspect real pixels. `vbrt shot` is on-request ONLY and just prints a confirmation — it does NOT return the image, so never run it to see your own work.',
+    '- Container: `python` is ABSENT — parse JSON/JSONL and write scripts in `node`. Port 8080 is taken by the server you are running inside — use another port or skip a local server. `curl`, `jq`, `gh`, `ffmpeg`, and Playwright are installed.',
+    '- Resources are tight (~1GB RAM + disk): prefer $VBRT_PREVIEW_BASE over standing up a second dev server, and skip large installs you don\'t need — a full dev-dep install + dev server + headless browser can OOM the box.',
+  ];
+  try {
+    if (session && session.cwd && fs.existsSync(path.join(session.cwd, 'package.json'))) {
+      lines.push('- This is a Node/npm project: if deps are missing run `npm install` once (node_modules isn\'t committed). NODE_ENV may be `production`, which makes npm OMIT devDependencies — so if a build/dev tool (vite, ts-node, typescript, a bundler) is missing, reinstall with `npm install --include=dev`.');
+    }
+  } catch {
+    /* fs probe is best-effort; omit the npm note if we can't tell */
+  }
+  const resourceNote = boxResourceNote(session);
+  if (resourceNote) lines.push(resourceNote);
+  return lines.join('\n');
+}
+
 // Permission modes we let the UI pick. `default` denies edit/exec without an
 // approval channel (which we don't have yet) — safe but limited. The others are
 // deliberate opt-ins the user selects per session, with `bypassPermissions` the
@@ -630,6 +684,7 @@ function runTurn(session, prompt, { resume }) {
   // `default` mode (verified: MCP tools auto-deny headless without this). The
   // sidecar POSTs questions back to BASE_URL and blocks until the user answers.
   let mcpConfigPath = null;
+  const appendPrompts = [];
   if (BASE_URL) {
     mcpConfigPath = path.join(os.tmpdir(), `vbrt-mcp-${session.id}.json`);
     try {
@@ -643,8 +698,7 @@ function runTurn(session, prompt, { resume }) {
       );
       args.push('--mcp-config', mcpConfigPath);
       args.push('--allowedTools', `${MCP_ASK_TOOL},${MCP_REPORT_TOOL}`);
-      args.push(
-        '--append-system-prompt',
+      appendPrompts.push(
         'When you need a decision, preference, or clarification from the user, call the ' +
           `${MCP_ASK_TOOL} tool — it shows a picker in their UI and returns their answer in the ` +
           'same turn. Do NOT use the built-in AskUserQuestion tool; it cannot be answered here.\n' +
@@ -658,6 +712,13 @@ function runTurn(session, prompt, { resume }) {
       mcpConfigPath = null;
     }
   }
+  // Make the Drive runtime guidance travel with the runtime, not the repo
+  // (PLAN_DRIVE_RUNTIME_GUIDANCE.md): a clone of someone else's repo gets the
+  // preview/container env but not the instructions, which only ever lived in
+  // VibeRate's own CLAUDE.md. Appended alongside the MCP guidance as one flag.
+  const runtimeGuidance = driveRuntimeGuidance(session);
+  if (runtimeGuidance) appendPrompts.push(runtimeGuidance);
+  if (appendPrompts.length) args.push('--append-system-prompt', appendPrompts.join('\n\n'));
 
   // Fresh per-turn streaming state (see handleRawEvent / publicView).
   session.streamedText = false;

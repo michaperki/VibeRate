@@ -1,8 +1,13 @@
 # PLAN — Drive runtime guidance reaches *every* cloned repo
 
-**Status:** proposed (2026-06-24). Surfaced by the first real "clone someone else's
-repo and Drive it" dogfood: the **daber** project (`github.com/michaperki/daber`,
-a Hebrew-learning Preact+Fastify monorepo).
+**Status:** **core shipped** (2026-06-24) — step 1 (inject the guidance) and the
+minimum of step 2 (situation-aware resource warning + steer to preview) are live in
+`src/agent.js`. Steps left: the heavier box guard (machine bump / `node_modules` cap)
+and the optional per-project run-skill. See "What shipped" below.
+
+Surfaced by the first real "clone someone else's repo and Drive it" dogfood: the
+**daber** project (`github.com/michaperki/daber`, a Hebrew-learning Preact+Fastify
+monorepo).
 
 ## The dogfood that exposed it
 
@@ -73,20 +78,51 @@ Make the runtime guidance travel with the runtime, not the repo.
    runs of the same repo would "just work." Complements (1); doesn't replace it, since the
    first run still needs the injected guidance.
 
-## Open questions
+## What shipped (2026-06-24)
 
-- How much guidance is too much to append every turn? (token cost vs. self-rediscovery
-  cost — daber burned ~real minutes rediscovering it.)
-- Should the preamble be static, or partly derived from the detected stack (e.g. only
-  surface the `NODE_ENV`/dev-dep note for npm projects)?
-- Is the right durable home a generated per-project `CLAUDE.md`/run-skill the agent writes
-  on first clone, the injected system prompt, or both?
+Implemented in `src/agent.js` — two new helpers + a refactor of the append assembly:
+
+- **`driveRuntimeGuidance(session)`** — the repo-agnostic preamble. **Gated to the
+  hosted box** (`VBRT_HOSTED === '1'`): a local `vbrt serve` agent runs on the user's
+  own machine where the container facts (node:20-slim, no `python`, port 8080 taken)
+  are wrong and their own `CLAUDE.md` already applies, so it gets nothing extra. The
+  preamble condenses `CLAUDE.md`'s "Drive runtime env" to its highest-value lines:
+  show-via-`$VBRT_PREVIEW_BASE`, see-your-own-UI (preview→Playwright→`Read` the PNG;
+  `vbrt shot` returns no pixels and is on-request only), container facts, and the
+  tight-resources steer toward preview over a second server.
+- **Stack-aware** (answers an open question): the `NODE_ENV=production` + `--include=dev`
+  trap line is appended **only when `package.json` exists** in the workspace, so the
+  npm note doesn't mislead a non-Node clone.
+- **`boxResourceNote(session)`** — the concrete minimum of step 2. Reads `os.freemem()`
+  + `fs.statfsSync(cwd)` at spawn and, **only when actually tight** (<300MB RAM or
+  <500MB disk), appends a live "do NOT run a big install / dev server + headless
+  browser right now, you have ~X MB free" warning. Silent on a healthy box (no per-turn
+  noise) — verified against this container.
+- **Append assembly refactor**: the MCP `ask`/`report` guidance and the runtime
+  preamble are now collected into `appendPrompts[]` and passed as a single
+  `--append-system-prompt` (the CLI gets one combined value, joined by blank lines).
+
+## Still open
+
+- **Heavier box guard** (the rest of step 2): bump the Fly machine for Drive runs and/or
+  cap runaway `node_modules`. Today's guard is *advisory* (warn the agent) — it can still
+  choose to do the install. A hard resource ceiling is the durable fix.
+- **Per-project run-skill** (step 3): have the agent generate a run-skill on first clone
+  so subsequent runs of the same repo "just work." Complements the injected guidance.
+- **Durable home** (open question, partially answered): the injected system prompt is now
+  the *first-run* home (it travels with the runtime). A generated per-project
+  `CLAUDE.md`/run-skill could be the *persistent* home — likely both, not either/or.
+- **Token cost vs. self-rediscovery**: the preamble is kept tight and rides every hosted
+  turn; we have not measured the token delta against the minutes daber burned
+  rediscovering the recipe. Revisit if the system prompt grows.
 
 ## Pointers
 
-- `src/agent.js:262-293` — `childEnv`: where preview/loopback/slug env is injected.
-- `src/agent.js:626-660` — the existing `--append-system-prompt` (MCP-tools-only today);
-  the place to extend.
+- `src/agent.js:262-303` — `childEnv`: where preview/loopback/slug env is injected.
+- `src/agent.js:310` — `boxResourceNote`: the situation-aware low-resource warning.
+- `src/agent.js:338` — `driveRuntimeGuidance`: the hosted-gated, stack-aware preamble.
+- `src/agent.js:699-721` — the `--append-system-prompt` assembly: MCP guidance + runtime
+  preamble collected into `appendPrompts[]`, passed as one combined flag.
 - `src/agentRoutes.js:95`, `src/evidence.js:259-266` — preview/loopback + `vbrt shot`
-  rewrite plumbing this guidance would point agents at.
-- `CLAUDE.md` "Drive runtime env" — the source-of-truth prose to condense from.
+  rewrite plumbing this guidance points agents at.
+- `CLAUDE.md` "Drive runtime env" — the source-of-truth prose the preamble condenses from.
