@@ -5516,6 +5516,10 @@ const liveBrain = (() => {
   let edges = [];
   let plans = {};                 // node id -> { done, total }
   let selectedId = null;          // node tapped to pin its label (label policy lives in draw())
+  let showAll = false;            // "show all docs" expands the quiet background docs onto the rim
+  let cooling = false;            // set on turn-complete → the working set decays faster so the brain visibly settles to rest
+  let quietDocs = [];             // docGraph nodes that aren't a plan/anchor — a count at rest, not dots
+  const restPos = new Map();      // node id -> fixed home {x,y} the force sim springs toward (no orbit)
 
   const baseKey = (p) => String(p).split(/[\\/]/).pop().toLowerCase();
   const baseLabel = (p) => String(p).split(/[\\/]/).pop();
@@ -5566,55 +5570,87 @@ const liveBrain = (() => {
     return n;
   }
 
-  // Seed persistent brain-doc nodes from the live doc graph (skip archived ghosts).
+  // Calm rest layout (the "nodes at rest" model). The constitution anchor tucks top-left;
+  // each plan ring sits on a gentle shelf across the mid-band. These are *fixed homes* the
+  // force sim springs toward — not an orbit — so the brain sits still when the agent is idle.
+  // Quiet background docs only get a home (a dim rim ring) when "show all" is toggled on.
+  function layoutRest() {
+    restPos.clear();
+    const cores = [...nodes.values()].filter((n) => n.core);
+    cores.forEach((n, i) => restPos.set(n.id, { x: 52 + i * 30, y: 52 }));
+    const plns = [...nodes.values()].filter((n) => n.kind === 'plan');
+    const np = plns.length;
+    plns.forEach((p, i) => { const t = (i + 0.5) / Math.max(1, np); restPos.set(p.id, { x: 78 + t * 224, y: 196 + Math.sin(t * Math.PI) * -22 }); });
+    for (const d of nodes.values()) if (d.quiet) { const a = hashAngle(d.id); restPos.set(d.id, { x: CX + Math.cos(a) * 150, y: CY + Math.sin(a) * 104 }); }
+  }
+
+  // Seed the at-rest set from the live doc graph (skip archived ghosts). Only the
+  // constitution anchor + plans-with-checklists become persistent dots; every other doc is a
+  // quiet background doc — a count, not a node — unless "show all" reveals it on the rim.
   function seed() {
     // Snapshot live positions/heat first so a re-seed (reopening the brain overlay, or
     // a docGraph refresh) keeps the existing formation in place instead of re-exploding
-    // every node from its spawn radius. Only genuinely new nodes animate in. This is the
-    // fix for the "dots stretch to the edges and snap back" flash on every brain open.
+    // every node from its home. Only genuinely new nodes animate in.
     const prev = new Map(nodes);
-    nodes.clear(); edges = []; plans = {};
+    nodes.clear(); edges = []; plans = {}; quietDocs = [];
     const restore = (n) => { const p = prev.get(n.id); if (p) { n.x = p.x; n.y = p.y; n.vx = p.vx; n.vy = p.vy; n.heat = p.heat; n.flash = p.flash; n.fade = p.fade; } };
     const g = ((state.docGraph && state.docGraph.nodes) || []).filter((n) => !n.archived);
     for (const d of g) {
       const isMem = d.role === 'memory' || /(^|\/)memory\//i.test(d.name || '');
       const hasPlan = !!(d.completion && d.completion.total);
-      const kind = hasPlan ? 'plan' : isMem ? 'mem' : 'doc';
       const core = d.role === 'constitution';
-      const spec = { id: baseKey(d.name), label: d.base || baseLabel(d.name), kind, core, r: core ? 12 : hasPlan ? 11 : 9, path: d.name };
+      if (!core && !hasPlan) { quietDocs.push(d); continue; }   // long tail: a count at rest, not a dot
+      const kind = hasPlan ? 'plan' : isMem ? 'mem' : 'doc';
+      const spec = { id: baseKey(d.name), label: d.base || baseLabel(d.name), kind, core, persistent: true, r: core ? 11 : 12, path: d.name };
       if (hasPlan) { spec.plan = spec.id; plans[spec.id] = { done: d.completion.done, total: d.completion.total }; }
       restore(addNode(spec));
     }
-    // Keep ephemeral code nodes the agent recently touched — they're live recency state,
-    // not docGraph-derived, so a re-seed would otherwise wipe the trail of dots.
-    for (const [id, p] of prev) if (!nodes.has(id) && p.ephemeral) nodes.set(id, p);
-    // A light backbone so the force layout has structure: hang every orbit node off
-    // the first constitution core, and chain the cores together.
-    const cores = [...nodes.values()].filter((n) => n.core);
-    if (cores.length) {
-      for (let i = 1; i < cores.length; i++) edges.push({ a: cores[i - 1].id, b: cores[i].id });
-      for (const n of nodes.values()) if (!n.core) edges.push({ a: n.id, b: cores[0].id });
+    // "Show all docs" reveals the quiet long tail as dim, tappable rim nodes (the on-demand map).
+    if (showAll) for (const d of quietDocs) {
+      const isMem = d.role === 'memory' || /(^|\/)memory\//i.test(d.name || '');
+      restore(addNode({ id: baseKey(d.name), label: d.base || baseLabel(d.name), kind: isMem ? 'mem' : 'doc', core: false, quiet: true, r: 8, path: d.name }));
     }
+    // Keep ephemeral nodes the agent recently touched — live recency state, not docGraph-derived.
+    for (const [id, p] of prev) if (!nodes.has(id) && p.ephemeral) nodes.set(id, p);
+    layoutRest();
+    for (const n of nodes.values()) { const rp = restPos.get(n.id); if (rp) { n.rest = rp; if (!prev.has(n.id)) { n.x = rp.x; n.y = rp.y; } } }
     renderHero();
+    updateCount();
+  }
+
+  function updateCount() {
+    if (!refs.showall) return;
+    const n = quietDocs.length;
+    refs.showall.textContent = showAll ? 'hide docs' : (n ? `+${n} docs` : '');
+    refs.showall.style.display = n ? '' : 'none';
   }
 
   let activePlan = null;
   function touch(verb, file) {
     if (!file) return;
+    cooling = false;                                  // the agent is active again → normal recency decay
     // Editing a brain doc (STORY.md, memory/MEMORY.md, …) should light up its existing
     // seeded node — those are keyed by basename — so snap to a same-basename non-ephemeral
     // node first. Otherwise a code file is identified by its full repo-relative path, so
     // same-named files in different folders stay separate dots (no merge) and the node
     // carries a folder-aware label.
     const base = baseKey(file);
-    let n = [...nodes.values()].find((x) => !x.ephemeral && baseKey(x.path) === base) || nodes.get(relKey(file));
-    if (!n) n = addNode({ id: relKey(file), label: relLabel(file), kind: 'code', core: false, r: 9, path: file, ephemeral: true });
+    let n = [...nodes.values()].find((x) => (x.persistent || x.quiet) && baseKey(x.path) === base) || nodes.get(relKey(file));
+    if (!n) {
+      // Not a persistent node → summon an ephemeral one. A .md file flares as a doc; anything
+      // else is code. It spawns near the active plan, floats up into the working band, then decays.
+      const isDoc = /\.md$/i.test(file);
+      n = addNode({ id: relKey(file), label: relLabel(file), kind: isDoc ? 'doc' : 'code', core: false, r: 9, path: file, ephemeral: true });
+      const ap = activePlan && restPos.get(activePlan);
+      if (ap) { n.x = ap.x + (hashAngle(n.id) > Math.PI ? 26 : -26); n.y = ap.y - 64; }
+      n.summonR = 1; n.homePlan = activePlan;
+    }
     n.fade = 0;
     if (verb === 'read') { n.heat = Math.min(1, n.heat + 0.45); n.flash = 1; n.flashKind = 'read'; }
     else if (verb === 'run') { n.heat = Math.min(1, n.heat + 0.55); n.flash = 1; n.flashKind = 'run'; ripple(n, COLOR.run); }
     else { n.heat = 1; n.flash = 1; n.flashKind = 'edit'; }            // edit / write run hot
     if (verb === 'write' && n.kind === 'code') n.kind = 'doc';          // a freshly written file graduates
-    if (n.kind === 'code' && activePlan && !edges.some((e) => e.a === n.id && e.b === activePlan && e.transient))
+    if (n.ephemeral && activePlan && !edges.some((e) => e.a === n.id && e.b === activePlan && e.transient))
       edges.push({ a: n.id, b: activePlan, transient: true });
     setTicker(verb, n.label);
   }
@@ -5622,6 +5658,7 @@ const liveBrain = (() => {
   // A plan tool ticked — pulse the plan nodes (we don't fabricate completion; the
   // ring values stay honest, sourced from the docGraph re-seed on refresh()).
   function planPulse() {
+    cooling = false;
     let any = false;
     for (const n of nodes.values()) if (n.kind === 'plan') { n.heat = 1; n.flash = 1; n.flashKind = 'edit'; any = true; activePlan = n.id; }
     setTicker('plan', any ? 'plan updated' : 'plan');
@@ -5652,6 +5689,7 @@ const liveBrain = (() => {
     if (refs.spin) refs.spin.style.visibility = 'visible';
   }
   function idle() {
+    cooling = true;                                   // turn complete → let the working set fade quickly back to rest
     if (!refs.verb) return;
     if (refs.spin) refs.spin.style.visibility = 'hidden';
     refs.verb.className = 'dvb-verb read'; refs.verb.textContent = 'done';
@@ -5705,43 +5743,44 @@ const liveBrain = (() => {
   function step(now) {
     if (!svg || !svg.isConnected) { raf = null; return; }   // view torn down → stop the loop
     const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016); last = now;
-    // decay heat; ephemeral code nodes that have gone cold fade out and die
+    // Decay heat. Persistent nodes (anchor + plans) settle to a calm visible floor; ephemeral
+    // touched files — code *and* docs — cool fast and fade out, so an idle brain goes quiet.
     for (const n of nodes.values()) {
-      const hl = n.kind === 'code' ? 7 : 16;
+      const hl = n.ephemeral ? (cooling ? 1.6 : 3.2) : 9;
       n.heat *= Math.pow(0.5, dt / hl);
       n.flash *= Math.pow(0.5, dt / 0.45);
-      if (n.ephemeral && n.heat < 0.04) { n.fade += dt / 2.2; if (n.fade >= 1) { removeNode(n.id); continue; } }
+      if (n.persistent) { const floor = n.core ? 0.16 : 0.34; if (n.heat < floor) n.heat = floor; }
+      else if (n.quiet && n.heat < 0.12) n.heat = 0.12;
+      if (n.summonR) n.summonR = Math.max(0, n.summonR - dt * 2.2);
+      if (n.ephemeral && n.heat < 0.12) { n.fade += dt / 1.2; if (n.fade >= 1) { removeNode(n.id); continue; } }
     }
-    // hard cap: if ephemeral nodes pile up, retire the coldest
-    const code = [...nodes.values()].filter((n) => n.ephemeral);
-    if (code.length > 40) code.sort((a, b) => a.heat - b.heat).slice(0, code.length - 40).forEach((n) => removeNode(n.id));
+    // Cap the live working set: keep the 8 hottest touched files, let the rest cool off and fade.
+    const eph = [...nodes.values()].filter((n) => n.ephemeral && n.fade < 0.5);
+    if (eph.length > 8) eph.sort((a, b) => b.heat - a.heat).slice(8).forEach((n) => { n.heat = 0.02; });
     const arr = [...nodes.values()];
     for (let i = 0; i < arr.length; i++) {
       const a = arr[i];
       for (let j = i + 1; j < arr.length; j++) {
         const b = arr[j];
         let dx = a.x - b.x, dy = a.y - b.y; const d2 = dx * dx + dy * dy + 0.01, d = Math.sqrt(d2);
-        const f = 1400 / d2; a.vx += f * dx / d; a.vy += f * dy / d; b.vx -= f * dx / d; b.vy -= f * dy / d;
+        if (d > 78) continue;                                            // only nearby nodes repel — the rest shelf stays still
+        const f = 1000 / d2; a.vx += f * dx / d; a.vy += f * dy / d; b.vx -= f * dx / d; b.vy -= f * dy / d;
       }
-      const ang = Math.atan2(a.y - CY, a.x - CX);
-      let targetR;
-      if (a.core) targetR = 32;
-      else if (a.kind === 'code') targetR = 56 + (1 - a.heat) * 120;     // hot = near core, cold = rim
-      else targetR = 64 + (1 - a.heat) * 48;
-      const tx = CX + Math.cos(ang) * targetR, ty = CY + Math.sin(ang) * targetR;
-      const pull = a.core ? 0.06 : 0.035;
-      a.vx += (tx - a.x) * pull; a.vy += (ty - a.y) * pull;
-      if (!reduce) { a.vx += -Math.sin(ang) * (0.08 + a.heat * 0.22); a.vy += Math.cos(ang) * (0.08 + a.heat * 0.22); }
+      if (a.rest) { a.vx += (a.rest.x - a.x) * 0.05; a.vy += (a.rest.y - a.y) * 0.05; }   // spring to fixed home — NO orbital spin
+      else {                                                             // ephemeral: float up into the working band above its plan
+        const ap = a.homePlan && restPos.get(a.homePlan);
+        const ty = (ap ? ap.y : CY) - 64; a.vy += (ty - a.y) * 0.03; a.vx += (CX - a.x) * 0.004;
+      }
     }
     for (const e of edges) {
       const a = nodes.get(e.a), b = nodes.get(e.b); if (!a || !b) continue;
       let dx = b.x - a.x, dy = b.y - a.y; const d = Math.hypot(dx, dy) + 0.01;
-      const rest = e.transient ? 64 : 90, f = (d - rest) * 0.012;
+      const f = (d - 58) * 0.01;                                         // transient link from a touched file to its plan
       a.vx += f * dx / d; a.vy += f * dy / d; b.vx -= f * dx / d; b.vy -= f * dy / d;
     }
     for (const n of nodes.values()) {
-      n.x += n.vx * 0.6; n.y += n.vy * 0.6; n.vx *= 0.86; n.vy *= 0.86;
-      const m = 18; n.x = Math.max(m, Math.min(W - m, n.x)); n.y = Math.max(m, Math.min(H - 24, n.y));
+      n.x += n.vx * 0.6; n.y += n.vy * 0.6; n.vx *= 0.82; n.vy *= 0.82;
+      const m = 16; n.x = Math.max(m, Math.min(W - m, n.x)); n.y = Math.max(m, Math.min(H - 22, n.y));
     }
     for (let i = edges.length - 1; i >= 0; i--) { const e = edges[i]; if (!e.transient) continue; const a = nodes.get(e.a); if (!a || a.heat < 0.05) edges.splice(i, 1); }
     draw();
@@ -5758,8 +5797,9 @@ const liveBrain = (() => {
     layers.edges.innerHTML = eh;
     for (const n of nodes.values()) {
       const rec = ensureEl(n);
-      const r = n.r + n.heat * 5;
-      const baseOp = 0.32 + 0.68 * Math.min(1, n.heat * 1.4 + (n.core ? 0.5 : 0.15));
+      const r = (n.r + n.heat * 5) * (1 + (n.summonR || 0) * 0.6);       // a freshly summoned node pops in, then settles
+      let baseOp = 0.32 + 0.68 * Math.min(1, n.heat * 1.4 + (n.core ? 0.4 : 0.15));
+      if (n.quiet) baseOp *= 0.5;                                        // expanded background docs sit dim behind the live set
       rec.g.setAttribute('opacity', (baseOp * (1 - n.fade)).toFixed(2));
       let fill = baseColor(n);
       if (n.flash > 0.05) {
@@ -5787,11 +5827,10 @@ const liveBrain = (() => {
     placeLabels();
   }
 
-  // Label policy + de-collision (UI_FEEDBACK P0 #1, collision sub-item). Showing all
-  // ~20 labels at once guarantees overlap on a phone, so by default only the core docs,
-  // the currently active/edited nodes, and a tapped node carry a label. A greedy
-  // priority pass (selected > core > hottest first) then hides any remaining label whose
-  // box would overlap one already placed — labels never stack, and the hub stays legible.
+  // Label policy + de-collision (UI_FEEDBACK P0 #1, collision sub-item). In the nodes-at-rest
+  // model the persistent set (anchor + plans) always carries a label; an active/edited node or a
+  // tapped one earns one too. A greedy priority pass (selected > persistent > hottest first) then
+  // hides any remaining label whose box would overlap one already placed — labels never stack.
   function placeLabels() {
     const wish = [];
     for (const n of nodes.values()) {
@@ -5799,8 +5838,8 @@ const liveBrain = (() => {
       if (!rec) continue;
       const active = n.heat > 0.2 || n.flash > 0.15;
       const sel = n.id === selectedId;
-      if (!(n.core || active || sel)) { rec.label.setAttribute('opacity', '0'); continue; }
-      wish.push({ n, rec, pri: (sel ? 2 : n.core ? 1 : 0) + n.heat });
+      if (!(n.persistent || active || sel)) { rec.label.setAttribute('opacity', '0'); continue; }
+      wish.push({ n, rec, pri: (sel ? 2 : n.persistent ? 1 : 0) + n.heat });
     }
     wish.sort((a, b) => b.pri - a.pri);
     const placed = [];
@@ -5812,7 +5851,7 @@ const liveBrain = (() => {
       const clash = placed.some((p) => box.x1 < p.x2 && box.x2 > p.x1 && box.y1 < p.y2 && box.y2 > p.y1);
       if (clash) { rec.label.setAttribute('opacity', '0'); continue; }
       placed.push(box);
-      const op = n.id === selectedId ? 1 : 0.6 + 0.4 * Math.min(1, n.heat * 1.5 + (n.core ? 0.6 : 0.1));
+      const op = n.id === selectedId ? 1 : 0.6 + 0.4 * Math.min(1, n.heat * 1.5 + (n.persistent ? 0.6 : 0.1));
       rec.label.setAttribute('opacity', op.toFixed(2));
     }
   }
@@ -5834,9 +5873,10 @@ const liveBrain = (() => {
           <span class="dvb-pct">0%</span>
         </div>
         <div class="dvb-meta">
-          <div class="dvb-title"><span class="jargon" title="Brain = the markdown docs, plans, and memory that steer the agent. The graph below is those docs and how they reference each other.">🧠 live brain</span></div>
+          <div class="dvb-title"><span class="jargon" title="Brain = the plans and docs steering the agent. At rest it shows your plan rings; while the agent works, the files it touches flare in and fade out. Tap '+N docs' to reveal the rest of the doc map.">🧠 live brain</span></div>
           <div class="dvb-subline">no plan checklists</div>
         </div>
+        <button class="dvb-showall" type="button" title="Reveal the quiet background docs as a dim map. Tap again to hide." style="display:none"></button>
         <span class="dvb-livedot"><i></i>live</span>
       </div>
       <div class="dvb-stage"><svg class="dvb-svg" preserveAspectRatio="xMidYMid meet"></svg></div>
@@ -5883,7 +5923,8 @@ const liveBrain = (() => {
     svg = root.querySelector('.dvb-svg');
     if (!svg) { if (raf) cancelAnimationFrame(raf); raf = null; return; }
     const q = (sel) => root.querySelector(sel);
-    refs = { prog: q('.dvb-prog'), pct: q('.dvb-pct'), sub: q('.dvb-subline'), verb: q('.dvb-verb'), file: q('.dvb-file'), spin: q('.dvb-spin'), hero: q('.dvb-hero') };
+    refs = { prog: q('.dvb-prog'), pct: q('.dvb-pct'), sub: q('.dvb-subline'), verb: q('.dvb-verb'), file: q('.dvb-file'), spin: q('.dvb-spin'), hero: q('.dvb-hero'), showall: q('.dvb-showall') };
+    if (refs.showall) { refs.showall.onclick = () => { showAll = !showAll; seed(); }; }
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.innerHTML = '';
     layers = { edges: document.createElementNS(SVGNS, 'g'), fx: document.createElementNS(SVGNS, 'g'), nodes: document.createElementNS(SVGNS, 'g') };

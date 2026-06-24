@@ -1164,6 +1164,8 @@ body.public #feed { margin: 0 auto; }
 .dvb-meta { flex: 1 1 auto; min-width: 0; }
 .dvb-title { font-size: 13px; font-weight: 650; }
 .dvb-subline { font-size: 11px; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dvb-showall { flex: 0 0 auto; background: #19212c; color: var(--muted); border: 1px solid #28323f; border-radius: 7px; padding: 3px 9px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.dvb-showall:hover { border-color: #3a4b5e; color: var(--ink, #e8edf4); }
 .dvb-livedot { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--live); font-weight: 600; }
 .dvb-livedot i { width: 7px; height: 7px; border-radius: 50%; background: var(--live); animation: dvb-beat 1.3s ease-in-out infinite; }
 @keyframes dvb-beat { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }

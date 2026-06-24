@@ -98,12 +98,34 @@ scope is still growing." See `PRODUCT_STRATEGY.md` "Is completion % the right me
 
 ---
 
-## Brain architecture rethink — prototype-led, not decided (2026-06-23)
+## Brain architecture rethink — ✅ shipped (2026-06-24)
 
-> **Status: open. We do not solve this here.** Mike's explicit steer: "Nailing the
-> brain will require prototyping." So this section *documents the thinking and the
-> options to prototype* — it does **not** pick a design. Next step is **mocks/prototypes
-> of the candidates, compared live** (the house toggle/mock method), then a decision.
+> **Status: resolved & shipped.** Prototyped (`public/proto/brain-rethink.html` — a
+> side-by-side of today vs. the new model, same simulated session driving both), Mike
+> approved, then wired into the real `liveBrain` (`public/app.js`). The chosen design is
+> **#1 (activity-driven, nodes at rest) fused with #3 (foreground/background split)** —
+> the two leaning candidates below, combined. What changed, concretely:
+>
+> - **At rest the brain shows only the working set:** the constitution **anchor** + the
+>   **plans-with-checklists** (completion rings kept — Mike's "don't lose that"). The other
+>   ~18 reference/strategy/narrative docs are a **count, not dots** (`quietDocs`); a small
+>   **`+N docs`** toggle expands them onto a dim rim on demand (the structural map becomes
+>   foreground-on-request, not the default). 23 nodes → ~3–5 at rest.
+> - **The constitution no longer is the hub everything orbits.** Persistent nodes spring to
+>   **fixed homes** (anchor tucked at a corner, plans on a calm shelf) — no radial field,
+>   no backbone hanging every doc off the core.
+> - **The ambient tangential spin is deleted.** Motion happens **only on a real event**:
+>   a touched file (code *or* `.md`) is **summoned** near its active plan, flares, links to
+>   it, then **decays and fades out** — docs decay now too, not just code. A working-set cap
+>   (8 hottest) + a faster cooldown on `idle()` (turn-complete) settle the brain visibly
+>   back to just-the-plans within a few seconds. Idle now reads as *quiet*, not as endless
+>   drift.
+>
+> The four "open questions for the prototypes" below are answered by this: *how to show
+> "what the agent just read" without orbiting* → summon-near-plan + decay; *what idle looks
+> like* → the at-rest plan shelf. Verified against the real sliced module via
+> `public/proto/brain-live-harness.html` (no console errors; settles to exactly the
+> anchor+plan set). Original prototype-led thinking preserved below for provenance.
 
 The brain is the most important surface and the least settled. Two complaints from
 dogfooding the PWA, both confirmed in code:

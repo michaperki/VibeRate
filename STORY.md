@@ -460,6 +460,34 @@ fought the web platform, and the value didn't justify the boundary.* When a thin
 approach starts generating bugs that only exist at the shell seam, the cheap move is to
 remove the seam, not to keep patching it.
 
+## Chapter 12 — The brain stops being a map (2026-06-24)
+
+The cockpit (`PLAN_COCKPIT.md`) had quietly changed what the brain was *for*. Once the
+project home led with **Now / Latest / Next** as readable text, the brain no longer had to
+be the project's legible map — that job moved. But the brain hadn't noticed: it still
+rendered all ~23 of the repo's `.md` docs as permanent dots, all orbiting `CLAUDE.md`, all
+spinning forever on a per-frame tangential kick. With two dozen nodes it was, in Mike's
+words, "basically useless" — the one thing it was uniquely good at, *showing the agent at
+work*, drowned under a static doc census that never changed and never shrank.
+
+The fix had been scoped on paper since 2026-06-23 (Ch. 9's brain re-open) but deliberately
+left for **prototyping**, because the right answer was a feel, not an argument. So we built
+the feel: `public/proto/brain-rethink.html`, a side-by-side with the *same* simulated agent
+session driving both panels — the old orbital field on the left, a new "nodes at rest" model
+on the right. Play it and the case makes itself. When the agent goes idle, the left keeps
+spinning 23 dots; the right falls quiet to just the plan rings.
+
+What shipped (wired straight into the real `liveBrain`): **at rest the brain shows only the
+working set** — the constitution anchor plus the plans-with-checklists, completion rings
+intact (the one piece Mike said not to lose). The other ~18 docs collapse to a `+N docs`
+count you can expand on demand. **Nothing orbits anymore** — persistent nodes spring to fixed
+homes. **The ambient spin is gone** — motion happens only when the agent touches something: a
+file (code *or* doc) is *summoned* next to its active plan, flares, links to it, then decays
+and fades out. Idle reads as calm, a flurry of edits reads as busy. The brain became an
+*instrument* for watching the build, and handed the map job to the cockpit that had already
+taken it. Same discipline as every prior rung: prototype the feel, ship the slice, cut what
+stopped earning its place — this time, the orbit itself.
+
 ## Where it stands, and the open questions
 
 As of the reframe, VibeRate is a working, hosted, self-dogfooding mobile agent-first
