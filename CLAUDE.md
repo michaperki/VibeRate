@@ -23,6 +23,7 @@ test fixture.
 - `ONBOARDING.md` — onboarding & credentials forks (whose Claude runs; new vs existing app)
 - `PLAN_AGENT_RUNTIME.md` — Drive: the local agent runtime (the "drive" half)
 - `PLAN_DRIVE_WORKSPACES.md` — binding a project to a real checkout on the host
+- `PLAN_DRIVE_RUNTIME_GUIDANCE.md` — the runtime guidance (preview/screenshot recipe, `NODE_ENV` dev-dep trap, container facts) reaches VibeRate's *own* repo via this `CLAUDE.md` but **not** cloned third-party repos — the env is injected, the instructions aren't. Surfaced by the first "clone someone else's repo and Drive it" dogfood (daber); fix is to extend the existing `--append-system-prompt` (`src/agent.js:646`) with a repo-agnostic preamble + guard the box against the install/run memory+disk spike.
 - `PLAN_MOBILE.md` — the mobile-unified plan (responsive port; Variant A chat + brain header)
 - `PLAN_CAPACITOR.md` — native iOS via Capacitor + Codemagic (wrap the SPA, cloud-Mac build → TestFlight; no Mac needed). Scaffolded 2026-06-22.
 - `PLAN_NATIVE_AUTH.md` — why social sign-in fails in the wrapped iOS app (OAuth state-cookie context split) and the token-sign-in workaround. 2026-06-23.
