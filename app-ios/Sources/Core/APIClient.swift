@@ -53,6 +53,22 @@ struct APIClient {
         try await send(request("/api/me"), as: Me.self)
     }
 
+    /// Start a new Drive session in a project's bound workspace, with the first prompt.
+    /// 409s if the project's checkout isn't set up yet.
+    @discardableResult
+    func startSession(projectSlug: String, prompt: String) async throws -> AgentSession {
+        let body = try JSONEncoder().encode(["projectSlug": projectSlug, "prompt": prompt])
+        return try await send(request("/api/agent/sessions", method: "POST", body: body), as: AgentSession.self)
+    }
+
+    /// Send a follow-up prompt to an existing session (resumes it). 400s if the session
+    /// is mid-turn ("busy") — surface that to the user rather than dropping it.
+    @discardableResult
+    func sendMessage(sessionId: String, prompt: String) async throws -> AgentSession {
+        let body = try JSONEncoder().encode(["prompt": prompt])
+        return try await send(request("/api/agent/sessions/\(sessionId)/message", method: "POST", body: body), as: AgentSession.self)
+    }
+
     func projects() async throws -> [Project] {
         try await send(request("/api/projects"), as: [Project].self)
     }

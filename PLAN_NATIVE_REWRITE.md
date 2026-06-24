@@ -151,12 +151,23 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
 - [x] `/api/me` accepts an account-linked bearer token (`currentAccount`) so native OAuth
       actually signs in; pasted-token fallback added to `SignInView`.
 - [x] `PLAN_NATIVE_REWRITE.md` + `CLAUDE.md` index link.
+- [x] **Steer from the app** — `DriveSessionView` is interactive: a composer sends a
+      prompt to the running session (`POST /api/agent/sessions/:id/message`), or **starts**
+      one in the project workspace if none is running (`POST /api/agent/sessions`).
+      Optimistic prompt bubble, deduped against the stream's `user_prompt` echo; streamed
+      `assistant_text_delta`s are coalesced into one growing bubble (not a line per token).
+- [x] **Killed the "streaming · idle" jargon** — the status bar now reads plain language
+      ("Working…", "Idle", "Waiting for you", "No agent running yet…") via `humanStatus`.
 - ◻ You (one-time): confirm the `Internal Testers` group exists (Manual distribution).
 - ◻ Confirm a provider redirect URI `https://vbrt.fly.dev/auth/{github,google}/callback`
       is registered in the GitHub/Google OAuth apps — the only remaining server-side OAuth
       variable the Drive box can't inspect (the token fallback works regardless).
-- ◻ Apply `paths-ignore: ['app-ios/**']` to `fly-deploy.yml` (needs a `workflow`-scoped token).
-- ◻ Send a Drive prompt from the app (`POST /api/agent/sessions/:id/message`) + optimistic bubble.
-- ◻ Rich transcript rendering (thinking / tool I/O / diffs) instead of one line per event.
+- ◻ **You (one-time): add `paths-ignore: ['app-ios/**']` to `fly-deploy.yml`** so Swift-only
+      pushes stop redeploying/restarting the server. The Drive token is `repo, read:user` only
+      (no `workflow` scope), so it can't push `.github/workflows/` — apply it from GitHub's web
+      editor or a `workflow`-scoped checkout. Exact diff is in the chat / `app-ios/README.md`.
+- ◻ Rich transcript rendering — `thinking` and `tool_result` are currently skipped on the
+      phone (only `tool_use` shows as `→ name`); fold them in next.
+- ◻ Optimistic-send polish: a "Working…" spinner row while the agent runs between events.
 - ◻ Cockpit roster (`/api/agent/roster/stream`) + brain view (`/api/projects/:slug/docs`).
 - ◻ APNs push end to end ("agent needs you / finished") — also the App Store 4.2 anchor.

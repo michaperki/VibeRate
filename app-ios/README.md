@@ -72,8 +72,22 @@ open VibeRate.xcodeproj
   a 152×152 iPad icon (90023) **and** all four interface orientations for iPad multitasking
   (90474). Phone-first app → drop iPad, both gates clear at once.
 - A Swift-only push currently **also redeploys the Fly server** — `fly-deploy.yml` isn't
-  path-filtered off `app-ios/**` (the Drive token can't push `.github/workflows/`). Harmless,
-  just an extra deploy.
+  path-filtered off `app-ios/**`, and the Drive box's token is `repo, read:user` only (no
+  `workflow` scope), so an agent can't push `.github/workflows/`. To decouple iOS builds from
+  server deploys (so an iOS build stops restarting a live Drive session), apply this from
+  GitHub's web editor or a `workflow`-scoped checkout:
+
+  ```yaml
+  # .github/workflows/fly-deploy.yml
+  on:
+    push:
+      branches: [main]
+      paths-ignore:        # add these two lines
+        - 'app-ios/**'
+  ```
+
+  `paths-ignore` only skips when **every** changed file matches, so a push that also touches
+  server code still deploys — exactly what you want.
 
 ## Auth flow (RFC 8252 deep-link OAuth)
 
