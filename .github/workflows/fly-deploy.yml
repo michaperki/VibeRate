@@ -7,6 +7,8 @@ name: Deploy to Fly
 on:
   push:
     branches: [main]
+    paths-ignore:        # add these two lines
+        - 'app-ios/**'
 
 # Never let two deploys race; a newer push supersedes an in-flight one.
 concurrency:
