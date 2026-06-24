@@ -247,10 +247,24 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       hot-loop. Plus `SSEClient` refuses gzip + caching so URLSession can't buffer the
       trickle. *Both text and thinking ride the same stream, so this unblocks both.*
 - ◻ Optimistic-send polish: a "Working…" spinner row while the agent runs between events.
-- ◻ **New agent from the phone** — the `+` in CockpitView already opens a fresh Drive,
-      but `POST /api/agent/sessions` 409s if the project's workspace isn't cloned
-      (`agentRoutes.js:182`) and there's no setup affordance on iOS. Add a workspace-setup
-      step (`POST /api/agent/workspace/:slug/setup`) so a fresh project can start an agent.
+- ✅ **New agent from the phone** — the `+` opened a fresh Drive but `connect()` then
+      re-attached/adopted the agent *already* running on the project, so you landed back in
+      the open convo with no way to start a second one. Fixed: `DriveSessionView` takes a
+      `forceNew` flag; CockpitView passes `forceNew: t.sessionId == nil` (both `+` entry
+      points use a `nil` sessionId, a row-tap passes the agent id), and `connect()` short-
+      circuits before the live-lookup/adopt path — the first message starts a *second*
+      concurrent session. The viberate workspace is already cloned so the 409 below doesn't
+      bite; it's still open for a *fresh* project.
+- ✅ **Always drive in bypass permissions** — the native client sent no `permissionMode`,
+      so every session ran in `default`, which silently denies edits in a headless Drive
+      (no prompt can reach the phone; "go ahead" in chat doesn't grant a tool permission —
+      this stranded a prior session mid-edit). `APIClient.startSession` *and* `adopt` now
+      send `permissionMode: "bypassPermissions"` (server validates it + adds
+      `--dangerously-skip-permissions`, `agent.js:363,685`).
+- ◻ **Workspace setup for a fresh project** — `POST /api/agent/sessions` still 409s if the
+      project's checkout isn't cloned (`agentRoutes.js:182`) and there's no setup affordance
+      on iOS. Add a workspace-setup step (`POST /api/agent/workspace/:slug/setup`) so a
+      brand-new project can start its first agent.
 - ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
       plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same
       `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.

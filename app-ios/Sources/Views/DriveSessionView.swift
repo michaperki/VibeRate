@@ -11,6 +11,10 @@ struct DriveSessionView: View {
     var attachTo: String? = nil
     /// The roster's last-known status for `attachTo`, so the bar reads right on entry.
     var initialStatus: String? = nil
+    /// Force a brand-new agent: skip the live-session lookup *and* the adopt path so the
+    /// **+** never re-attaches to the agent already running on this project. The first
+    /// message then starts a second, concurrent session.
+    var forceNew: Bool = false
 
     struct Bubble: Identifiable {
         enum Role { case user, assistant, tool, thinking, error }
@@ -153,6 +157,14 @@ struct DriveSessionView: View {
 
     private func connect() async {
         do {
+            // 0. The + asked for a fresh agent — don't attach or adopt anything. Leave a
+            //    blank composer; the first message starts a new session (steps 1–3 would
+            //    otherwise drop us back into the agent already running here).
+            if forceNew {
+                status = "New agent — send a message to start one."
+                ready = true
+                return
+            }
             // 1. The cockpit handed us a specific agent — attach straight to it.
             if let id = attachTo {
                 sessionId = id

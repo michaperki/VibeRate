@@ -57,7 +57,10 @@ struct APIClient {
     /// 409s if the project's checkout isn't set up yet.
     @discardableResult
     func startSession(projectSlug: String, prompt: String) async throws -> AgentSession {
-        let body = try JSONEncoder().encode(["projectSlug": projectSlug, "prompt": prompt])
+        // Drive from the phone runs headless — there's no permission prompt we can route
+        // to the device, so `default` mode silently denies every edit/exec. Always ask
+        // for bypass; the native client is steering on the user's behalf.
+        let body = try JSONEncoder().encode(["projectSlug": projectSlug, "prompt": prompt, "permissionMode": "bypassPermissions"])
         return try await send(request("/api/agent/sessions", method: "POST", body: body), as: AgentSession.self)
     }
 
@@ -74,7 +77,9 @@ struct APIClient {
     /// a fresh handle and replays it — then `?after=0` on the stream backfills the convo.
     @discardableResult
     func adopt(claudeSessionId: String, projectSlug: String?) async throws -> AgentSession {
-        var payload = ["claudeSessionId": claudeSessionId]
+        // Re-adopt in bypass too — a redeploy-wiped session resumes headless and would
+        // otherwise come back in edit-denying `default` mode (see startSession).
+        var payload = ["claudeSessionId": claudeSessionId, "permissionMode": "bypassPermissions"]
         if let projectSlug { payload["projectSlug"] = projectSlug }
         let body = try JSONEncoder().encode(payload)
         return try await send(request("/api/agent/sessions/adopt", method: "POST", body: body), as: AgentSession.self)

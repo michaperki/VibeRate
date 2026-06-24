@@ -65,7 +65,7 @@ struct CockpitView: View {
             }
         }
         .navigationDestination(item: $driveTarget) { t in
-            DriveSessionView(project: project, attachTo: t.sessionId, initialStatus: t.status)
+            DriveSessionView(project: project, attachTo: t.sessionId, initialStatus: t.status, forceNew: t.sessionId == nil)
         }
         .refreshable {
             if let store { await store.refresh(client: client) }
