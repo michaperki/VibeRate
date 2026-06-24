@@ -25,6 +25,27 @@ function readJson(file, fallback) {
   }
 }
 
+// mtime of a project's manifest, or null if absent. Every write path that changes
+// a project's data — saveSessions, ingestDriveSession, saveGit/Docs/etc. via
+// saveBundle — rewrites project.json, so its mtime is a reliable "did anything
+// change?" key for the derived-read caches below (no explicit invalidation needed).
+function manifestMtime(slug) {
+  try {
+    return fs.statSync(path.join(projectDir(slug), 'project.json')).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+// getActivity re-reads and JSON-parses *every* session file of a project. It's
+// called once per project by the home-page rollup and again on every project open,
+// so as the dogfood repo crossed 100 sessions a single home load was parsing the
+// whole data store (~1s of CPU). The parsed output is small (truncated msgs, capped
+// file lists), so we memoize it keyed on the manifest mtime — a cache hit skips all
+// the disk reads + parses. Capped LRU-ish so we don't pin every project in memory.
+const ACTIVITY_CACHE_MAX = 64;
+const activityCache = new Map(); // slug -> { mtimeMs, value }
+
 // Local sink: persist a capture bundle to the on-disk store the viewer reads.
 // Mirror of what the hosted ingest API does server-side, so the two sinks stay
 // behavior-compatible. `opts.slug` overrides the cwd-derived slug (used for
@@ -408,8 +429,17 @@ export function getEvidence(slug) {
 // project memory blob was more confusing than faithful. Memory lives on each
 // project's page instead. See ARCHITECTURE.md → "Memory model" (2026-06-19).
 // `memory: []` is kept in the response for client back-compat.
+// Cache the cross-project rollup keyed on a cheap signature of every listed
+// project's manifest mtime (+ slug, to catch add/remove). Building the signature is
+// N stat() calls; a hit skips N getActivity calls (each O(sessions) even when those
+// are cache hits) so a re-opened home page is effectively free until data changes.
+const rollupCache = new Map(); // ownerKey -> { sig, value }
 export function getWorkspaceRollup(owner = null) {
   const projects = listProjects(owner);
+  const ownerKey = owner == null ? '*' : Array.isArray(owner) ? owner.join(',') : String(owner);
+  const sig = projects.map((p) => `${p.slug}:${manifestMtime(p.slug)}`).join('|');
+  const cached = rollupCache.get(ownerKey);
+  if (cached && cached.sig === sig) return cached.value;
   let sessions = 0;
   let messages = 0;
   let commits = 0;
@@ -427,7 +457,9 @@ export function getWorkspaceRollup(owner = null) {
     if (g && Array.isArray(g.commits)) commits += g.commits.length;
   }
 
-  return { stats: { projects: projects.length, sessions, messages, commits, added, removed }, memory: [] };
+  const value = { stats: { projects: projects.length, sessions, messages, commits, added, removed }, memory: [] };
+  rollupCache.set(ownerKey, { sig, value });
+  return value;
 }
 
 // Per-session activity for the timeline: timestamps of the messages the USER
@@ -435,6 +467,24 @@ export function getWorkspaceRollup(owner = null) {
 // replies are excluded — they're not "messages I sent". Also derives, from the
 // agent's edit tool calls, which files were touched and approx lines +/-.
 export function getActivity(slug) {
+  const mtimeMs = manifestMtime(slug);
+  const hit = activityCache.get(slug);
+  if (hit && mtimeMs != null && hit.mtimeMs === mtimeMs) {
+    activityCache.delete(slug); // refresh recency (insertion-ordered LRU)
+    activityCache.set(slug, hit);
+    return hit.value;
+  }
+  const value = computeActivity(slug);
+  if (value && mtimeMs != null) {
+    activityCache.set(slug, { mtimeMs, value });
+    if (activityCache.size > ACTIVITY_CACHE_MAX) {
+      activityCache.delete(activityCache.keys().next().value); // evict oldest
+    }
+  }
+  return value;
+}
+
+function computeActivity(slug) {
   const project = getProject(slug);
   if (!project) return null;
   const out = [];

@@ -6035,8 +6035,15 @@ async function bootDashboard() {
     };
   loadHarnessRail(); // instance-global; fills in when admin (drive rights), silent otherwise
   try {
-    const projects = await loadProjects(); // sidebar; throws '401' if not authorized
-    const ws = await api('/api/workspace');
+    // Fire both in parallel: loadProjects paints the sidebar on its own (~15ms),
+    // while /api/workspace (the heavier rollup) loads concurrently instead of
+    // serially behind it. The overview needs both, so it still awaits the pair —
+    // but at max(time) not sum. The rollup is non-critical, so a failure there
+    // shouldn't break auth handling: only loadProjects' 401 should propagate.
+    const projectsP = loadProjects(); // sidebar; throws '401' if not authorized
+    const wsP = api('/api/workspace').catch(() => null);
+    const projects = await projectsP;
+    const ws = await wsP;
     const node = el('#ws-overview');
     if (node) {
       node.innerHTML = renderWorkspaceSection(ws, projects || []);

@@ -1,6 +1,9 @@
 import express from 'express';
+import compression from 'compression';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PROJECTS_DIR } from './paths.js';
 import { listProjects, getProject, getSession, getActivity, getTicker, getGit, getDocs, getDocHistory, getMemory, getEvidence, getClassify, saveClassify, getWorkspaceRollup, ingestBundle, createProject, setVisibility } from './storage.js';
 import { classifyUnits, hasKey } from './classify.js';
 import { getProjectMemory } from './workspace.js';
@@ -36,6 +39,24 @@ const RATE_MAX = Number(process.env.VBRT_RATE_MAX || 20);
 // can key them by token instead of a shared NAT/WSL IP.
 const RATE_MAX_AUTH = Number(process.env.VBRT_RATE_MAX_AUTH || 120);
 const ingestHits = new Map();
+
+// The project-level /prompts rail re-reads and re-parses every session of a project
+// (O(sessions) disk reads + extractPromptUnits) on each project open — the second
+// half of the project-open slowness alongside getActivity. Its inputs are the
+// session files plus evidence/git/classify, all rewritten by the same ingest cycle.
+// Memoize the built unit list keyed on a cheap stat-signature of those files; a hit
+// skips the whole loop. Bounded so we don't pin every project's prompts in memory.
+const PROMPTS_CACHE_MAX = 64;
+const promptsCache = new Map(); // slug -> { sig, value }
+function mtimeOf(file) {
+  try { return fs.statSync(file).mtimeMs; } catch { return 0; }
+}
+function promptsSignature(slug) {
+  const dir = path.join(PROJECTS_DIR, slug);
+  return ['project.json', 'evidence.json', 'git.json', 'classify.json']
+    .map((f) => mtimeOf(path.join(dir, f)))
+    .join('|');
+}
 
 // The owner hashes a request can act as: a signed-in account's linked tokens, or
 // a single machine token via Bearer. null = unauthenticated (hosted), or local
@@ -143,6 +164,20 @@ export function startServer(port = 4317) {
   // Behind Fly's (or any) TLS-terminating proxy, honor X-Forwarded-Proto so
   // req.protocol is 'https' — otherwise minted share links come out as http://.
   app.set('trust proxy', true);
+  // gzip everything: the SPA ships ~440KB of uncompressed app.js + style.css, and
+  // JSON API payloads (activity/prompts/sessions) are highly compressible. Fly's
+  // proxy doesn't gzip for us, so without this the wire cost is ~3x. Cheap CPU.
+  // BUT: never compress the SSE live streams (Drive stream + live ticker,
+  // agentRoutes.js) — compression buffers, so gzipping `text/event-stream` would
+  // hold events back until a chunk fills, killing real-time updates. compression's
+  // default filter treats text/* as compressible, so we must exclude it explicitly.
+  app.use(compression({
+    filter: (req, res) => {
+      const ct = String(res.getHeader('Content-Type') || '');
+      if (ct.includes('text/event-stream')) return false;
+      return compression.filter(req, res);
+    },
+  }));
   app.use(express.json({ limit: JSON_LIMIT })); // bundles carry full conversations
 
   if (HOSTED) mountAuth(app); // /auth/* sign-in, /api/me, /api/auth/providers
@@ -447,6 +482,9 @@ export function startServer(port = 4317) {
   app.get('/api/projects/:slug/prompts', (req, res) => {
     const project = guardRead(req, res);
     if (!project) return;
+    const sig = promptsSignature(req.params.slug);
+    const cached = promptsCache.get(req.params.slug);
+    if (cached && cached.sig === sig) return res.json(cached.value);
     const evidence = getEvidence(req.params.slug);
     const git = getGit(req.params.slug);
     const classify = getClassify(req.params.slug);
@@ -467,6 +505,10 @@ export function startServer(port = 4317) {
       }
     }
     units.sort((a, b) => Date.parse(b.ts || b.sessionEndedAt || 0) - Date.parse(a.ts || a.sessionEndedAt || 0));
+    promptsCache.set(req.params.slug, { sig, value: units });
+    if (promptsCache.size > PROMPTS_CACHE_MAX) {
+      promptsCache.delete(promptsCache.keys().next().value); // evict oldest
+    }
     res.json(units);
   });
 
@@ -535,7 +577,11 @@ export function startServer(port = 4317) {
   }
 
   // index:false so static doesn't auto-serve index.html at `/` (we route it above).
-  app.use(express.static(PUBLIC_DIR, { index: false }));
+  // maxAge gives a short browser cache so repeat loads skip even the revalidation
+  // round-trip; assets aren't content-hashed (app.js keeps its name across deploys)
+  // so we keep it short — returning users pick up a new build within the window, and
+  // ETag still yields a 304 (no body) after it expires if nothing changed.
+  app.use(express.static(PUBLIC_DIR, { index: false, maxAge: '5m' }));
 
   // Bind all interfaces so the app is reachable inside a container / behind a
   // platform proxy (not just loopback).
