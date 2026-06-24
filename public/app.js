@@ -1239,14 +1239,12 @@ function renderSessionList() {
     .querySelectorAll('.sess')
     .forEach((node) => node.addEventListener('click', () => {
       // The actively-driven convo returns to Drive; everything else opens the reader.
-      if (isActiveDrive(node.dataset.id)) return resumeDrive(state.project);
-      selectSession(state.project, node.dataset.id);
+      openConvoOrDrive(node.dataset.id);
     }));
   el('#sessions')
     .querySelectorAll('.prompt-row:not(.provisional)')
     .forEach((node) => node.addEventListener('click', () => {
-      if (isActiveDrive(node.dataset.session)) return resumeDrive(state.project);
-      selectSession(state.project, node.dataset.session, Number(node.dataset.turn));
+      openConvoOrDrive(node.dataset.session, Number(node.dataset.turn));
     }));
   state._liveFreshPrompts = null;
 }
@@ -1420,11 +1418,26 @@ function renderNowCard() {
   const done = plans.reduce((a, p) => a + p.done, 0);
   const total = plans.reduce((a, p) => a + p.total, 0);
   const lastAt = agents.length ? Math.max(...agents.map((a) => a.lastEventAt || 0)) : 0;
+  const driveable = state.driveable !== false;
+  // A durable, resumable handle for this project that ISN'T a currently-running agent.
+  // The roster (state.roster) is the live in-memory truth; state.driveActive survives
+  // navigation/redeploy in localStorage. When the two disagree — cockpit shows no live
+  // agent but the rail offers "Return to Drive" — it's because the session is paused
+  // and adoptable, not running. Say that plainly instead of a flat "no agents".
+  const hasResumable = driveable && state.driveActive && state.driveActive.project === state.project && !state._driveOpen;
   let body;
-  if (state.driveable === false) body = '<div class="ck-empty">Live agents show here while you drive. Sign in as the instance admin to start one.</div>';
-  else if (!agents.length) body = '<div class="ck-empty">No agents running. Open a conversation and tap <b>✦ Drive</b> to start one.</div>';
+  if (!driveable) body = '<div class="ck-empty">Live agents show here while you drive. Sign in as the instance admin to start one.</div>';
+  else if (!agents.length) body = hasResumable
+    ? '<div class="ck-empty">No agent running right now — your last session is paused and resumable. <b>✦ Return to Drive</b> picks it up where it left off.</div>'
+    : '<div class="ck-empty">No agents running. Tap <b>✦ New agent</b> to start one.</div>';
   else body = agents.map(agentRowHtml).join('');
-  const line1 = agents.length ? `${working} working · ${waiting} waiting · ${idle} idle` : 'Now';
+  // Cockpit is the control center: start a new agent or rejoin the resumable one
+  // straight from here (no detour through a conversation's Drive panel).
+  const actions = driveable ? `<div class="ck-now-actions">
+        ${hasResumable ? '<button class="ck-act resume" data-ck-resume title="Reconnect to your paused agent session — it continues where it left off">✦ Return to Drive</button>' : ''}
+        <button class="ck-act new" data-ck-new title="Start a brand-new agent session in this project">✦ New agent</button>
+      </div>` : '';
+  const line1 = agents.length ? `${working} working · ${waiting} waiting · ${idle} idle` : (hasResumable ? '1 paused' : 'Now');
   const line2 = (total ? `${done}/${total} tasks` : 'no plan checklists') + (lastAt ? ` · active ${fmtAgo(lastAt)}` : '');
   return `<section class="dash-card cockpit-now">
       <div class="ck-now-head">
@@ -1437,6 +1450,7 @@ function renderNowCard() {
       </div>
       ${cockpitSparkline(sessions)}
       <div class="ck-roster">${body}</div>
+      ${actions}
     </section>`;
 }
 
@@ -1618,6 +1632,10 @@ function wireCockpit() {
   if (lt) lt.onclick = () => { state.live ? stopLive() : startLive(); renderTimeline(); };
   const full = conv.querySelector('[data-full-timeline]');
   if (full) full.onclick = () => { state.fullTimeline = true; renderTimeline(); };
+  const ckNew = conv.querySelector('[data-ck-new]');
+  if (ckNew) ckNew.onclick = () => { cockpitDetach(); openDriveForProject(state.project); };
+  const ckResume = conv.querySelector('[data-ck-resume]');
+  if (ckResume) ckResume.onclick = () => { cockpitDetach(); resumeDrive(state.project); };
   wireRoster(conv);
   wireCockpitFeeds(conv);
 }
@@ -1676,7 +1694,7 @@ async function endRosterAgent(id) {
 }
 
 function wireCockpitFeeds(root) {
-  root.querySelectorAll('.ck-ev.convo[data-open]').forEach((n) => (n.onclick = () => selectSession(state.project, n.dataset.open)));
+  root.querySelectorAll('.ck-ev.convo[data-open]').forEach((n) => (n.onclick = () => openConvoOrDrive(n.dataset.open)));
   root.querySelectorAll('[data-bh-doc]').forEach((n) => (n.onclick = () => { const d = currentDocNode(n.dataset.bhDoc); if (d) openDocLightbox(d); }));
   root.querySelectorAll('.ck-ev.commits[data-burst]').forEach((n) => (n.onclick = () => { const l = n.querySelector('.ck-burst-list'); if (l) l.hidden = !l.hidden; }));
 }
@@ -1875,7 +1893,7 @@ function renderFullTimeline() {
     .querySelectorAll('[data-open]')
     .forEach((n) =>
       n.addEventListener('click', () => {
-        if (n.dataset.open) selectSession(state.project, n.dataset.open);
+        if (n.dataset.open) openConvoOrDrive(n.dataset.open);
       }),
     );
   el('#conversation')
@@ -4299,6 +4317,17 @@ function railIsLive(id) {
   return isDrivingSession(id) || isActiveDrive(id);
 }
 
+// Single rule for "open this conversation", used everywhere a convo is clickable
+// (rail rows, cockpit Latest feed, timeline ribbon): if it's the session we're
+// actively driving — or have suspended but can still resume — reconnect to the live
+// Drive instead of the read-only archive. Otherwise open the reader. This is what
+// keeps "clicking the active convo" behaving the same as "Return to Drive" no matter
+// which surface you tapped it from (the inconsistency Mike hit from the Cockpit).
+function openConvoOrDrive(id, turnIndex = null) {
+  if (isActiveDrive(id) || isDrivingSession(id)) return resumeDrive(state.project);
+  return selectSession(state.project, id, turnIndex);
+}
+
 const DRIVE_PERMS = [
   ['bypassPermissions', 'bypassPermissions — run anything, no approvals (DANGER, local only)'],
   ['default', 'default — read/chat only (edits & shell need approval)'],
@@ -5021,9 +5050,12 @@ function driveFmtElapsed(s) { return s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 
 // Context-window meter: the input side of usage (fresh + cache) is the context the
 // model saw; show it as tokens + % of the window (mirrors the convos live pill /
 // src/parsers.js). The window is 200k, or 1M for a [1m] model. Driven live now —
-// fed by interim `message_start` usage during the turn (each tool-loop call) and
-// finalized by the end-of-turn `result` — so it climbs as context fills instead of
-// only snapping at turn's end. Idempotent: safe to call on every usage event.
+// fed *only* by interim `message_start` usage during the turn (each tool-loop call),
+// so it climbs as context fills and the last call of the turn leaves it at the true
+// high-water mark. It is deliberately NOT fed by the `result` event: that usage is
+// the cumulative turn total (input summed across every tool-loop call), which on a
+// long turn is many times the window and would pin the pill at a false 100%.
+// Idempotent: safe to call on every usage event.
 function driveCtxWindow(model) {
   const m = String(model || '').toLowerCase();
   return (m.includes('[1m]') || m.includes('-1m')) ? 1_000_000 : 200_000;
@@ -5053,7 +5085,10 @@ function driveUpdateCtx(ev) {
 }
 
 // Turn-complete summary line: duration + token usage (exact, from the result event)
-// + step count + cost (when billed). Cache reads fold into the input total.
+// + step count + cost (when billed). Cache reads fold into the input total. Note the
+// "tok in" here is the turn's *cumulative* throughput (summed over every tool-loop
+// call) — turn-cost metering, deliberately distinct from the context-window pill,
+// which tracks per-call fill via driveUpdateCtx. Don't wire this number into the pill.
 function driveResultMeta(ev) {
   const u = ev.usage || {};
   const out = u.output_tokens;
@@ -5378,7 +5413,10 @@ function driveRender(ev) {
       driveEndTurn();
       liveBrain.idle();
       driveAddEv('result', ev.isError ? 'turn failed' : 'turn complete', driveResultMeta(ev));
-      driveUpdateCtx(ev);
+      // Don't refresh the context pill from `result`: its usage is the cumulative
+      // turn total (summed over every tool-loop call), not the context-window fill, so
+      // it would pin the pill at a bogus "100%". The interim `usage` events
+      // (message_start) already left it at the true fill. See driveUpdateCtx + agent.js.
       driveCoolProvisional(); break;
     case 'usage': driveUpdateCtx(ev); break; // live context-window fill, from interim message_start mid-turn
     case 'system':

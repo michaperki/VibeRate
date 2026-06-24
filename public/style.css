@@ -1793,6 +1793,19 @@ body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-
 .ck-ctx-bar i { display: block; height: 100%; border-radius: 99px; transition: width 0.4s ease, background 0.4s ease; }
 .ck-empty { font-size: 12.5px; color: var(--muted); line-height: 1.5; padding: 10px 6px; }
 
+/* Cockpit-as-control-center: start a new agent / rejoin the resumable one from the
+   Now card itself. Mirrors the rail's ✦ Drive language so the action reads the same
+   wherever you launch from. */
+.ck-now-actions { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 10px; }
+.ck-act {
+  background: transparent; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 7px; padding: 6px 13px; font: inherit; font-weight: 600; font-size: 12px; cursor: pointer;
+}
+.ck-act:hover { background: var(--accent); color: #0a1020; }
+.ck-act.resume { background: var(--accent); color: #0a1020; animation: pb-live 2s ease-in-out infinite; }
+.ck-act.resume:hover { background: #6b4cf2; border-color: #6b4cf2; color: #fff; }
+@media (prefers-reduced-motion: reduce) { .ck-act.resume { animation: none; } }
+
 /* — Latest: calm event feed — */
 .cockpit-latest .ck-ev { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-top: 1px solid var(--border); }
 .cockpit-latest .ck-ev:first-of-type { border-top: 0; }

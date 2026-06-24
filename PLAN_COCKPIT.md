@@ -371,3 +371,93 @@ home until step 6 flips the default.
 - Agent runtime: `src/agent.js` (`sessions` Map `:275`, `createSession` `:283`, `setStatus`
   `:326`, usage emit `:373–387`, `listSessions`/`publicView` `:726–745`), `src/agentRoutes.js`
   (`/api/agent/sessions` `:108`, `/stream` `:281`).
+
+---
+
+## §X — Session-state audit & lifecycle unification (2026-06-24)
+
+Mike reported a cluster of inconsistencies around Drive session state, context
+reporting, and lifecycle. Audited the three surfaces that report agent/session status
+(Cockpit, Drive, conversations rail) and found they did **not** share a source of truth.
+Fixes below shipped on `main`.
+
+### 1. Context meter read a cumulative number as if it were window fill *(the headline bug)*
+**Symptom.** Ending a turn flashed something extreme — "4M / 200K · 100% full ⚠" — but
+navigating away and back showed the real "37%".
+
+**Cause.** The Claude stream's `result` event carries **cumulative** turn usage:
+`input_tokens` summed across *every* model call in the tool loop. A long turn re-sends a
+growing context each call, so the sum is many multiples of the window (≈20 calls × ~200k ≈
+4M). Two places fed that into the **context-window meter**:
+- `src/agent.js` `result` handler → `recordUsage(session, obj.usage)` (poisoned the cockpit
+  roster `ctxPct`).
+- `public/app.js` `case 'result'` → `driveUpdateCtx(ev)` (poisoned the Drive pill).
+
+The *correct* fill is the per-call input usage from `message_start` (`agent.js` interim
+branch / client `case 'usage'`); the turn's last `message_start` already leaves the meter at
+the true high-water mark. On return, the meter is re-seeded from the transcript's last
+per-message usage (`adoptSession`) — which is why navigating back showed the right number.
+So the two sources weren't "different denominators"; one was reading turn-throughput, the
+other context-fill.
+
+**Fix.** Stop feeding `result.usage` into the meter on both server and client. The meter is
+now fed *only* by interim `message_start` usage. `result.usage` still drives the turn footer
+(duration / cost / throughput), which legitimately wants the cumulative number.
+
+### 2. Compaction now reads correctly (no code change needed beyond #1)
+Auto-compaction was already surfaced as a `note` (`agent.js`, `system` subtype `*compact*`).
+With #1 fixed, the pill now *drops* after compaction (the next `message_start` carries the
+reduced context) instead of being pinned at a bogus 100% — so the note and the meter finally
+agree, and the drop has a visible cause.
+
+### 3. One source-of-truth rule for "open this conversation"
+**Symptom.** Clicking the active convo in the rail returned to Drive, but clicking it in the
+Cockpit's *Latest* feed (or the timeline ribbon) opened the **read-only archive**.
+
+**Cause.** Only the rail handler checked `isActiveDrive`; the cockpit/timeline `data-open`
+handlers called `selectSession` unconditionally.
+
+**Fix.** New `openConvoOrDrive(id)` helper: if the convo is the session we're actively
+driving *or* the durable resumable handle (`isActiveDrive || isDrivingSession`), reconnect to
+Drive; else open the reader. All three surfaces (rail rows, cockpit Latest, timeline) route
+through it. "Click the active convo" now behaves identically to "Return to Drive" everywhere.
+
+### 4. Cockpit is now the control center
+**Symptom.** Cockpit said "No agents running" while the rail offered "Return to Drive"; and
+you could only launch a new agent from inside an existing convo's Drive panel.
+
+**Cause.** Cockpit read live `state.roster` (in-memory sessions); the rail read durable
+`state.driveActive` (localStorage, survives nav/redeploy). When a session is paused/adoptable
+but not a running process, the roster is empty while `driveActive` persists — the two
+legitimately describe different things ("running now" vs "resumable"), but the UI never said
+so, and the cockpit had no launcher.
+
+**Fix.** `renderNowCard` now:
+- distinguishes **running** vs **paused/resumable**: when no live agent but `driveActive`
+  exists for this project, the empty state says "paused and resumable" (line1 shows
+  "1 paused") instead of a flat "no agents";
+- adds a **`✦ New agent`** launcher (→ `openDriveForProject`) and, when resumable, a
+  **`✦ Return to Drive`** button (→ `resumeDrive`) — so starting / rejoining / monitoring all
+  happen from the Cockpit, not only from a convo's Drive panel.
+
+### Lifecycle vocabulary (the distinctions the UI now makes)
+- **New session** — `✦ New agent` / `✦ Drive` → `openDriveForProject` → `startSession`
+  (`resume:false`). A fresh `claudeSessionId`.
+- **Return to a suspended session (same process)** — `resumeDrive` fast path: `state.driveActive.id`
+  still resolves in-memory → reconnect SSE, replay buffered events, continue.
+- **Reconnect to a running agent** — same `resumeDrive`/`openRosterAgent` path while
+  `status` is `working`/`waiting`; the agent kept running while you were away.
+- **Adopt a paused/finished session (process gone, e.g. redeploy)** — `resumeDrive` falls
+  through to `/sessions/adopt` by durable `claudeSessionId`; transcript replayed, fresh local
+  handle, status `idle`.
+- **Archive view** — `selectSession` → read-only reader. Only for convos that are *not* the
+  active drive.
+- **Restart** — explicitly ending (`/end`, clears `driveActive`) then starting new. Never
+  implicit: clicking the active convo reconnects, it never restarts.
+
+### Still open
+- Cross-device / server-side resumable index (today `driveActive` + the drive-sessions log
+  are localStorage-scoped). Until then, "resumable" in the Cockpit reflects *this browser's*
+  durable handle, not every on-disk session — acceptable, but note the scope.
+- A hard signal in the roster row distinguishing "running process" from "in-memory but idle"
+  vs "adoptable from disk" (today: status dot + the paused/running copy on the Now card).

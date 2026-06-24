@@ -628,7 +628,14 @@ function handleRawEvent(session, obj) {
   }
 
   if (type === 'result') {
-    recordUsage(session, obj.usage); // keep the roster ctx meter fresh at turn's end
+    // NB: do NOT feed obj.usage into the context meter. The `result` event's usage is
+    // the *cumulative* total for the whole turn — input_tokens summed across every
+    // model call in the tool loop — so on a long turn it's many times the window (e.g.
+    // 4M against a 200k window → a bogus "100% full"). The real context-window fill is
+    // the per-call input usage from `message_start` (recordUsage at the interim branch
+    // above); the last such event of the turn already left the meter at the true
+    // high-water mark. We still forward obj.usage below for the turn footer/cost, which
+    // legitimately wants the cumulative throughput.
     emit(session, {
       kind: 'result',
       isError: !!obj.is_error,
