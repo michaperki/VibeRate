@@ -1,0 +1,10 @@
+# XcodeGen regenerates these on every build — they are artifacts, not source.
+VibeRate.xcodeproj/
+Support/Info.plist
+
+# Xcode / build noise
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store

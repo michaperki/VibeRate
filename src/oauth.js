@@ -1,5 +1,5 @@
-import { upsertUser, getUser, setGithubConnection, clearGithubConnection, getGithubToken } from './accounts.js';
-import { signValue, verifyValue, readCookie, setCookie, clearCookie } from './auth.js';
+import { upsertUser, getUser, setGithubConnection, clearGithubConnection, getGithubToken, linkOwner } from './accounts.js';
+import { signValue, verifyValue, readCookie, setCookie, clearCookie, newToken, hashToken } from './auth.js';
 
 // Social sign-in for the web dashboard. Standard OAuth2 web flow, hand-rolled on
 // fetch (no deps). The CLI never touches this — it keeps using its machine token;
@@ -68,6 +68,26 @@ function githubLogin(user) {
   return user && user.github && user.github.login ? user.github.login : null;
 }
 
+// --- Native deep-link OAuth (RFC 8252) for the SwiftUI app ----------------------
+// The web flow binds the callback to the same browser via a state COOKIE, then sets
+// a session cookie and redirects to /app. A native app can't share that cookie jar
+// (the bug class that killed the Capacitor wrapper — PLAN_NATIVE_AUTH.md), so the
+// native variant is cookie-free: the app's custom-scheme callback is signed into the
+// HMAC `state` (un-forgeable, so no cookie is needed to bind it), and on the provider
+// callback we mint a SHORT one-time code instead of a session. The app exchanges that
+// code for an account-linked bearer token — which carries the account's full project
+// scope AND unlocks Drive when the email is allowlisted (adminEmailFor resolves a
+// linked token to its account email). We deliberately reuse the SAME provider
+// redirect_uri as the web flow (/auth/:provider/callback) and branch on the signed
+// `native` flag, so no extra redirect URI has to be registered with GitHub/Google.
+const NATIVE_CB_PREFIX = 'viberate://';
+const NATIVE_CODE_TTL = 2 * 60 * 1000;
+const nativeCodes = new Map(); // oneTimeCode -> { token, email, name, exp }
+function pruneNativeCodes() {
+  const now = Date.now();
+  for (const [k, v] of nativeCodes) if (v.exp < now) nativeCodes.delete(k);
+}
+
 async function exchangeCode(p, code, redirectUri) {
   const res = await fetch(p.tokenUrl, {
     method: 'POST',
@@ -87,6 +107,38 @@ async function exchangeCode(p, code, redirectUri) {
 
 export function mountAuth(app) {
   app.get('/api/auth/providers', (_req, res) => res.json({ providers: configuredProviders() }));
+
+  // Native (SwiftUI app) deep-link sign-in start. `cb` is the app's custom-scheme
+  // return URL (e.g. viberate://auth); it's signed into the state and validated on
+  // the way back. No cookie is set — see the NATIVE notes above.
+  app.get('/auth/native/:provider/start', (req, res) => {
+    const provider = req.params.provider;
+    if (!authConfigured(provider)) return res.status(404).send('unknown provider');
+    const cb = String(req.query.cb || 'viberate://auth');
+    if (!cb.startsWith(NATIVE_CB_PREFIX)) return res.status(400).send('bad callback scheme');
+    const p = PROVIDERS[provider];
+    const state = signValue({ r: Math.random().toString(36).slice(2), native: true, cb }, STATE_AGE);
+    const u = new URL(p.authUrl);
+    u.searchParams.set('client_id', process.env[p.idEnv]);
+    u.searchParams.set('redirect_uri', callbackUrl(req, provider));
+    u.searchParams.set('scope', p.scope);
+    u.searchParams.set('state', state);
+    u.searchParams.set('response_type', 'code');
+    if (provider === 'google') u.searchParams.set('prompt', 'select_account');
+    res.redirect(u.toString());
+  });
+
+  // Exchange a one-time code (delivered to the app's custom scheme) for the bearer
+  // token. Single-use, short TTL. The app stores the token in the Keychain and sends
+  // it as `Authorization: Bearer` thereafter.
+  app.post('/api/auth/native/exchange', (req, res) => {
+    const code = req.body && req.body.code;
+    pruneNativeCodes();
+    const entry = code && nativeCodes.get(code);
+    if (!entry || entry.exp < Date.now()) return res.status(400).json({ error: 'invalid or expired code' });
+    nativeCodes.delete(code); // one-time
+    res.json({ token: entry.token, email: entry.email, name: entry.name });
+  });
 
   app.get('/api/me', (req, res) => {
     const u = currentUser(req);
@@ -122,7 +174,35 @@ export function mountAuth(app) {
     const { code, state } = req.query;
     const cookieState = readCookie(req, 'vbrt_oauth_state');
     const st = verifyValue(state);
-    if (!code || !state || state !== cookieState || !st) {
+    if (!code || !state || !st) {
+      return res.status(400).send('Sign-in failed: bad OAuth state. Try again from /app.');
+    }
+    // Native deep-link sign-in: no cookie to compare against (the signed state IS the
+    // binding). Mint a one-time code and bounce to the app's custom URL scheme.
+    if (st.native) {
+      const cb = String(st.cb || 'viberate://auth');
+      try {
+        const token = await exchangeCode(p, code, callbackUrl(req, provider));
+        const prof = await p.profile(token);
+        if (!prof.providerId) throw new Error('no profile id');
+        const user = upsertUser({ provider, providerId: prof.providerId, email: prof.email, name: prof.name });
+        // Mint a bearer token bound to this account → full project scope + Drive.
+        const appToken = newToken();
+        linkOwner(user.id, hashToken(appToken));
+        const oneTime = newToken();
+        pruneNativeCodes();
+        nativeCodes.set(oneTime, { token: appToken, email: user.email, name: user.name, exp: Date.now() + NATIVE_CODE_TTL });
+        const back = new URL(cb);
+        back.searchParams.set('code', oneTime);
+        return res.redirect(back.toString());
+      } catch (e) {
+        const back = new URL(cb);
+        back.searchParams.set('error', String((e && e.message) || e));
+        return res.redirect(back.toString());
+      }
+    }
+    // Web flow: still require the state cookie (binds the callback to this browser).
+    if (state !== cookieState) {
       return res.status(400).send('Sign-in failed: bad OAuth state. Try again from /app.');
     }
     // "Connect GitHub" grant (repo scope): not a sign-in — bind the resulting token
