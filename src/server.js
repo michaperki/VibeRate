@@ -2,6 +2,7 @@ import express from 'express';
 import compression from 'compression';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PROJECTS_DIR } from './paths.js';
 import { listProjects, getProject, getSession, getActivity, getTicker, getGit, getDocs, getDocHistory, getMemory, getEvidence, getClassify, saveClassify, getWorkspaceRollup, ingestBundle, createProject, setVisibility } from './storage.js';
@@ -554,7 +555,26 @@ export function startServer(port = 4317) {
     res.json({ ...summary, myVote: getUserVote(req.params.id, user.id) });
   });
 
-  const sendApp = (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  // Cache-busting for the SPA shell. `app.js`/`style.css` keep stable names across
+  // deploys, so the short static browser cache (maxAge below) can serve a stale build
+  // for a few minutes after a deploy — which reads as "my change didn't land". Stamp a
+  // content hash onto the asset refs so every deploy is a fresh URL that busts the cache
+  // the instant the bytes change (and never otherwise). The shell itself is sent
+  // `no-cache` so it always revalidates and the version refs stay current; it's tiny.
+  const assetVer = (rel) => {
+    try { return crypto.createHash('sha1').update(fs.readFileSync(path.join(PUBLIC_DIR, rel))).digest('hex').slice(0, 10); }
+    catch { return 'dev'; }
+  };
+  let _appShell = null;
+  const appShell = () => {
+    if (_appShell) return _appShell;   // assets can't change within a process; recomputed on redeploy (new process)
+    const html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
+      .replace('/style.css"', `/style.css?v=${assetVer('style.css')}"`)
+      .replace('/app.js"', `/app.js?v=${assetVer('app.js')}"`);
+    _appShell = html;
+    return html;
+  };
+  const sendApp = (_req, res) => { res.set('Cache-Control', 'no-cache'); res.type('html').send(appShell()); };
 
   // Public single-project page: /p/<id> serves the SPA, which reads the id from
   // the URL and loads that project directly (no picker). Always public — the
