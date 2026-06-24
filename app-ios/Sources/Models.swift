@@ -55,6 +55,23 @@ struct WorkspaceState: Codable {
     let error: String?
 }
 
+/// A durable past Drive conversation in a project's workspace
+/// (`GET /api/agent/workspace/:slug/sessions`), read from the on-disk claude
+/// transcripts — so it survives the server redeploy that wipes the live in-memory
+/// roster. `liveId`/`status` are present only when the conversation is *also* still
+/// running in this process; otherwise it's resumed by `claudeSessionId` (adopt).
+struct WorkspaceSession: Codable, Identifiable, Hashable {
+    let claudeSessionId: String
+    let title: String?
+    let userTurns: Int?
+    let startedAt: Double?
+    let lastAt: Double?
+    let liveId: String?
+    let status: String?
+
+    var id: String { claudeSessionId }
+}
+
 /// A live/known Drive agent session (`GET /api/agent/sessions`).
 struct AgentSession: Codable, Identifiable {
     let id: String

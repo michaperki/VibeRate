@@ -283,6 +283,22 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       and a shared `apiMessage(_:)` error-body helper (DriveSessionView's `friendly` now
       delegates to it). *No server change — the route already shipped for the web onboarding
       flow.* **Pending Codemagic build + on-device verify** (the Linux box can't compile Swift).
+- [x] **Cockpit "Conversations" — see + resume past sessions** (2026-06-24). Symptom from
+      dogfooding: after a redeploy (every push to `main` restarts the box) the cockpit showed
+      "No agents running" for a project with real history, because the roster only lists *live
+      in-memory* sessions — the durable past conversations vanished from view, and the only way
+      back was `DriveSessionView`'s silent best-effort adopt of the per-project stored cid. That
+      read as "I can't start a new agent" — every entry collapsed onto the one remembered
+      session. (The `+`/`forceNew` path already starts a genuinely independent agent server-side:
+      `startSession` mints a fresh claude session, no `--resume`, no per-cwd reuse — verified.)
+      Fix: a **Conversations** section under the Now roster lists the project's durable sessions
+      (`GET /api/agent/workspace/:slug/sessions` → on-disk transcripts, survives the redeploy),
+      deduped against the live roster. Tapping one **deliberately** resumes it — a still-live one
+      routes to its running agent (`attachTo`), an offline one adopts its exact `claudeSessionId`
+      (new `resumeCid` branch in `connect()`, distinct from the step-3 fallback). `+ New agent`
+      stays separate and unmistakable. New `WorkspaceSession` model + `workspaceSessions` on
+      `APIClient`. *No server change — the workspace-sessions endpoint already shipped.*
+      **Pending Codemagic build + on-device verify.**
 - ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
       plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same
       `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.

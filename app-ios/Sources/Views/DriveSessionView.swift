@@ -9,6 +9,11 @@ struct DriveSessionView: View {
     /// The specific agent to attach to (a tap on a cockpit roster row). `nil` means a
     /// fresh agent — don't auto-attach; the first message starts a new session.
     var attachTo: String? = nil
+    /// A durable past conversation to resume by its claude session id (a tap on a
+    /// cockpit "Conversations" row). Adopted via `/sessions/adopt`, which replays the
+    /// on-disk transcript — used when the session is no longer live in memory (e.g. after
+    /// a redeploy). Ignored when `attachTo` or `forceNew` is set.
+    var resumeCid: String? = nil
     /// The roster's last-known status for `attachTo`, so the bar reads right on entry.
     var initialStatus: String? = nil
     /// Force a brand-new agent: skip the live-session lookup *and* the adopt path so the
@@ -212,6 +217,19 @@ struct DriveSessionView: View {
                 // Best-effort: learn this session's durable id so we can adopt it later
                 // if a redeploy wipes the live record (don't block the composer on it).
                 if let s = try? await client.session(id: id), let cid = s.claudeSessionId { store(cid) }
+                return
+            }
+            // 1b. A "Conversations" row handed us a specific past session to resume —
+            //     adopt exactly that claude id (replays its on-disk transcript). This is
+            //     the deliberate-resume path, distinct from the step-3 best-effort adopt.
+            if let cid = resumeCid {
+                status = "Reconnecting…"
+                let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
+                sessionId = adopted.id
+                store(cid)
+                status = humanStatus(adopted.status)
+                openStream(adopted.id)
+                ready = true
                 return
             }
             // 2. No target — find a live session for this project. Prefer one that's

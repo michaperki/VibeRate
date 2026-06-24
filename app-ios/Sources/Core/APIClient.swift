@@ -110,6 +110,15 @@ struct APIClient {
         return all.filter { $0.projectSlug == project }
     }
 
+    /// Past Drive conversations for a project, read from the durable on-disk transcripts
+    /// (`driveIngest.listWorkspaceSessions`). Survives the redeploy that empties the live
+    /// in-memory roster, so the cockpit can still show — and resume — earlier work. Each
+    /// may carry a `liveId` when it's also running in this process.
+    func workspaceSessions(slug: String) async throws -> [WorkspaceSession] {
+        struct Reply: Decodable { let sessions: [WorkspaceSession] }
+        return try await send(request("/api/agent/workspace/\(slug)/sessions"), as: Reply.self).sessions
+    }
+
     /// The project's workspace binding — has a checkout been cloned on the host yet?
     /// Drives the setup form (`suggestedRepo` prefill) and the post-clone poll.
     func workspace(slug: String) async throws -> WorkspaceInfo {

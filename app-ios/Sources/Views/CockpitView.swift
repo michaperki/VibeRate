@@ -13,16 +13,32 @@ struct CockpitView: View {
 
     @State private var store: RosterStore?
     @State private var driveTarget: DriveTarget?
+    @State private var past: [WorkspaceSession] = []
     @State private var tick = Date()
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
 
-    /// Where a tap goes: a specific running agent, or `nil` to start a fresh one.
+    /// Where a tap goes. All-nil = start a fresh agent (the ✦ button). `sessionId` = a
+    /// live in-memory agent (a Now-roster row). `resumeCid` = a durable past conversation
+    /// to adopt (a Conversations row).
     struct DriveTarget: Hashable, Identifiable {
-        let sessionId: String?
-        let status: String?
-        var id: String { sessionId ?? "new" }
+        var sessionId: String? = nil
+        var resumeCid: String? = nil
+        var status: String? = nil
+        var id: String { sessionId ?? resumeCid ?? "new" }
+        var isNew: Bool { sessionId == nil && resumeCid == nil }
+    }
+
+    /// Past conversations not represented by a row already in the live "Now" roster —
+    /// the ones a redeploy left offline, plus any never-live history. Resuming one adopts
+    /// it; a still-live one routes straight to its running agent.
+    private var offlineConversations: [WorkspaceSession] {
+        let liveIds = Set(store?.agents.map(\.id) ?? [])
+        return past.filter { s in
+            if let lid = s.liveId { return !liveIds.contains(lid) }
+            return true
+        }
     }
 
     var body: some View {
@@ -49,6 +65,7 @@ struct CockpitView: View {
                         Text("Tap an agent to drive it.").font(.caption2)
                     }
                 }
+                conversationsSection
             } else {
                 ProgressView().frame(maxWidth: .infinity)
             }
@@ -58,26 +75,63 @@ struct CockpitView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    driveTarget = DriveTarget(sessionId: nil, status: nil)
+                    driveTarget = DriveTarget()   // all-nil → forceNew
                 } label: {
                     Label("New agent", systemImage: "plus.circle.fill")
                 }
             }
         }
         .navigationDestination(item: $driveTarget) { t in
-            DriveSessionView(project: project, attachTo: t.sessionId, initialStatus: t.status, forceNew: t.sessionId == nil)
+            DriveSessionView(project: project, attachTo: t.sessionId, resumeCid: t.resumeCid,
+                             initialStatus: t.status, forceNew: t.isNew)
         }
         .refreshable {
             if let store { await store.refresh(client: client) }
+            await loadPast()
         }
         .task {
             let s = store ?? RosterStore(project: project.slug, token: token)
             store = s
             await s.refresh(client: client)   // instant paint from the list endpoint…
             s.start()                         // …then go live on the stream.
+            await loadPast()                  // durable past conversations (survive redeploy)
         }
         .onDisappear { store?.stop() }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick = $0 }
+    }
+
+    // MARK: - Conversations (durable past sessions)
+
+    /// Past conversations to resume, separate from "Now". This is what makes a fresh
+    /// agent unmistakable: tapping + starts a NEW one; resuming an old one is a deliberate
+    /// tap here — not a silent auto-adopt. It also survives a redeploy (which empties the
+    /// live roster), so the project never looks empty when it has history.
+    @ViewBuilder
+    private var conversationsSection: some View {
+        if !offlineConversations.isEmpty {
+            Section {
+                ForEach(offlineConversations) { s in
+                    Button {
+                        if let lid = s.liveId {
+                            driveTarget = DriveTarget(sessionId: lid, status: s.status)
+                        } else {
+                            driveTarget = DriveTarget(resumeCid: s.claudeSessionId, status: "idle")
+                        }
+                    } label: {
+                        ConversationRow(session: s, now: tick)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: {
+                Text("Conversations")
+            } footer: {
+                Text("Tap to resume a past conversation, or + above to start a new agent.").font(.caption2)
+            }
+        }
+    }
+
+    private func loadPast() async {
+        if let s = try? await client.workspaceSessions(slug: project.slug) { past = s }
     }
 
     // MARK: - Empty state
@@ -94,7 +148,7 @@ struct CockpitView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button {
-                driveTarget = DriveTarget(sessionId: nil, status: nil)
+                driveTarget = DriveTarget()   // all-nil → forceNew
             } label: {
                 Label("New agent", systemImage: "plus.circle.fill")
             }
@@ -190,6 +244,54 @@ private struct AgentRow: View {
         if secs < 60 { return "\(secs)s" }
         if secs < 3600 { return "\(secs / 60)m" }
         return "\(secs / 3600)h \((secs % 3600) / 60)m"
+    }
+}
+
+/// One past conversation: preview title, a "running" tag if it's still live, message
+/// count, and how long ago it was last active.
+private struct ConversationRow: View {
+    let session: WorkspaceSession
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.subheadline)
+                .lineLimit(1)
+            HStack(spacing: 8) {
+                if session.liveId != nil {
+                    Label("running", systemImage: "circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                        .labelStyle(.titleAndIcon)
+                }
+                if let t = session.userTurns, t > 0 {
+                    Text("\(t) message\(t == 1 ? "" : "s")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let rel = relative {
+                    Text(rel).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+    }
+
+    private var title: String {
+        if let t = session.title, !t.isEmpty { return t }
+        return "Untitled conversation"
+    }
+
+    /// "5m ago" from the ms-epoch `lastAt`. Ticks off the cockpit's shared `now`.
+    private var relative: String? {
+        guard let ms = session.lastAt else { return nil }
+        let secs = max(0, Int(now.timeIntervalSince1970 - ms / 1000))
+        if secs < 60 { return "just now" }
+        if secs < 3600 { return "\(secs / 60)m ago" }
+        if secs < 86400 { return "\(secs / 3600)h ago" }
+        return "\(secs / 86400)d ago"
     }
 }
 
