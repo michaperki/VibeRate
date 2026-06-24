@@ -193,10 +193,10 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
 - ◻ Confirm a provider redirect URI `https://vbrt.fly.dev/auth/{github,google}/callback`
       is registered in the GitHub/Google OAuth apps — the only remaining server-side OAuth
       variable the Drive box can't inspect (the token fallback works regardless).
-- ◻ **You (one-time): add `paths-ignore: ['app-ios/**']` to `fly-deploy.yml`** so Swift-only
-      pushes stop redeploying/restarting the server. The Drive token is `repo, read:user` only
-      (no `workflow` scope), so it can't push `.github/workflows/` — apply it from GitHub's web
-      editor or a `workflow`-scoped checkout. Exact diff is in the chat / `app-ios/README.md`.
+- [x] **`paths-ignore: ['app-ios/**']` on `fly-deploy.yml`** (`a86e28c`) — Swift-only
+      pushes no longer redeploy/restart the server. (Applied from a `workflow`-scoped
+      checkout, since the Drive token is `repo, read:user` only. A cosmetic `# add these two
+      lines` comment is still in the file; harmless.)
 - [x] **Cockpit "Now" roster** (`CockpitView` + `RosterStore`, 2026-06-24) — the
       drive+cockpit milestone on the phone. A new screen sits **between** the projects list
       and Drive: `Projects → Cockpit → Drive`. It subscribes to the aggregate roster SSE
@@ -246,7 +246,15 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       `id:`/Last-Event-ID dedupe, `agentRoutes.js:357`), skipping a 4xx so it can't
       hot-loop. Plus `SSEClient` refuses gzip + caching so URLSession can't buffer the
       trickle. *Both text and thinking ride the same stream, so this unblocks both.*
-- ◻ Optimistic-send polish: a "Working…" spinner row while the agent runs between events.
+- [x] **Optimistic-send polish — "Working…" spinner row** (2026-06-24). The gap between
+      sending a prompt and the first streamed event read as dead air (the status bar might
+      still say "Idle" until the server's first `status` frame). `DriveSessionView` now
+      shows a `ProgressView` + "Working…"/"Thinking…" row at the foot of the transcript
+      whenever the agent is busy but nothing is actively streaming into a bubble
+      (`showWorkingRow` = `awaitingResponse || status busy`, hidden while assistant text or
+      a thinking trace is growing — that text is its own progress signal). `awaitingResponse`
+      flips on at send and off at the first real `status`/`turn_end`/`error`; a lingering
+      "Working…" is cleared at `turn_end` so the spinner can't stick after the agent goes idle.
 - ✅ **New agent from the phone** — the `+` opened a fresh Drive but `connect()` then
       re-attached/adopted the agent *already* running on the project, so you landed back in
       the open convo with no way to start a second one. Fixed: `DriveSessionView` takes a
@@ -261,10 +269,20 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       this stranded a prior session mid-edit). `APIClient.startSession` *and* `adopt` now
       send `permissionMode: "bypassPermissions"` (server validates it + adds
       `--dangerously-skip-permissions`, `agent.js:363,685`).
-- ◻ **Workspace setup for a fresh project** — `POST /api/agent/sessions` still 409s if the
-      project's checkout isn't cloned (`agentRoutes.js:182`) and there's no setup affordance
-      on iOS. Add a workspace-setup step (`POST /api/agent/workspace/:slug/setup`) so a
-      brand-new project can start its first agent.
+- [x] **Workspace setup for a fresh project** (2026-06-24) — `POST /api/agent/sessions`
+      409s if the project's checkout isn't cloned (`agentRoutes.js:182`); previously that
+      stranded a fresh project on the phone with a bare error and no recovery. The server
+      `POST /api/agent/workspace/:slug/setup` route already existed (clone + dep-install,
+      background, status walks `cloning → ready|error`) — this adds the iOS affordance.
+      `send()` now detects the 409 (`isWorkspaceNotSetup`), rolls back the optimistic
+      bubble, queues the prompt, and presents `WorkspaceSetupView`: a sheet that prefills
+      the project's `suggestedRepo` (from `GET /api/agent/workspace/:slug`), clones via
+      `setupWorkspace`, polls the status (~3 min ceiling) until `ready`, then calls back
+      to re-send the queued prompt — which now starts the project's first agent. New
+      `WorkspaceInfo`/`WorkspaceState` models, `workspace`/`setupWorkspace` on `APIClient`,
+      and a shared `apiMessage(_:)` error-body helper (DriveSessionView's `friendly` now
+      delegates to it). *No server change — the route already shipped for the web onboarding
+      flow.* **Pending Codemagic build + on-device verify** (the Linux box can't compile Swift).
 - ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
       plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same
       `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.

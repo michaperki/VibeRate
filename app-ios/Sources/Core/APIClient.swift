@@ -109,4 +109,34 @@ struct APIClient {
         let all = try await send(request("/api/agent/sessions"), as: [RosterAgent].self)
         return all.filter { $0.projectSlug == project }
     }
+
+    /// The project's workspace binding — has a checkout been cloned on the host yet?
+    /// Drives the setup form (`suggestedRepo` prefill) and the post-clone poll.
+    func workspace(slug: String) async throws -> WorkspaceInfo {
+        try await send(request("/api/agent/workspace/\(slug)"), as: WorkspaceInfo.self)
+    }
+
+    /// Clone the project's repo onto the host so an agent can drive it. Returns
+    /// immediately with `status: cloning`; poll `workspace(slug:)` until it flips to
+    /// `ready`/`error` (the clone + dep-install runs in the background server-side).
+    @discardableResult
+    func setupWorkspace(slug: String, repo: String, branch: String?) async throws -> WorkspaceState {
+        var payload = ["repo": repo]
+        if let branch, !branch.isEmpty { payload["branch"] = branch }
+        let body = try JSONEncoder().encode(payload)
+        return try await send(request("/api/agent/workspace/\(slug)/setup", method: "POST", body: body), as: WorkspaceState.self)
+    }
+}
+
+/// Pull the server's `{error: "…"}` message out of an HTTP error body when present, so
+/// the UI shows the human-readable reason instead of a bare status code. Shared by the
+/// Drive and workspace-setup views.
+func apiMessage(_ error: Error) -> String {
+    if case let APIError.http(_, body) = error,
+       let data = body.data(using: .utf8),
+       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let msg = obj["error"] as? String {
+        return msg
+    }
+    return error.localizedDescription
 }

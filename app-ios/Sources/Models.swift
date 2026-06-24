@@ -36,6 +36,25 @@ struct ProjectSession: Codable, Hashable {
     let endedAt: String?
 }
 
+/// A project's Drive workspace binding (`GET /api/agent/workspace/:slug`). A driven
+/// session needs a checkout on the host; until one exists, `POST /api/agent/sessions`
+/// 409s. `suggestedRepo` prefills the setup form (the repo the project was created from).
+struct WorkspaceInfo: Codable {
+    let workspace: WorkspaceState?
+    let suggestedRepo: String?
+    let name: String?
+}
+
+/// The clone state of a project's workspace. `status` walks `cloning → ready | error`;
+/// the setup form polls `GET` until it leaves `cloning`. All optional — the server sends
+/// more (`dir`, `head`, `updatedAt`) and unknown keys are ignored.
+struct WorkspaceState: Codable {
+    let status: String?
+    let repo: String?
+    let branch: String?
+    let error: String?
+}
+
 /// A live/known Drive agent session (`GET /api/agent/sessions`).
 struct AgentSession: Codable, Identifiable {
     let id: String

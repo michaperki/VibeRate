@@ -36,6 +36,9 @@ struct DriveSessionView: View {
     @State private var eventCount = 0                // diagnostics: events seen on this stream
     @State private var streamHTTP: Int?              // diagnostics: stream response status
     @State private var lastSeq = 0                   // highest event seq seen — resume point for reconnect
+    @State private var awaitingResponse = false      // sent a prompt, nothing has streamed back yet
+    @State private var showSetup = false             // a fresh project needs its workspace cloned first
+    @State private var queuedPrompt: String?         // the prompt to re-send once the workspace is ready
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -64,6 +67,17 @@ struct DriveSessionView: View {
         }
         .task { await connect() }
         .onDisappear { streamTask?.cancel() }
+        .sheet(isPresented: $showSetup) {
+            WorkspaceSetupView(project: project, token: token) {
+                // Workspace cloned + ready — re-send the prompt that 409'd, which now
+                // starts the project's first agent.
+                if let p = queuedPrompt {
+                    queuedPrompt = nil
+                    draft = p
+                    Task { @MainActor in await send() }
+                }
+            }
+        }
     }
 
     // MARK: - Transcript
@@ -83,6 +97,7 @@ struct DriveSessionView: View {
                         bubbleView(b)
                             .frame(maxWidth: .infinity, alignment: b.role == .user ? .trailing : .leading)
                     }
+                    if showWorkingRow { workingRow }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding()
@@ -92,6 +107,9 @@ struct DriveSessionView: View {
             }
             .onChange(of: bubbles.last?.text) { _, _ in
                 proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onChange(of: showWorkingRow) { _, on in
+                if on { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
         }
     }
@@ -131,6 +149,26 @@ struct DriveSessionView: View {
                 .font(.footnote)
                 .foregroundStyle(.red)
         }
+    }
+
+    /// Show a "Working…" row whenever the agent is busy but nothing is actively
+    /// streaming into a bubble — i.e. the gap between sending a prompt and the first
+    /// event, and the pauses between tool calls. Hidden while assistant text or a
+    /// thinking trace is growing (that text is its own progress signal).
+    private var showWorkingRow: Bool {
+        (awaitingResponse || status == "Working…" || status == "Thinking…")
+            && !assistantOpen && !thinkingOpen
+    }
+
+    private var workingRow: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(status == "Thinking…" ? "Thinking…" : "Working…")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .transition(.opacity)
     }
 
     // MARK: - Composer
@@ -290,14 +328,36 @@ struct DriveSessionView: View {
                 status = humanStatus(session.status)
                 openStream(session.id)
             }
+            awaitingResponse = true   // sent; show "Working…" until the stream moves
         } catch {
-            // Roll back the optimistic bubble — the send didn't take (e.g. agent busy).
-            if pendingEcho == text, bubbles.last?.role == .user, bubbles.last?.text == text {
-                bubbles.removeLast()
+            // Roll back the optimistic bubble — the send didn't take.
+            rollbackOptimistic(text)
+            // A fresh project has no checkout yet (`POST /sessions` 409s). Don't strand the
+            // user — offer to clone the workspace, then re-send the queued prompt.
+            if isWorkspaceNotSetup(error) {
+                queuedPrompt = text
+                status = "This project needs a workspace before an agent can run."
+                showSetup = true
+                return
             }
-            pendingEcho = nil
             bubbles.append(Bubble(role: .error, text: friendly(error)))
         }
+    }
+
+    /// Remove the optimistic user bubble when a send fails before it took.
+    private func rollbackOptimistic(_ text: String) {
+        if pendingEcho == text, bubbles.last?.role == .user, bubbles.last?.text == text {
+            bubbles.removeLast()
+        }
+        pendingEcho = nil
+    }
+
+    /// The server 409s `… workspace is not set up yet …` when a project has no checkout.
+    private func isWorkspaceNotSetup(_ error: Error) -> Bool {
+        if case let APIError.http(code, body) = error {
+            return code == 409 && body.contains("not set up")
+        }
+        return false
     }
 
     // MARK: - Stream rendering
@@ -361,10 +421,18 @@ struct DriveSessionView: View {
             // Turn over — drop the ephemeral thinking trace, leaving a clean transcript
             // of prompts, replies, and tool activity (matches the web Drive view).
             assistantOpen = false
+            awaitingResponse = false
+            // No status event may follow a turn end; clear a lingering "Working…" so the
+            // spinner row doesn't stick when the agent has actually gone idle.
+            if status == "Working…" || status == "Thinking…" { status = "Idle" }
             clearThinking()
         case "status":
-            if let s = obj["status"] as? String { status = humanStatus(s) }
+            if let s = obj["status"] as? String {
+                status = humanStatus(s)
+                awaitingResponse = false   // a real status now drives the working row
+            }
         case "error":
+            awaitingResponse = false
             if let m = obj["message"] as? String { bubbles.append(Bubble(role: .error, text: m)) }
         default:
             break
@@ -415,13 +483,5 @@ struct DriveSessionView: View {
     }
 
     /// Pull the server's `{error: "…"}` message out of an HTTP error body when present.
-    private func friendly(_ error: Error) -> String {
-        if case let APIError.http(_, body) = error,
-           let data = body.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let msg = obj["error"] as? String {
-            return msg
-        }
-        return error.localizedDescription
-    }
+    private func friendly(_ error: Error) -> String { apiMessage(error) }
 }
