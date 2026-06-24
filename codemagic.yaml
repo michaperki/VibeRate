@@ -90,12 +90,15 @@ workflows:
           # ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE). Capacitor hardcodes
           # CURRENT_PROJECT_VERSION = 1 in the pbxproj, and Info.plist's CFBundleVersion
           # is $(CURRENT_PROJECT_VERSION) — so derive the next number from whatever is
-          # already on TestFlight and bump it. This stays strictly monotonic across
-          # re-runs without us hand-editing the version each time.
+          # already on TestFlight and bump it. The TestFlight query lags a still-
+          # processing build though, so LATEST+1 can collide; use epoch seconds as a
+          # strictly-monotonic floor — max(LATEST+1, now) never reproduces a build number
+          # already uploaded and keeps climbing across re-runs regardless of API lag.
           LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
           case "$LATEST" in ""|*[!0-9]*) LATEST=0;; esac
-          NEW=$((LATEST + 1))
-          echo "Latest TestFlight build=$LATEST -> setting CFBundleVersion=$NEW"
+          EPOCH=$(date +%s)
+          NEW=$(( LATEST + 1 > EPOCH ? LATEST + 1 : EPOCH ))
+          echo "Latest TestFlight build=$LATEST, epoch=$EPOCH -> setting CFBundleVersion=$NEW"
           sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $NEW;/g" \
             ios/App/App.xcodeproj/project.pbxproj
           grep -m3 CURRENT_PROJECT_VERSION ios/App/App.xcodeproj/project.pbxproj || true
@@ -202,10 +205,16 @@ workflows:
           # duplicate CFBundleVersion, so derive the next number from TestFlight.
           # CFBundleVersion = $(CURRENT_PROJECT_VERSION) (set in project.yml), so we
           # bump CURRENT_PROJECT_VERSION in the freshly generated pbxproj.
+          # NOTE: get-latest-testflight-build-number lags a build that's still
+          # processing, so LATEST+1 can collide with one already uploaded (this 409'd on
+          # a duplicate "11"). Use epoch seconds as a strictly-monotonic floor:
+          # max(LATEST+1, now) can never reproduce a number already on TestFlight and
+          # keeps climbing every run regardless of API lag.
           LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
           case "$LATEST" in ""|*[!0-9]*) LATEST=0;; esac
-          NEW=$((LATEST + 1))
-          echo "Latest TestFlight build=$LATEST -> setting CFBundleVersion=$NEW"
+          EPOCH=$(date +%s)
+          NEW=$(( LATEST + 1 > EPOCH ? LATEST + 1 : EPOCH ))
+          echo "Latest TestFlight build=$LATEST, epoch=$EPOCH -> setting CFBundleVersion=$NEW"
           sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $NEW;/g" \
             app-ios/VibeRate.xcodeproj/project.pbxproj
           grep -m3 CURRENT_PROJECT_VERSION app-ios/VibeRate.xcodeproj/project.pbxproj || true
