@@ -476,3 +476,13 @@ Two issues surfaced after the first pass:
   roster). Once any agent is running, the **roster rows are the reconnect targets** (tap a
   row → that specific agent opens in Drive via `openRosterAgent`), with a "Tap an agent to
   reconnect" hint. "New agent" is always available.
+
+### §X.2 — final: drop the global Return-to-Drive, keep per-agent tap (2026-06-24)
+Mike's call after using it: tapping an agent row in the Cockpit already reconnects to
+*that* agent (`openRosterAgent` → `enterDrive`), which is unambiguous with several running.
+The standalone "Return to Drive" button was therefore redundant *and* confusing, so it's
+removed. The Cockpit's only launcher is **✦ New agent**; rejoining a running agent is a tap
+on its row (with a "Tap an agent to reconnect" hint when any are live). A paused/adoptable
+session (roster empty after a redeploy) is still reachable from the conversation rail's
+"Return to Drive" — the Cockpit just no longer duplicates it. Removed `data-ck-resume` and
+its `.ck-act.resume` styles.

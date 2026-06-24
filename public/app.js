@@ -1425,25 +1425,20 @@ function renderNowCard() {
   // agent but the rail offers "Return to Drive" — it's because the session is paused
   // and adoptable, not running. Say that plainly instead of a flat "no agents".
   const hasResumable = driveable && state.driveActive && state.driveActive.project === state.project && !state._driveOpen;
-  // The standalone "Return to Drive" only makes sense when there's a single,
-  // unambiguous target: a paused/adoptable session with NO live agents in the roster.
-  // The moment ≥1 agent is running, "which one?" has no good answer — so we drop the
-  // global button and let each roster row be its own reconnect (tap a row → that
-  // agent opens in Drive, via openRosterAgent). state.driveActive is just the most-
-  // recent handle, a poor proxy for "the one you meant" when several are live.
-  const showGlobalResume = hasResumable && !agents.length;
+  // Reconnect is per-agent: tapping a roster row opens THAT agent in Drive
+  // (openRosterAgent) — unambiguous even with several running. So there's no global
+  // "Return to Drive" button (it couldn't say which agent it meant). The Cockpit's one
+  // launcher is "New agent"; rejoining is the tap.
   let body;
   if (!driveable) body = '<div class="ck-empty">Live agents show here while you drive. Sign in as the instance admin to start one.</div>';
   else if (!agents.length) body = hasResumable
-    ? '<div class="ck-empty">No agent running right now — your last session is paused and resumable. <b>✦ Return to Drive</b> picks it up where it left off.</div>'
+    ? '<div class="ck-empty">No agent running right now — your last session is paused and still resumable from the conversation list. Tap <b>✦ New agent</b> to start a fresh one.</div>'
     : '<div class="ck-empty">No agents running. Tap <b>✦ New agent</b> to start one.</div>';
   else body = agents.map(agentRowHtml).join('');
-  // Cockpit is the control center: start a new agent or rejoin the resumable one
-  // straight from here (no detour through a conversation's Drive panel). When agents
-  // are live, the hint points you at the rows instead of a one-size global button.
+  // Cockpit is the control center: the one action it needs is starting a new agent;
+  // rejoining a running one is a tap on its roster row (hint shown when any are live).
   const rejoinHint = (driveable && agents.length) ? '<span class="ck-now-hint">Tap an agent to reconnect</span>' : '';
   const actions = driveable ? `<div class="ck-now-actions">
-        ${showGlobalResume ? '<button class="ck-act resume" data-ck-resume title="Reconnect to your paused agent session — it continues where it left off">✦ Return to Drive</button>' : ''}
         <button class="ck-act new" data-ck-new title="Start a brand-new agent session in this project">✦ New agent</button>
         ${rejoinHint}
       </div>` : '';
@@ -1647,17 +1642,16 @@ function wireCockpit() {
   wireCockpitFeeds(conv);
 }
 
-// The Now card's launchers (New agent / Return to Drive). Wired separately from
-// wireCockpit because renderNowInPlace() rebuilds the whole .cockpit-now card on every
-// roster SSE frame — so these handlers must be re-attached there too, not just once at
-// first paint (the bug where the Cockpit button worked from the convo panel but went
-// dead in the Cockpit after the first live frame). `root` is #conversation or the
+// The Now card's "New agent" launcher. Wired separately from wireCockpit because
+// renderNowInPlace() rebuilds the whole .cockpit-now card on every roster SSE frame —
+// so this handler must be re-attached there too, not just once at first paint (the bug
+// where the launcher worked from the convo panel but went dead in the Cockpit after the
+// first live frame). Reconnecting to a running agent is a tap on its roster row
+// (wireRoster → openRosterAgent), not a button here. `root` is #conversation or the
 // freshly-rebuilt now-card node.
 function wireNowActions(root) {
   const ckNew = root.querySelector('[data-ck-new]');
   if (ckNew) ckNew.onclick = () => { cockpitDetach(); openDriveForProject(state.project); };
-  const ckResume = root.querySelector('[data-ck-resume]');
-  if (ckResume) ckResume.onclick = () => { cockpitDetach(); resumeDrive(state.project); };
 }
 
 function wireRoster(root) {

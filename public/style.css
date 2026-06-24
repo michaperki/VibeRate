@@ -1803,9 +1803,6 @@ body.is-mobile .dv-wrap { min-height: calc(100dvh - var(--m-appbar-h) - var(--m-
   border-radius: 7px; padding: 6px 13px; font: inherit; font-weight: 600; font-size: 12px; cursor: pointer;
 }
 .ck-act:hover { background: var(--accent); color: #0a1020; }
-.ck-act.resume { background: var(--accent); color: #0a1020; animation: pb-live 2s ease-in-out infinite; }
-.ck-act.resume:hover { background: #6b4cf2; border-color: #6b4cf2; color: #fff; }
-@media (prefers-reduced-motion: reduce) { .ck-act.resume { animation: none; } }
 
 /* — Latest: calm event feed — */
 .cockpit-latest .ck-ev { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-top: 1px solid var(--border); }
