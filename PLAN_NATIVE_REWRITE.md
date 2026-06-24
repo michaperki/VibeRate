@@ -137,6 +137,37 @@ bugs, each a *green build that shipped nothing* or *a build Apple rejected*. Ord
 were blocked by permission prompts that never surfaced to the human — resolved by re-doing
 the edits under bypass permissions.)
 
+## The silent SSE hang — empty Drive transcript (2026-06-24)
+
+First real on-device drive after the cockpit shipped surfaced the headline bug: opening a
+conversation showed an **empty transcript**, sending a message showed the optimistic bubble
+and a "working" status but **nothing streamed before or after it**, and navigating away and
+back lost even the local bubble. Confirmed-by-contrast: the *same* convo was fully visible in
+mobile Safari. Diagnosis took one instrumented build (don't re-learn this):
+
+1. **The tell was a diagnostic indicator.** Blind (no Swift compile on the Linux box, ~15 min
+   per Codemagic build), guessing is expensive — so the fix-build added a status-bar
+   indicator that distinguishes *never connected* (`·`) from *open-but-zero-events* (`↯200`)
+   from *rejected* (`⚠<code>`) from *flowing* (`⚡N`). It read **`·`**: the stream connected
+   without error yet delivered zero events. That one character ruled out auth/routing and
+   pointed straight at the reader.
+2. **Root cause — `URLSession.bytes(...).lines` buffers SSE.** `SSEClient` consumed the stream
+   with `for try await line in bytes.lines`, which doesn't yield a line until the response
+   body *completes* — but an SSE stream never completes, so the loop hung forever, zero events,
+   socket open. The `POST .../message` path worked (ordinary request), which is why prompts
+   reached the agent while the transcript stayed blank; the web `EventSource` never hits this.
+3. **Fix (`a97756e`): read the stream via a `URLSessionDataDelegate`** — parse SSE frames out
+   of each `didReceive(data:)` chunk as it arrives (the standard robust SSE-on-URLSession
+   pattern). History backfilled and live responses streamed immediately. *Lesson: never use
+   `URLSession.bytes`/`.lines` for an endless stream; it's for finite downloads.*
+
+Shipped in the same fix-cluster (`7e2bcdc`+`a97756e`): explicit `?after=0` backfill so a convo
+re-paints its history on open; **render `tool_use` targets + `tool_result` output** so a
+tool-heavy turn visibly moves instead of looking frozen; **smarter session targeting**
+(prefer a live working/waiting session over a stale idle one); and **durable reconnect** —
+persist `claudeSessionId` per project and `POST /sessions/adopt` it when no live session is
+found, so a convo survives an app relaunch *and* the redeploy that push-to-main triggers.
+
 ## Status / next
 
 Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixes above.
@@ -184,8 +215,22 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       params; `nil` attach = fresh agent). *No server change — the enriched `publicView` +
       roster stream already shipped for the web cockpit.* **Pending Codemagic build +
       on-device verify** (the Linux box can't compile Swift).
-- ◻ Rich transcript rendering — `thinking` and `tool_result` are currently skipped on the
-      phone (only `tool_use` shows as `→ name`); fold them in next.
+- [x] **Durable Drive transcript** (2026-06-24) — SSE reader rewritten to a
+      `URLSessionDataDelegate` (the silent-hang fix above), `?after=0` backfill on open,
+      `tool_use` targets + `tool_result` output rendered, live-session-preferred targeting,
+      and `claudeSessionId`-persist → `adopt` reconnect so a convo survives relaunch/redeploy.
+- [x] **Markdown in assistant messages** (2026-06-24) — assistant bubbles used
+      `Text(b.text)`, but SwiftUI only parses Markdown from string *literals*
+      (`LocalizedStringKey`); a runtime `String` renders verbatim, so `**bold**`,
+      backticked `` `code` ``, fences, and pipe-tables showed raw. New `MarkdownView`
+      (`app-ios/Sources/Views/MarkdownView.swift`) ports the web `renderMarkdown`
+      (`public/app.js`): block-level parse (code fences, headings, lists, blockquotes,
+      hr, tables) + `AttributedString` inline spans (bold/italic/code/links). Tables
+      stack into labelled key/value cards on the phone, mirroring the web's `data-label`
+      CSS. Streamed and backfilled assistant text share the one `.assistant` path, so
+      they render identically.
+- ◻ Rich transcript rendering — `thinking` is still skipped on the phone (`tool_use`/
+      `tool_result` now render); fold thinking in next, plus diffs.
 - ◻ Optimistic-send polish: a "Working…" spinner row while the agent runs between events.
 - ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
       plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same

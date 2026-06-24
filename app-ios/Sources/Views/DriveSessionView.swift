@@ -100,7 +100,7 @@ struct DriveSessionView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .textSelection(.enabled)
         case .assistant:
-            Text(b.text)
+            MarkdownView(text: b.text)
                 .textSelection(.enabled)
         case .tool:
             Text(b.text)
