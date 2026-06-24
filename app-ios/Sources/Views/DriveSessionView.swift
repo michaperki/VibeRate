@@ -45,6 +45,7 @@ struct DriveSessionView: View {
     @State private var awaitingResponse = false      // sent a prompt, nothing has streamed back yet
     @State private var showSetup = false             // a fresh project needs its workspace cloned first
     @State private var queuedPrompt: String?         // the prompt to re-send once the workspace is ready
+    @FocusState private var composerFocused: Bool    // bring up the keyboard after a starter chip pre-fills
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -56,22 +57,23 @@ struct DriveSessionView: View {
         }
         .navigationTitle(project.name ?? project.slug)
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .top) {
-            HStack(spacing: 8) {
-                Text(status).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 8)
-                // Plain-language stream state (dot + words) instead of the old cryptic
-                // ⚡/↯/⚠ glyphs: "Connecting…", "Stream connected", "History loaded",
-                // "Disconnected". The dot color carries the same at a glance.
-                HStack(spacing: 4) {
-                    Circle().fill(connectionColor).frame(width: 6, height: 6)
-                    Text(connectionLabel).font(.caption2).foregroundStyle(.secondary)
+        // Status lives *inside* the nav bar as a thin subtitle line — no separate strip,
+        // so the header stays a single compact iOS nav bar instead of a stacked block.
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(project.name ?? project.slug)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Circle().fill(connectionColor).frame(width: 5, height: 5)
+                        Text(headerSubtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.bar)
         }
         .task { await connect() }
         .onDisappear { streamTask?.cancel() }
@@ -168,10 +170,12 @@ struct DriveSessionView: View {
         .padding(.top, 24)
     }
 
-    /// Fill the composer with a starter prompt and send it — starts the agent.
+    /// Pre-fill the composer with a starter prompt (don't auto-send) — on mobile, users
+    /// expect to tweak the prompt before launching an agent. Focuses the field so the
+    /// keyboard comes up ready to edit/send.
     private func startWith(_ prompt: String) {
         draft = prompt
-        Task { @MainActor in await send() }
+        composerFocused = true
     }
 
     @ViewBuilder
@@ -259,6 +263,7 @@ struct DriveSessionView: View {
             TextField("Message the agent…", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
+                .focused($composerFocused)
                 .disabled(sending || !ready)
             Button {
                 Task { @MainActor in await send() }
@@ -363,6 +368,25 @@ struct DriveSessionView: View {
         if let code = streamHTTP, !(200..<300).contains(code) { return .red }
         if eventCount == 0 && streamHTTP == nil { return .orange }
         return .green
+    }
+
+    /// The nav-bar subtitle: a short agent state + the connection word ("Idle · Stream
+    /// connected"). The verbose guidance sentences live in the transcript's empty state,
+    /// not the tiny header, so they're collapsed to a token here.
+    private var headerSubtitle: String {
+        statusShort == connectionLabel ? statusShort : "\(statusShort) · \(connectionLabel)"
+    }
+
+    /// Collapse the long status sentences to a header-sized token.
+    private var statusShort: String {
+        switch status {
+        case let s where s.hasPrefix("New agent"): return "New agent"
+        case let s where s.hasPrefix("No agent"): return "No agent yet"
+        case let s where s.hasPrefix("Stream error"): return "Stream error"
+        case let s where s.hasPrefix("Connected, but"): return "No transcript"
+        case let s where s.hasPrefix("This project needs"): return "Needs workspace"
+        default: return status
+        }
     }
 
     /// Open the live SSE stream. `after` is the seq to resume past: 0 on a fresh open

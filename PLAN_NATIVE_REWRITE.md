@@ -321,6 +321,26 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       quiet steps, not a wall of mono text. `CockpitView.swift` + `DriveSessionView.swift`
       (+ `ProjectsView.swift`: "N conversations", "Live agent"). *No server change.*
       **Pending Codemagic build + on-device verify** (the Linux box can't compile Swift).
+- [x] **Legibility pass v2 — header weight + density** (2026-06-24, follow-up to the above).
+      Feedback after the first pass: the chat header still read as a bulky *stacked* block
+      (nav bar + a full-width `.bar` status strip), conversation rows were icon-cluttered,
+      markdown body ran large, and the new-agent chips auto-sent. Fixes, all client-side:
+      (a) **Chat header collapsed into the nav bar** — the separate `safeAreaInset` status
+      strip is gone; status now rides as a thin subtitle line under the project name via a
+      `.principal` toolbar item (`headerSubtitle` = short status + connection word, e.g.
+      "Idle · Stream connected"), so it's one compact iOS nav bar, not a custom header.
+      (b) **Conversation rows decluttered** — title-primary with a single quiet metadata
+      line ("Resumable · 3 messages · 55m ago"); dropped the leading icon, the per-field
+      bubble/clock icons, and the redundant Resume/Open text (kept the chevron; the state
+      word already conveys resume-vs-open). (c) **Markdown typography** — body dropped from
+      `.body` to `.subheadline`, heading sizes down one notch, list spacing 4→2, so a long
+      reply isn't a wall of oversized text. (d) **Starter chips pre-fill the composer**
+      (and focus it) instead of auto-sending — mobile users tweak before launching.
+      (e) **Softer toolbar `+`** (thin `plus`, not `plus.circle.fill`) and (f) **Projects
+      list `.plain`** so rows sit on the background instead of in one big rounded card.
+      *Note: the circular back/`+`/profile buttons are iOS 26's own system toolbar style —
+      not custom code, so they can be softened (icon weight) but not resized.* **Pending
+      Codemagic build + on-device verify.**
 - ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
       plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same
       `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.

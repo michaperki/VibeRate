@@ -79,9 +79,9 @@ struct CockpitView: View {
                 Button {
                     driveTarget = DriveTarget()   // all-nil → forceNew
                 } label: {
-                    // Title + icon so the + unmistakably means "start a new agent",
-                    // not "add" something ambiguous.
-                    Label("New agent", systemImage: "plus.circle.fill")
+                    // Title + a thin plus (not a heavy filled circle) so the action is
+                    // unmistakably "start a new agent" without dominating the bar.
+                    Label("New agent", systemImage: "plus")
                         .labelStyle(.titleAndIcon)
                 }
             }
@@ -261,10 +261,10 @@ private struct AgentRow: View {
     }
 }
 
-/// One past conversation, styled deliberately *unlike* a live agent row (leading
-/// history icon + a trailing Resume/Open affordance, no live meters) so the two
-/// sections don't blur together. Metadata — status, message count, last-active —
-/// disambiguates rows whose titles all truncate to the same prefix.
+/// One past conversation: title-first, with a single quiet metadata line (state ·
+/// message count · last-active) that disambiguates same-prefix truncated titles. Kept
+/// deliberately lighter than a live agent row (no status pill, meters, or icons) so the
+/// "Now" and "Conversations" sections read differently at a glance.
 private struct ConversationRow: View {
     let session: WorkspaceSession
     let now: Date
@@ -273,34 +273,18 @@ private struct ConversationRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: isLive ? "waveform.circle.fill" : "clock.arrow.circlepath")
-                .font(.title3)
-                .foregroundStyle(isLive ? Color.green : .secondary)
             VStack(alignment: .leading, spacing: 3) {
+                // Title is primary; everything else collapses to one quiet metadata line
+                // ("Resumable · 3 messages · 55m ago") so the row scans cleanly.
                 Text(title)
                     .font(.subheadline)
                     .lineLimit(1)
-                HStack(spacing: 10) {
-                    Text(statusLabel)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(statusColor)
-                    if let t = session.userTurns, t > 0 {
-                        Label("\(t)", systemImage: "bubble.left")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let rel = relative {
-                        Label(rel, systemImage: "clock")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(metadataLine)
+                    .font(.caption2)
+                    .foregroundStyle(statusColor)
+                    .lineLimit(1)
             }
             Spacer(minLength: 8)
-            // The action this row performs — explicit, so resuming reads as a choice.
-            Text(isLive ? "Open" : "Resume")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.tint)
             Image(systemName: "chevron.right")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -312,6 +296,15 @@ private struct ConversationRow: View {
     private var title: String {
         if let t = session.title, !t.isEmpty { return t }
         return "Untitled conversation"
+    }
+
+    /// One line: the state, then message count and last-active — the metadata that tells
+    /// apart same-prefix truncated titles, without an icon per field.
+    private var metadataLine: String {
+        var parts = [statusLabel]
+        if let t = session.userTurns, t > 0 { parts.append("\(t) message\(t == 1 ? "" : "s")") }
+        if let rel = relative { parts.append(rel) }
+        return parts.joined(separator: " · ")
     }
 
     /// A live convo shows its running state; an offline one is explicitly "Resumable".

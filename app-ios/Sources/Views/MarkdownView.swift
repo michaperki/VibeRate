@@ -15,12 +15,15 @@ struct MarkdownView: View {
 
     var body: some View {
         let blocks = MarkdownParser.parse(text)
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { item in
                 blockView(item.element)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Assistant body text was rendering at full .body (17pt) — slightly smaller reads
+        // better in a phone bubble and lets more words fit per line. Headings override.
+        .font(.subheadline)
     }
 
     @ViewBuilder
@@ -49,10 +52,10 @@ struct MarkdownView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
         case .bullets(let items):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(items.enumerated()), id: \.offset) { it in
                     HStack(alignment: .top, spacing: 6) {
-                        Text("•")
+                        Text("•").foregroundStyle(.secondary)
                         Text(MarkdownParser.inline(it.element))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -60,7 +63,7 @@ struct MarkdownView: View {
             }
 
         case .ordered(let items):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(items.enumerated()), id: \.offset) { it in
                     HStack(alignment: .top, spacing: 6) {
                         Text("\(it.offset + 1).")
@@ -90,10 +93,10 @@ struct MarkdownView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .title2
-        case 2: return .title3
-        case 3: return .headline
-        default: return .subheadline
+        case 1: return .title3
+        case 2: return .headline
+        case 3: return .subheadline
+        default: return .footnote
         }
     }
 

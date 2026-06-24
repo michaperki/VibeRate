@@ -34,6 +34,9 @@ struct ProjectsView: View {
                     }
                 }
             }
+            // Plain style: rows sit directly on the background (iOS Settings-ish) rather
+            // than inside one big rounded "web card" container.
+            .listStyle(.plain)
             .overlay {
                 if loading && projects.isEmpty { ProgressView() }
             }
