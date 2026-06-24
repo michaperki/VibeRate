@@ -34,7 +34,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.viberate.app
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        TARGETED_DEVICE_FAMILY: "1,2"
+        # iPhone-only (1). Targeting iPad too (1,2) made App Store Connect demand a
+        # 152x152 iPad icon AND all four interface orientations for iPad multitasking
+        # (upload errors 90023 + 90474). VibeRate is a phone-first product, so drop
+        # iPad — that clears both requirements. Revisit if we want native iPad later.
+        TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Support/Info.plist
     info:
