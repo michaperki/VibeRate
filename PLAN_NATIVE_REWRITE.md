@@ -166,8 +166,31 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       pushes stop redeploying/restarting the server. The Drive token is `repo, read:user` only
       (no `workflow` scope), so it can't push `.github/workflows/` — apply it from GitHub's web
       editor or a `workflow`-scoped checkout. Exact diff is in the chat / `app-ios/README.md`.
+- [x] **Cockpit "Now" roster** (`CockpitView` + `RosterStore`, 2026-06-24) — the
+      drive+cockpit milestone on the phone. A new screen sits **between** the projects list
+      and Drive: `Projects → Cockpit → Drive`. It subscribes to the aggregate roster SSE
+      (`/api/agent/roster/stream?project=…`, PLAN_COCKPIT.md §3.1c) via the bearer-header
+      `SSEClient`, paints a `snapshot` then merges `agent`/`removed` frames, and shows one
+      live row per agent: status dot, current action (`lastAction` verb+file), `◆ plan` chip
+      (declared-over-inferred), a **locally-ticking elapsed timer** (`promptStartedAt`, a 1 s
+      `Timer`), and a context-fill meter (`ctxPct`). Header summarizes "N working · M
+      waiting · K idle"; rows sort needs-you-first (waiting → working → error → idle).
+      **Tapping a row drives that specific agent** (`DriveSessionView(attachTo:)`); **✦ New
+      agent** starts a fresh one — matching the web cockpit's settled model (PLAN_COCKPIT
+      §X.2: roster rows are the reconnect targets, no global "Return to Drive"). One-shot
+      `/api/agent/sessions` decode is the instant-paint + pull-to-refresh fallback when the
+      stream can't connect. `DriveSessionView` no longer auto-attaches to "the first session
+      in the project" — the cockpit owns selection now (new `attachTo`/`initialStatus`
+      params; `nil` attach = fresh agent). *No server change — the enriched `publicView` +
+      roster stream already shipped for the web cockpit.* **Pending Codemagic build +
+      on-device verify** (the Linux box can't compile Swift).
 - ◻ Rich transcript rendering — `thinking` and `tool_result` are currently skipped on the
       phone (only `tool_use` shows as `→ name`); fold them in next.
 - ◻ Optimistic-send polish: a "Working…" spinner row while the agent runs between events.
-- ◻ Cockpit roster (`/api/agent/roster/stream`) + brain view (`/api/projects/:slug/docs`).
-- ◻ APNs push end to end ("agent needs you / finished") — also the App Store 4.2 anchor.
+- ◻ Cockpit **"Latest" + "Next"** zones (commit bursts / brain-doc changes / convos, and
+      plans-closest-to-done) — the read-only follow-ups to the Now roster, over the same
+      `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.
+- ◻ Brain view (`/api/projects/:slug/docs`) — note Ch. 12 demoted the brain; the cockpit
+      owns legibility now, so this is low priority on the phone.
+- ◻ APNs push end to end ("agent needs you / finished") — now has a destination (the
+      cockpit row / Drive); also the App Store 4.2 anchor.

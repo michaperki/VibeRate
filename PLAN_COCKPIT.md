@@ -486,3 +486,20 @@ on its row (with a "Tap an agent to reconnect" hint when any are live). A paused
 session (roster empty after a redeploy) is still reachable from the conversation rail's
 "Return to Drive" — the Cockpit just no longer duplicates it. Removed `data-ck-resume` and
 its `.ck-act.resume` styles.
+
+## §Y — the cockpit comes to native iOS (2026-06-24)
+
+The "Now" roster shipped on the **native SwiftUI app** (`app-ios/`, see
+`PLAN_NATIVE_REWRITE.md`), reaching the "drive + cockpit" goal on the phone. It reuses this
+plan's whole server surface unchanged — the aggregate roster SSE
+(`/api/agent/roster/stream?project=…`, §3.1c) and the enriched `publicView` (§3.1: `status`
+incl. `waiting`, `lastAction`, `promptStartedAt`, `declaredPlan`/`currentPlan`, `ctxPct`) —
+so it was pure client work. `CockpitView` + `RosterStore` paint a `snapshot` then merge
+`agent`/`removed` frames; rows carry the status dot, current action, plan chip, a
+locally-ticking elapsed timer, and a context meter, sorted needs-you-first. It deliberately
+mirrors the web cockpit's **settled IA** (§X.2): the cockpit is the project home (between the
+projects list and Drive), **roster rows are the per-agent reconnect targets**, and **✦ New
+agent** is the only launcher — no global "Return to Drive". The native `SSEClient` sets the
+bearer header, so it hits the admin-guarded stream directly (the web client passes the token
+in the query). "Latest"/"Next" are the native follow-up zones. *Pending Codemagic build +
+on-device verify — the Linux Drive box can't compile Swift.*

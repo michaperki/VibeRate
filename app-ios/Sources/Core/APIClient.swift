@@ -78,4 +78,13 @@ struct APIClient {
     func agentSessions() async throws -> [AgentSession] {
         try await send(request("/api/agent/sessions"), as: [AgentSession].self)
     }
+
+    /// One-shot cockpit roster snapshot — the instant paint before the live stream
+    /// connects, and the pull-to-refresh fallback. `/api/agent/sessions` returns the
+    /// same enriched `publicView` records the roster stream pushes, so we decode them as
+    /// `RosterAgent` and filter to this project client-side.
+    func roster(project: String) async throws -> [RosterAgent] {
+        let all = try await send(request("/api/agent/sessions"), as: [RosterAgent].self)
+        return all.filter { $0.projectSlug == project }
+    }
 }

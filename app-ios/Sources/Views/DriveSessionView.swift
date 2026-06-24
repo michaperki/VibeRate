@@ -6,6 +6,11 @@ import SwiftUI
 /// the core "drive from your phone" loop — the read-only viewer became interactive.
 struct DriveSessionView: View {
     let project: Project
+    /// The specific agent to attach to (a tap on a cockpit roster row). `nil` means a
+    /// fresh agent — don't auto-attach; the first message starts a new session.
+    var attachTo: String? = nil
+    /// The roster's last-known status for `attachTo`, so the bar reads right on entry.
+    var initialStatus: String? = nil
 
     struct Bubble: Identifiable {
         enum Role { case user, assistant, tool, error }
@@ -122,18 +127,14 @@ struct DriveSessionView: View {
     // MARK: - Networking
 
     private func connect() async {
-        do {
-            let sessions = try await client.agentSessions()
-            let match = sessions.first { $0.projectSlug == project.slug } ?? sessions.first
-            if let session = match {
-                sessionId = session.id
-                status = humanStatus(session.status)
-                openStream(session.id)
-            } else {
-                status = "No agent running yet — send a message to start one."
-            }
-        } catch {
-            status = friendly(error)
+        // The cockpit picks the agent now: attach to the tapped session, or — for a
+        // fresh "New agent" — don't attach to anything and let the first send start one.
+        if let id = attachTo {
+            sessionId = id
+            status = humanStatus(initialStatus)
+            openStream(id)
+        } else {
+            status = "No agent running yet — send a message to start one."
         }
         ready = true
     }

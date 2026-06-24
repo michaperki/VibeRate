@@ -44,3 +44,31 @@ struct AgentSession: Codable, Identifiable {
     let cwd: String?
     let status: String?
 }
+
+/// One live agent on the cockpit "Now" roster. This is the enriched `publicView`
+/// payload (PLAN_COCKPIT.md §3.1) — the same record the roster stream pushes in its
+/// `snapshot`/`agent` frames and that `/api/agent/sessions` returns. Only the fields the
+/// roster row renders are decoded; the server sends more and unknown keys are ignored.
+struct RosterAgent: Codable, Identifiable, Hashable {
+    let id: String
+    let projectSlug: String?
+    let status: String?
+    let title: String?
+    let type: String?
+    let model: String?
+    /// ms-epoch start of the current turn — the roster's elapsed timer ticks from this.
+    let promptStartedAt: Double?
+    let lastAction: LastAction?
+    let currentPlan: String?   // inferred from touched files (tier 1)
+    let declaredPlan: String?  // self-reported via the MCP `report` tool (ground truth)
+    let ctxPct: Int?
+
+    struct LastAction: Codable, Hashable {
+        let verb: String?
+        let label: String?
+        let file: String?
+    }
+
+    /// Declared (self-reported) plan wins over the inferred one.
+    var plan: String? { declaredPlan ?? currentPlan }
+}

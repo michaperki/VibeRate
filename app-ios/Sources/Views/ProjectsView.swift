@@ -39,7 +39,7 @@ struct ProjectsView: View {
             }
             .navigationTitle("Projects")
             .navigationDestination(for: Project.self) { project in
-                DriveSessionView(project: project)
+                CockpitView(project: project)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

@@ -32,13 +32,21 @@ app-ios/
       SSEClient.swift      SSE over URLSession.bytes (can set Authorization)
     Auth/
       AuthModel.swift      ASWebAuthenticationSession → deep-link → token exchange
+    Cockpit/
+      RosterStore.swift    live "Now" roster over /api/agent/roster/stream (snapshot+frames)
     Views/
       RootView.swift       loading / signed-out / signed-in switch
       SignInView.swift     GitHub / Google buttons + "use an access token" fallback
-      ProjectsView.swift   GET /api/projects
-      DriveSessionView.swift  live SSE transcript (read-only)
+      ProjectsView.swift   GET /api/projects → pushes CockpitView
+      CockpitView.swift    the "Now" roster: live agent rows → tap to Drive / ✦ New agent
+      DriveSessionView.swift  live SSE transcript + composer (attaches to a chosen session)
   Assets.xcassets/         AppIcon (branded "V", 1024 no-alpha) + AccentColor
 ```
+
+Navigation is `Projects → Cockpit → Drive`. The cockpit is the project home (the "Now"
+zone of `../PLAN_COCKPIT.md` on the phone): one live row per Drive agent, fed by the
+aggregate roster SSE. Tapping a row drives *that* agent; ✦ starts a fresh one. Drive no
+longer guesses which session to attach to — the cockpit passes it `attachTo`.
 
 `VibeRate.xcodeproj` and `Support/Info.plist` are **generated** (gitignored) — `xcodegen`
 recreates them from `project.yml`, the same way the old Capacitor workflow ran `cap add ios`.
@@ -111,9 +119,12 @@ Server side lives in `../src/oauth.js` (the `native` branch of the OAuth callbac
 
 ## Next slices
 
-- Send a Drive prompt (`POST /api/agent/sessions/:id/message`) + optimistic bubble.
+- ✅ Send a Drive prompt (`POST /api/agent/sessions/:id/message`) + optimistic bubble.
+- ✅ Cockpit "Now" roster via `/api/agent/roster/stream` (`CockpitView` + `RosterStore`) —
+  live agent rows, tap-to-drive, ✦ new agent. *Pending Codemagic build + on-device verify.*
+- Cockpit "Latest" + "Next" zones (commit bursts / brain-doc changes, plans-closest-to-done).
 - Rich transcript rendering (thinking, tool I/O, diffs) instead of one line per event.
-- Cockpit roster via `/api/agent/roster/stream`.
-- Brain view (`/api/projects/:slug/docs`).
-- APNs push ("your agent is asking a question / finished") for the App Store 4.2 guardrail.
+- APNs push ("your agent is asking a question / finished") for the App Store 4.2 guardrail —
+  now has a destination to open into (the cockpit row / Drive).
+- Brain view (`/api/projects/:slug/docs`) — low priority; the cockpit owns legibility now.
 - Polish the app icon (currently a generated branded "V" placeholder — fine for TestFlight).
