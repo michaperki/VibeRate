@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './paths.js';
-import { hashToken } from './auth.js';
+import { hashToken, encryptSecret, decryptSecret } from './auth.js';
 
 // Web accounts: one JSON file per user under DATA_DIR/users. A user is keyed by
 // a stable hash of provider+providerId, and carries the machine-token owner
@@ -60,6 +60,38 @@ export function findUserByOwnerHash(ownerHash) {
     if (u && Array.isArray(u.ownerHashes) && u.ownerHashes.includes(ownerHash)) return u;
   }
   return null;
+}
+
+// --- per-user GitHub connection (ONBOARDING.md Fork 2 Slice 2) ------------------
+// A user can connect their GitHub account with `repo` scope so we can list their
+// repos and clone/push private ones with THEIR token instead of the shared instance
+// `GITHUB_TOKEN`. The OAuth access token is stored ENCRYPTED at rest (encryptSecret)
+// and only ever decrypted in-memory at clone/push time — never returned to the
+// browser. Shape: `user.github = { token: <enc>, login, connectedAt }`.
+export function setGithubConnection(id, { token, login }) {
+  const file = path.join(usersDir(), `${id}.json`);
+  const user = readJson(file, null);
+  if (!user) return null;
+  user.github = { token: encryptSecret(token), login: login || null, connectedAt: new Date().toISOString() };
+  user.updatedAt = new Date().toISOString();
+  fs.writeFileSync(file, JSON.stringify(user, null, 2));
+  return user;
+}
+
+export function clearGithubConnection(id) {
+  const file = path.join(usersDir(), `${id}.json`);
+  const user = readJson(file, null);
+  if (!user) return null;
+  delete user.github;
+  user.updatedAt = new Date().toISOString();
+  fs.writeFileSync(file, JSON.stringify(user, null, 2));
+  return user;
+}
+
+// Decrypt a connected user's GitHub token (or null). Server-side use only.
+export function getGithubToken(user) {
+  if (!user || !user.github || !user.github.token) return null;
+  return decryptSecret(user.github.token);
 }
 
 // Bind a machine-token owner hash to a user (idempotent). Returns the user.

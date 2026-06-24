@@ -88,12 +88,13 @@ working" on their phone. Two sub-questions, both open:
    Claude) as the clean, ToS-safe path, possibly alongside **BYO** (user supplies
    their own key/login) for faster time-to-market. BYO an OAuth/subscription token
    risks Anthropic's ToS and needs legal clarity before we ship it.
-2. **New app vs. existing app.** The existing-repo path is now no-terminal: a
-   **"New project"** button creates a project from a repo URL and clones it
-   (`createProject` + `workspaces.js`), no `vbrt push` required (shipped 2026-06-24;
-   `ONBOARDING.md` Fork 2 Slice 1). Project *creation* is account-scoped while the
-   *clone* stays admin-scoped, so this landed without touching the credentials fork.
-   Still missing: per-user GitHub auth + a repo picker (one-tap private clones), and a
+2. **New app vs. existing app.** The existing-repo path is now no-terminal and
+   one-tap: a **"New project"** button + **Connect GitHub** repo picker creates a
+   project and clones the repo (private included) using the user's own token
+   (`createProject` + per-user GitHub grant + `workspaces.js`), no `vbrt push` and no
+   shared instance token required (shipped 2026-06-24; `ONBOARDING.md` Fork 2 Slices 1
+   & 2). Project *creation* is account-scoped while the *clone* stays admin-scoped, so
+   this landed without touching the credentials fork. Still missing: a
    **start-from-scratch** path (scaffold a new project + brain) for users without a
    repo yet.
 

@@ -164,14 +164,26 @@ anyone but the operator using VibeRate to actually drive.
    - **No-terminal "New project" button** ✅ *(Fork 2 existing-app, Slice 1 — shipped
      2026-06-24)* — minting a project no longer requires `vbrt push` from a terminal. A
      **New project** entry in the workspace home (`app.js` `openNewProjectModal`) takes a
-     repo URL → `POST /api/projects/new` (`server.js` → `createProject`, `storage.js`)
-     mints the project record (account-scoped; private by default) → the modal kicks the
+     repo → `POST /api/projects/new` (`server.js` → `createProject`, `storage.js`) mints
+     the project record (account-scoped; private by default) → the modal kicks the
      one-time clone (admin-gated `/workspace/:slug/setup`) and drops you into Drive.
      Deliberately decoupled: project *creation* is account-scoped, the *clone* stays
      admin-scoped, so this shipped **without** any progress on Fork 1 (credentials/
-     billing). **Remaining:** Slice 2 = per-user GitHub token + repo picker (one-tap for
-     private repos, replaces the instance `GITHUB_TOKEN`); Slice 3 = scaffold-a-new-app
-     for repo-less users (`createProject` already mints the record). See `ONBOARDING.md`.
+     billing).
+   - **Per-user GitHub connect + repo picker** ✅ *(Fork 2 existing-app, Slice 2 —
+     shipped 2026-06-24)* — makes it one-tap for a user's *private* repo, not just
+     public/operator. **Connect GitHub** is a `repo`-scoped grant separate from sign-in
+     (`oauth.js` `/auth/github/connect`); the New-project window then lists the user's
+     repos (`/api/github/repos`). Private clones **and** the agent's pushes use the
+     project owner's connected token (resolved owner→user→token in `agentRoutes.js`),
+     not the shared instance `GITHUB_TOKEN`: stored **encrypted** at rest
+     (`auth.encryptSecret`, AES-256-GCM), decrypted only in-memory — clone via a
+     command-scoped credential helper that resets the global one (`workspaces.js`),
+     push via the session child env (`agent.js childEnv`); never sent to the browser. A
+     pasted URL stays as fallback; the picker degrades to it where GitHub OAuth isn't
+     configured (local). **Remaining:** Slice 3 = scaffold-a-new-app for repo-less users
+     (`createProject` already mints the record); later, a GitHub App for finer scopes.
+     See `ONBOARDING.md`.
 2. **Fleet / multi-agent session management** — the unit of work is shifting from
    one session to *several agents in flight*. The root cause of "only the most-recent
    Drive session resumes" was that the client kept a single `vbrt_drive_active`

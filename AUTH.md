@@ -31,6 +31,14 @@ Redirect/callback base is `https://vbrt.fly.dev` (swap for a custom domain later
 3. Authorization callback URL: `https://vbrt.fly.dev/auth/github/callback`
 4. Save the **Client ID** + generate a **Client Secret**.
 
+> The **same** OAuth App backs two flows on this one callback: *sign-in*
+> (read-only `read:user user:email`) and the separate **"Connect GitHub"** grant
+> (`/auth/github/connect`, scope `repo`) that lets a user pick a repo and have Drive
+> clone/push it with *their* token instead of the instance `GITHUB_TOKEN`
+> (`ONBOARDING.md` Fork 2 Slice 2). The repo token is stored **encrypted** on the
+> user record (`encryptSecret`, AES-256-GCM keyed off `SESSION_SECRET`) and never
+> returned to the browser. A finer-grained **GitHub App** is the later upgrade.
+
 ### Google
 1. Google Cloud Console → create/select a project
 2. APIs & Services → OAuth consent screen → External; scopes `email`, `profile`

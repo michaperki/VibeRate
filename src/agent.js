@@ -291,6 +291,14 @@ function childEnv(session) {
   if (session && session.claudeSessionId) {
     env.VBRT_DRIVE_SESSION_ID = `claude-${session.claudeSessionId}`;
   }
+  // Per-user GitHub token (ONBOARDING.md Slice 2): when the bound project's owner has
+  // connected GitHub, the agent pushes its branches with THEIR token. We override
+  // GITHUB_TOKEN for this child only (childEnv already copied process.env), so the
+  // existing global credential helper (ensureGitAuth) authenticates as the user
+  // instead of the instance. No per-user token → the instance GITHUB_TOKEN stands.
+  if (session && session.githubToken) {
+    env.GITHUB_TOKEN = session.githubToken;
+  }
   return env;
 }
 
@@ -390,13 +398,14 @@ function notifyRosterRemoved(id) {
 
 // One driven session: a stable local id, the claude session id once we learn it,
 // a capped event log for SSE backfill, and a set of live subscribers.
-function createSession({ cwd, permissionMode, projectSlug = null }) {
+function createSession({ cwd, permissionMode, projectSlug = null, githubToken = null }) {
   const id = randomUUID();
   const session = {
     id,
     cwd,
     permissionMode,
     projectSlug, // bound project (if any); drives the turn-end ingest into the rail
+    githubToken, // decrypted per-user GitHub token for clone/push (Slice 2); never serialized to the client
     claudeSessionId: null, // filled from the first `system/init` event
     status: 'starting', // starting | working | waiting | idle | exited | error
     createdAt: now(),
@@ -768,11 +777,11 @@ function assertIdleCwd(cwd) {
 // --- Public API (the server's thin route layer calls these) ---
 
 // Start a brand-new driven session and kick off its first turn.
-export function startSession({ cwd, prompt, permissionMode = 'default', projectSlug = null }) {
+export function startSession({ cwd, prompt, permissionMode = 'default', projectSlug = null, githubToken = null }) {
   assertIdleCwd(cwd);
   if (!prompt || !String(prompt).trim()) throw new Error('prompt is required');
   if (!PERMISSION_MODES.has(permissionMode)) throw new Error(`unknown permission mode: ${permissionMode}`);
-  const session = createSession({ cwd, permissionMode, projectSlug });
+  const session = createSession({ cwd, permissionMode, projectSlug, githubToken });
   session.title = String(prompt).trim().slice(0, 120);
   runTurn(session, String(prompt), { resume: false });
   return publicView(session);
@@ -787,7 +796,7 @@ export function startSession({ cwd, prompt, permissionMode = 'default', projectS
 // message resumes via `claude --resume`. Idempotent: if a live session already
 // wraps this claude id (e.g. a same-process reload raced us), return it instead of
 // minting a duplicate. Refuses ids with no transcript on disk (nothing to revive).
-export async function adoptSession({ claudeSessionId, cwd, projectSlug = null, permissionMode = 'default' }) {
+export async function adoptSession({ claudeSessionId, cwd, projectSlug = null, permissionMode = 'default', githubToken = null }) {
   if (!claudeSessionId || typeof claudeSessionId !== 'string') throw new Error('claudeSessionId is required');
   if (!PERMISSION_MODES.has(permissionMode)) throw new Error(`unknown permission mode: ${permissionMode}`);
   for (const s of sessions.values()) {
@@ -803,7 +812,7 @@ export async function adoptSession({ claudeSessionId, cwd, projectSlug = null, p
   if (!transcript) throw new Error('no saved transcript for that session; cannot resume');
   const workdir = cwd || transcript.cwd || null;
   assertIdleCwd(workdir);
-  const session = createSession({ cwd: workdir, permissionMode, projectSlug });
+  const session = createSession({ cwd: workdir, permissionMode, projectSlug, githubToken });
   session.claudeSessionId = claudeSessionId;
   session.status = 'idle';
   session.title = transcript.title || null;

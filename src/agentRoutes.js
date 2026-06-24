@@ -13,7 +13,23 @@ import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from '.
 import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
 import { bearer, hashToken } from './auth.js';
-import { findUserByOwnerHash } from './accounts.js';
+import { findUserByOwnerHash, getGithubToken } from './accounts.js';
+import { getProject } from './storage.js';
+
+// The decrypted per-user GitHub token to clone/push a project with, or null. We use
+// the project OWNER's connected token (not the requester's) so the repo is always
+// accessed as the person it belongs to — correct for the single-admin case today and
+// for multi-tenant later. Never logged; handed only to git via an env var. Slice 2.
+function githubTokenForProject(slug) {
+  try {
+    const proj = slug && getProject(slug);
+    if (!proj || !proj.owner) return null;
+    const user = findUserByOwnerHash(proj.owner);
+    return user ? getGithubToken(user) : null;
+  } catch {
+    return null;
+  }
+}
 
 // Is the TCP peer loopback? We deliberately read socket.remoteAddress (the real
 // peer) rather than req.ip, so a spoofed X-Forwarded-For can't pass even though the
@@ -169,7 +185,8 @@ export function mountAgent(app, opts = {}) {
       // Pass the bound slug through so the runtime can ingest each finished turn
       // back into this project's rail (driveIngest.js). Only set when driving a
       // real project — ad-hoc sessions on the default cwd have nowhere to land.
-      res.json(startSession({ cwd: workdir, prompt, permissionMode, projectSlug: projectSlug || null }));
+      // githubToken lets the agent push with the owner's connected GitHub (Slice 2).
+      res.json(startSession({ cwd: workdir, prompt, permissionMode, projectSlug: projectSlug || null, githubToken: githubTokenForProject(projectSlug) }));
     } catch (err) {
       fail(res, err);
     }
@@ -194,6 +211,7 @@ export function mountAgent(app, opts = {}) {
         cwd: workdir,
         projectSlug: projectSlug || null,
         permissionMode: permissionMode || 'default',
+        githubToken: githubTokenForProject(projectSlug),
       }));
     } catch (err) {
       fail(res, err);
@@ -212,7 +230,8 @@ export function mountAgent(app, opts = {}) {
   app.post('/api/agent/workspace/:slug/setup', guard, async (req, res) => {
     try {
       const { repo, branch } = req.body || {};
-      const ws = await startClone(req.params.slug, { repo, branch });
+      const token = githubTokenForProject(req.params.slug); // owner's connected token (Slice 2), or null → instance token
+      const ws = await startClone(req.params.slug, { repo, branch, token });
       res.json(ws);
     } catch (err) {
       fail(res, err);

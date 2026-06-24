@@ -472,13 +472,14 @@ The honestly-open questions, in the team's own priority order:
 1. **Onboarding & credentials** (`ONBOARDING.md`) — the hardest unsolved problem.
    *Whose Claude runs the agent?* (leaning toward operator-Claude + billing as the
    ToS-safe path, with BYO as a faster but legally-fraught alternative). And *new app
-   vs. existing app* — a scaffold-from-scratch path is still missing. The first slice
-   of the *existing-app* path shipped 2026-06-24: a no-terminal **"New project"**
-   button creates a project from a repo URL and drops you into Drive, with project
-   *creation* (account-scoped) deliberately decoupled from *driving* (admin-scoped) so
-   it landed without touching the credentials/billing fork. Still open: per-user GitHub
-   auth + a repo picker (one-tap private clones), the new-app scaffolder, and the
-   whose-Claude/billing fork itself — genuine forks, deliberately **not** yet decided.
+   vs. existing app* — a scaffold-from-scratch path is still missing. The *existing-app*
+   path shipped 2026-06-24 (two slices): a no-terminal **"New project"** button plus a
+   **Connect GitHub** repo picker that clones a user's repo (private included) with
+   *their own* encrypted token — one-tap, no shared instance token. Project *creation*
+   (account-scoped) is deliberately decoupled from *driving* (admin-scoped), so it
+   landed without touching the credentials/billing fork. Still open: the new-app
+   scaffolder, and the whose-Claude/billing fork itself — genuine forks, deliberately
+   **not** yet decided.
 2. **Fleet / session management** — make *every* past Drive session resumable, not
    just the most recent, and make several concurrent agents legible. The single
    `vbrt_drive_active` handle is the blocker.

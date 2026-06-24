@@ -45,13 +45,23 @@ in the agent-first cluster (`ROADMAP.md`) sits behind this.
   (you can create a project before you can drive it). This is the existing-app half of
   Fork 2 (below), built **without** touching Fork 1 (credentials/billing), so it ships
   while Drive stays operator-Claude + admin-gated for dogfooding.
-- **Workspace setup is still clone-only under the hood.** `workspaces.js` `startClone`
-  requires a valid `https://` or `git@` repo URL and clones it into
-  `/data/workspaces/<slug>` (`PLAN_DRIVE_WORKSPACES.md`). Private repos use a
-  `GITHUB_TOKEN` instance secret (per-user GitHub auth is still a remaining step —
-  see Fork 2). There is still **no start-a-new-project scaffold** — every session
-  runs in an existing checkout (cloned via the button above or `vbrt push`) or the
-  host default cwd.
+- **Per-user GitHub connect + repo picker (Slice 2, shipped 2026-06-24).** A signed-in
+  user can **Connect GitHub** (`/auth/github/connect`, `repo` scope — a grant separate
+  from sign-in's read-only scope) and the New-project window then shows a **picker of
+  their repositories** (`GET /api/github/repos`), private ones included. Private clones
+  and the agent's pushes now use **the project owner's** connected token, not the shared
+  instance `GITHUB_TOKEN`: the token is stored **encrypted** at rest (`encryptSecret`,
+  AES-256-GCM keyed off `SESSION_SECRET`), decrypted only in-memory at clone/push time,
+  and never sent to the browser. The clone uses a command-scoped credential helper that
+  resets the global one (`workspaces.js`); the agent's push uses it via the session's
+  child env (`agent.js childEnv`). A pasted URL remains the fallback, and where GitHub
+  OAuth isn't configured (local `vbrt serve`) the picker degrades to that URL box.
+- **Still clone-only under the hood; no scaffold yet.** `workspaces.js` `startClone`
+  still requires a valid `https://` or `git@` repo URL. There is still **no
+  start-a-new-project scaffold** — every session runs in an existing checkout (picked
+  via GitHub, pasted, or pushed) or the host default cwd. That's the remaining Fork 2
+  piece (Slice 3, below). A **GitHub App** (finer scopes than the OAuth `repo` grant)
+  is a later hardening upgrade.
 
 ## Fork 1 — whose Claude runs the agent?
 
@@ -103,18 +113,19 @@ consumer onboarding work.
 
 ## Fork 2 — load an existing app vs. start a new one
 
-- **Existing app — Slice 1 shipped (2026-06-24).** Sign in → click **New project** →
-  paste a repo URL → it clones and you Drive in it, all from the browser. No terminal,
-  no `vbrt push`. (`openNewProjectModal` → `POST /api/projects/new` → `createProject`,
-  then `drivePost('/workspace/:slug/setup')` to clone.) The repo URL prefill still
-  flows from the pushed bundle's `git.origin` (`manifest.repoUrl`) when a project was
-  born from a push, and the existing setup card remains the fallback when a project is
-  created without a repo. **Remaining (Slice 2 — the truly one-tap path):** for private
-  repos, replace the single instance `GITHUB_TOKEN` with **per-user GitHub auth** (the
-  existing OAuth identity carries a repo-scoped token, or a GitHub App), and turn the
-  paste box into a **repo picker** that lists the user's repos. Today's button still
-  leans on the instance token for private clones, so it's one-click for public repos
-  and for the operator, but not yet for an arbitrary user's private repo.
+- **Existing app — Slices 1 & 2 shipped (2026-06-24).** Sign in → **New project** →
+  **Connect GitHub** → pick a repository (private included) → it clones and you Drive in
+  it, all from the browser. Slice 1 was the no-terminal create (`openNewProjectModal` →
+  `POST /api/projects/new` → `createProject`, then `/workspace/:slug/setup` to clone);
+  Slice 2 added the **per-user GitHub grant + repo picker** so private clones/pushes use
+  the user's own token, not the instance `GITHUB_TOKEN` (`/auth/github/connect`,
+  `/api/github/repos`; token encrypted at rest, decrypted only at clone/push time). A
+  pasted URL is still accepted, the repo prefill still flows from a pushed bundle's
+  `git.origin` (`manifest.repoUrl`), and the setup card remains the fallback for a
+  repo-less project. It's now genuinely one-tap for an arbitrary user's *private* repo,
+  not just public/operator. **Remaining hardening:** a **GitHub App** for finer scopes
+  than the broad OAuth `repo` grant, and token-revocation/expiry UX (the repos call
+  already flags `reconnect` on a 401).
 - **New app (Slice 3 — still missing):** a user with no repo yet needs a **scaffold**
   path — create an empty workspace (+ optional starter brain: `CLAUDE.md`, `SEED.md`,
   a plan doc) and optionally an empty Git remote to push to. This is the natural
@@ -136,27 +147,26 @@ phone → sign in (Google/GitHub, exists)
 ```
 
 The **Connect: clone repo** branch and everything after "Drive" already exist
-(New-project button → workspace bind, spawn, stream, brain glow, context meter,
-resume/adopt). The net-new work is **per-user credential + billing** (Fork 1), the
-**per-user GitHub token + repo picker** that makes Connect one-tap for private repos
-(Fork 2 Slice 2), the **new-project scaffold** for repo-less users (Fork 2 Slice 3),
-plus opening the admin gate to billed/keyed users instead of an email allowlist.
+(New-project button + GitHub repo picker → workspace bind, spawn, stream, brain glow,
+context meter, resume/adopt). The net-new work left is **per-user credential + billing**
+(Fork 1), the **new-project scaffold** for repo-less users (Fork 2 Slice 3), plus
+opening the admin gate to billed/keyed users instead of an email allowlist.
 
 ## Remaining steps (in build order)
 
-1. **Slice 2 — per-user GitHub connect + repo picker** *(Fork 2 existing-app, makes
-   it one-tap):* upgrade the identity-only GitHub OAuth (`oauth.js`) to repo-scoped (or
-   a GitHub App), store a per-user encrypted token, and replace the New-project paste
-   box with a list of the user's repos. Private clones then use the user's token, not
-   the instance `GITHUB_TOKEN` — which also unblocks multi-tenant private clones.
-2. **Slice 3 — scaffold a brand-new app** *(Fork 2 new-app):* a "Start from scratch"
+1. **Slice 3 — scaffold a brand-new app** *(Fork 2 new-app):* a "Start from scratch"
    entry that seeds an empty workspace (`CLAUDE.md`/`SEED.md`/a plan), commits it, and
-   optionally creates the origin via the user's GitHub identity. `createProject`
-   already makes the record; this adds the scaffolder.
-3. **Fork 1 — per-user credentials + billing** *(the gate to non-operator drive):*
+   optionally creates the origin via the user's connected GitHub (the `repo` grant from
+   Slice 2 already covers repo-create). `createProject` already makes the record; this
+   adds the scaffolder.
+2. **Fork 1 — per-user credentials + billing** *(the gate to non-operator drive):*
    operator-Claude + metering + billing (1A, reaffirmed), optionally BYO key (1B), and
    replace the admin-email allowlist with a per-account `driveable` grant. Pricing/margin
    is pre-launch homework, not a build blocker (see Fork 1A note above).
+3. **Hardening (after the above):** swap the broad OAuth `repo` grant for a **GitHub
+   App** (per-repo scopes), add token-revocation/expiry UX (the `reconnect` flag is
+   already surfaced), and per-user workspace/credential isolation before opening drive
+   beyond the operator.
 
 ## Constraints carried in from the runtime
 

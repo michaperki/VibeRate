@@ -48,6 +48,32 @@ export function verifyValue(token) {
   }
 }
 
+// --- symmetric encryption for secrets at rest (e.g. a user's GitHub OAuth token) ---
+// AES-256-GCM with a key derived from SESSION_SECRET. We store third-party access
+// tokens encrypted on the user record so a leaked data volume doesn't hand out live
+// GitHub credentials; the plaintext only exists in memory while we clone/push. Format
+// is `iv.tag.ciphertext`, all base64url. Returns null on any tamper/!decrypt.
+const ENC_KEY = crypto.createHash('sha256').update(SESSION_SECRET).digest(); // 32 bytes
+export function encryptSecret(plain) {
+  if (plain == null) return null;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+  const enc = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('base64url')}.${tag.toString('base64url')}.${enc.toString('base64url')}`;
+}
+export function decryptSecret(blob) {
+  if (!blob || typeof blob !== 'string' || blob.split('.').length !== 3) return null;
+  try {
+    const [iv, tag, enc] = blob.split('.').map((s) => Buffer.from(s, 'base64url'));
+    const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
 export function readCookie(req, name) {
   const h = req.headers.cookie || '';
   for (const part of h.split(';')) {

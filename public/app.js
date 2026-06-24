@@ -405,7 +405,7 @@ async function loadProjects() {
   const projects = await api('/api/projects');
   const box = el('#projects');
   if (projects.length === 0) {
-    box.innerHTML = '<div class="empty">No projects yet.<br><button class="linkbtn" id="np-empty">＋ New project</button> from a repo, or run <code>vbrt push</code> in a folder.</div>';
+    box.innerHTML = '<div class="empty">No projects yet.<br><button class="linkbtn" id="np-empty">＋ New project</button> to get started.</div>';
     const npe = el('#np-empty');
     if (npe) npe.onclick = () => openNewProjectModal();
     return projects;
@@ -4344,12 +4344,13 @@ function driveShell(title, metaHtml, bodyHtml) {
 // workspace (the checkout on the host). Ready → prompt form; otherwise → a one-time
 // "set up workspace" (clone) step. Stops the bundle live-poll so it can't repaint
 // over us (the SSE gives liveness once a session is live).
-// "New project" — the no-terminal counterpart to `vbrt push` (ONBOARDING.md Fork 2).
-// Create a project from a Git repo URL, kick off the one-time clone, then drop the
-// user straight into Drive on it. Project creation is account-scoped (/api/projects/
-// new); the clone is admin-scoped (drivePost → /workspace/:slug/setup), so a creator
-// without drive rights still gets the project — refreshDriveWorkspace just shows the
-// setup card instead of the cloning spinner.
+// "New project" — start a project from one of your Git repositories, straight from
+// the browser. We create the project, set up the code, and open your agent on it.
+// If you've connected GitHub you pick a repo from a list (including private ones);
+// otherwise you can connect GitHub or paste a repository URL. Behind the scenes:
+// account-scoped create (/api/projects/new) + the workspace clone (/workspace/:slug/
+// setup); creation and drive rights are decoupled, so the setup card is the fallback
+// if the clone can't start yet (ONBOARDING.md Fork 2).
 function openNewProjectModal() {
   const prev = el('.memo-modal'); if (prev) prev.remove();
   const wrap = document.createElement('div');
@@ -4362,18 +4363,15 @@ function openNewProjectModal() {
         <button class="memo-close" title="Close">✕</button>
       </div>
       <div class="dv-body dv-start">
-        <p class="dim-note">Create a project from a Git repo — no terminal, no <code>vbrt push</code>.
-          We clone it onto the host once and you can Drive it right away. Captured convos
-          and the brain fill in as the agent works.</p>
+        <p class="dim-note">Start a project from one of your Git repositories. We'll set up the
+          code so your agent can start working on it right away.</p>
         <div id="np-banner" class="dv-banner hidden bad"></div>
-        <label for="np-name">Name <span class="dim-note">(optional — defaults to the repo name)</span></label>
-        <input id="np-name" placeholder="my-project" />
-        <label for="np-repo">Git repository</label>
-        <input id="np-repo" placeholder="https://github.com/owner/repo.git" />
-        <label for="np-branch">Branch <span class="dim-note">(optional — default branch if blank)</span></label>
+        <label for="np-name">Project name <span class="dim-note">(optional)</span></label>
+        <input id="np-name" placeholder="My project" />
+        <div id="np-repo-area"><div class="dim-note">Loading…</div></div>
+        <label for="np-branch">Branch <span class="dim-note">(optional — uses the default branch)</span></label>
         <input id="np-branch" placeholder="main" />
-        <div class="dv-warn">Private repos need a <code>GITHUB_TOKEN</code> secret on the instance.</div>
-        <div class="dv-actions"><button id="np-create">Create &amp; Drive</button></div>
+        <div class="dv-actions"><button id="np-create">Create project</button></div>
       </div>
     </div>`;
   document.body.appendChild(wrap);
@@ -4381,31 +4379,73 @@ function openNewProjectModal() {
   wrap.querySelector('.memo-backdrop').onclick = close;
   wrap.querySelector('.memo-close').onclick = close;
   const banner = (msg) => { const b = el('#np-banner'); b.textContent = msg; b.classList.remove('hidden'); };
+  npRenderRepoArea();
   el('#np-create').addEventListener('click', async () => {
     const name = el('#np-name').value.trim();
-    const repo = el('#np-repo').value.trim();
+    // Picked-from-list value wins; otherwise a pasted URL.
+    const picked = (el('#np-repo-select') && el('#np-repo-select').value) || '';
+    const pasted = (el('#np-repo') && el('#np-repo').value.trim()) || '';
+    const repo = pasted || picked;
     const branch = el('#np-branch').value.trim();
-    if (!repo) return banner('a Git repository URL is required');
+    if (!repo) return banner('choose a repository (or paste a repository URL)');
     if (!(/^https:\/\/\S+$/.test(repo) || /^git@[\w.-]+:\S+$/.test(repo))) {
-      return banner('use an https:// or git@ repo URL');
+      return banner('that doesn’t look like a repository URL');
     }
     el('#np-create').disabled = true;
     try {
       const { id } = await apiPost('/api/projects/new', { name: name || undefined, repo, branch: branch || undefined });
-      // Start the one-time clone now (admin-guarded). If the caller lacks drive
-      // rights the setup card will offer it instead — so swallow that failure.
+      // Start the one-time clone now. If the caller can't drive yet, the setup card
+      // offers it instead — so swallow that failure rather than blocking creation.
       try { await drivePost('/workspace/' + encodeURIComponent(id) + '/setup', { repo, branch: branch || undefined }); } catch { /* setup card handles it */ }
       close();
       await loadProjects();
       await selectProject(id);
       openDriveForProject(id);
     } catch (e) {
-      const msg = String(e.message) === '401' ? 'sign in to create a project' : (e.message || 'could not create the project');
+      const msg = String(e.message) === '401' ? 'please sign in to create a project' : (e.message || 'could not create the project');
       banner(msg);
       el('#np-create').disabled = false;
     }
   });
-  setTimeout(() => { const r = el('#np-repo'); if (r) r.focus(); }, 0);
+}
+
+// Render the repository chooser inside the New-project modal based on GitHub
+// connection state: a repo dropdown when connected, a "Connect GitHub" button when
+// available-but-not-connected, or just a URL box (local / GitHub not configured).
+async function npRenderRepoArea() {
+  const area = el('#np-repo-area');
+  if (!area) return;
+  let status = null;
+  try { status = await api('/api/github/status'); } catch { status = null; }
+  const urlBox = (label) => `<label class="np-or" for="np-repo">${label}</label>
+    <input id="np-repo" placeholder="https://github.com/owner/repo.git" />`;
+  if (status && status.connected) {
+    area.innerHTML = `<label for="np-repo-select">Repository <span class="dim-note">${esc(status.login || 'GitHub')}</span></label>
+      <select id="np-repo-select"><option value="">Loading your repositories…</option></select>
+      ${urlBox('or paste a repository URL')}`;
+    try {
+      const { repos } = await api('/api/github/repos');
+      const sel = el('#np-repo-select');
+      if (!sel) return; // modal closed while loading
+      sel.innerHTML = `<option value="">— choose a repository —</option>` + (repos || [])
+        .map((r) => `<option value="${esc(r.clone_url)}">${r.private ? '🔒 ' : ''}${esc(r.full_name)}</option>`)
+        .join('');
+    } catch {
+      const sel = el('#np-repo-select');
+      if (sel) sel.innerHTML = `<option value="">couldn’t load repositories — paste a URL below</option>`;
+    }
+  } else if (status && status.available) {
+    area.innerHTML = `<p class="dim-note">Connect GitHub to pick a repository — including your private ones.</p>
+      <div class="dv-actions"><button id="np-connect" class="ghost">Connect GitHub</button></div>
+      ${urlBox('or paste a repository URL')}`;
+    const c = el('#np-connect');
+    if (c) c.onclick = () => { location.href = '/auth/github/connect'; };
+  } else {
+    area.innerHTML = `<label for="np-repo">Repository URL</label>
+      <input id="np-repo" placeholder="https://github.com/owner/repo.git" />`;
+  }
+  const r = el('#np-repo-select') || el('#np-repo');
+  if (r) setTimeout(() => r.focus(), 0);
 }
 
 function openDriveForProject(slug) {
@@ -4455,8 +4495,8 @@ function renderDriveSetup(slug, st) {
        <input id="dv-repo" value="${esc(repo)}" placeholder="https://github.com/owner/repo.git" />
        <label for="dv-branch">Branch <span class="dim-note">(optional — default branch if blank)</span></label>
        <input id="dv-branch" value="${esc(ws.branch || '')}" placeholder="main" />
-       <div class="dv-warn">Private repos need a <code>GITHUB_TOKEN</code> secret on the instance.</div>
-       <div class="dv-actions"><button id="dv-clone">Clone &amp; continue</button></div>
+       <div class="dv-warn">For a private repository, connect GitHub from your workspace home first so it can be set up with your account.</div>
+       <div class="dv-actions"><button id="dv-clone">Set up &amp; continue</button></div>
      </div>`,
   );
   driveScroll(true);
@@ -5971,6 +6011,12 @@ async function bootDashboard() {
   };
   const np = el('#new-project');
   if (np) np.onclick = () => openNewProjectModal();
+  // Returning from the GitHub "Connect" grant — pick up where the user left off by
+  // reopening New project (now with the repo picker populated). Scrub the param.
+  if (/[?&]github=connected\b/.test(location.search)) {
+    history.replaceState(null, '', '/app');
+    openNewProjectModal();
+  }
   const cc = el('#connect-cli');
   if (cc)
     cc.onclick = async () => {

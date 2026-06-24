@@ -101,7 +101,7 @@ async function installDeps(dir) {
   }
 }
 
-export async function startClone(slug, { repo, branch } = {}) {
+export async function startClone(slug, { repo, branch, token } = {}) {
   if (!validRepo(repo)) throw new Error('a valid https or git@ repo URL is required');
   const cur = getWorkspace(slug);
   if (!cur) throw new Error('unknown project');
@@ -116,21 +116,33 @@ export async function startClone(slug, { repo, branch } = {}) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
       fs.mkdirSync(workspacesRoot(), { recursive: true });
-      const args = ['clone'];
+      // Per-user token (ONBOARDING.md Slice 2): when the project owner has connected
+      // GitHub, clone private repos with THEIR token, not the shared instance
+      // GITHUB_TOKEN. We reset any global github helper for this one command, then add
+      // a command-scoped helper that reads the token from an env var — so the token
+      // never lands in argv (only the helper script referencing the var name does) nor
+      // in the checkout's .git/config. No user token → fall back to the global helper
+      // (ensureGitAuth's instance GITHUB_TOKEN), preserving today's behavior.
+      const env = { ...process.env };
+      const pre = [];
+      if (token) {
+        env.VBRT_CLONE_TOKEN = token;
+        pre.push('-c', 'credential.https://github.com.helper=',
+          '-c', 'credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=$VBRT_CLONE_TOKEN"; }; f');
+      }
+      const args = [...pre, 'clone'];
       if (branch) args.push('--branch', branch, '--single-branch');
-      // Clone with the plain repo URL. Auth for private github https repos is supplied
-      // on demand by the global credential helper (ensureGitAuth, src/agent.js), so the
-      // GITHUB_TOKEN is never written into this checkout's .git/config — unlike embedding
-      // it in the clone URL, which git persists there. No token touches disk.
       args.push(repo, dir);
-      await exec('git', args, { timeout: 5 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
+      await exec('git', args, { timeout: 5 * 60 * 1000, maxBuffer: 64 * 1024 * 1024, env });
       // Stay in `cloning` while deps install so the agent isn't handed a node_modules-less
       // checkout the instant the git clone returns.
       await installDeps(dir);
       setWorkspace(slug, { status: 'ready', head: await headSha(dir), error: null });
     } catch (err) {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
-      setWorkspace(slug, { status: 'error', error: redact(err && err.message ? err.message : String(err)) });
+      let msg = err && err.message ? err.message : String(err);
+      if (token) msg = msg.split(token).join('***'); // never leak the user token into stored error text
+      setWorkspace(slug, { status: 'error', error: redact(msg) });
     }
   })();
 
