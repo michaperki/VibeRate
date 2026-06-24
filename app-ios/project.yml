@@ -15,7 +15,9 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "0.1.0"
+    # Must be >= the Capacitor builds' marketing version (1.0) or TestFlight treats
+    # the native build as OLDER and won't offer it as an update on the phone.
+    MARKETING_VERSION: "1.1.0"
     CURRENT_PROJECT_VERSION: "1"   # CI bumps this above the latest TestFlight build
     SWIFT_VERSION: "5.9"
 

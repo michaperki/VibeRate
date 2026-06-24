@@ -140,7 +140,14 @@ workflows:
     name: VibeRate iOS native (SwiftUI → TestFlight)
     instance_type: mac_mini_m2
     max_build_duration: 60
-    working_directory: app-ios
+    # NOTE: do NOT set `working_directory: app-ios`. `xcode-project build-ipa`
+    # exports the IPA to $CM_BUILD_DIR/build/ios/ipa (the clone root) regardless
+    # of working_directory, while the artifact/publish glob is resolved from the
+    # working_directory. With working_directory: app-ios the two diverged — the
+    # IPA landed at clone-root build/ios/ipa/ but publishing looked in
+    # app-ios/build/ios/ipa/, found nothing, and reported a green build that
+    # uploaded NOTHING. So we run from the clone root like ios-release and just
+    # `cd app-ios` for the XcodeGen step. (Fixed 2026-06-24.)
     integrations:
       app_store_connect: VibeRateASC
     environment:
@@ -148,7 +155,7 @@ workflows:
         - ios_signing
       vars:
         BUNDLE_ID: "com.viberate.app"
-        XCODE_PROJECT: "VibeRate.xcodeproj"
+        XCODE_PROJECT: "app-ios/VibeRate.xcodeproj"
         XCODE_SCHEME: "App"
         APP_STORE_APPLE_ID: "6782960153"   # same App Store Connect record as ios-release
       xcode: latest
@@ -169,6 +176,10 @@ workflows:
         script: |
           set -e
           brew install xcodegen
+          # XcodeGen must run where project.yml lives, but everything else (build,
+          # IPA export, publish) runs from the clone root so the IPA lands in the
+          # standard build/ios/ipa/ that publishing looks at.
+          cd app-ios
           xcodegen generate
           echo "=== generated project ==="
           ls -la VibeRate.xcodeproj
@@ -196,15 +207,18 @@ workflows:
           NEW=$((LATEST + 1))
           echo "Latest TestFlight build=$LATEST -> setting CFBundleVersion=$NEW"
           sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $NEW;/g" \
-            VibeRate.xcodeproj/project.pbxproj
-          grep -m3 CURRENT_PROJECT_VERSION VibeRate.xcodeproj/project.pbxproj || true
+            app-ios/VibeRate.xcodeproj/project.pbxproj
+          grep -m3 CURRENT_PROJECT_VERSION app-ios/VibeRate.xcodeproj/project.pbxproj || true
       - name: Build signed IPA
         script: |
           xcode-project build-ipa \
             --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
     artifacts:
-      - app-ios/build/ios/ipa/*.ipa
+      # Clone-root path (NOT app-ios/...): build-ipa exports here regardless of
+      # where xcodegen ran. This is what publishing picks up — see the note on
+      # working_directory above.
+      - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
