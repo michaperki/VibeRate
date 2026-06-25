@@ -67,6 +67,8 @@ struct DriveSessionView: View {
     @FocusState private var composerFocused: Bool    // bring up the keyboard after a starter chip pre-fills
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(NavRouter.self) private var router  // push the brain onto the shared stack
+    @State private var brain = BrainActivity.shared   // observe so a doc touch lights the pulse
 
     /// The one "is a turn in flight" predicate, mirroring the web `driveBusy()`. Everything
     /// mid-turn (queue vs send, Stop visibility, working row) keys off this.
@@ -103,6 +105,27 @@ struct DriveSessionView: View {
                             .lineLimit(1)
                     }
                 }
+            }
+            // Pop to the brain from the live chat — and pulse the button green while the
+            // agent is actively touching brain docs this turn (B8 live link). Gated on
+            // `busy` so the pulse clears on its own at turn end without a decay timer here.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    router.path.append(BrainRoute(project: project))
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "brain")
+                            .font(.subheadline.weight(.semibold))
+                        if busy && brain.isActive(slug: project.slug, now: Date()) {
+                            Circle().fill(Color.green)
+                                .frame(width: 7, height: 7)
+                                .offset(x: 5, y: -3)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel("Brain")
             }
         }
         .task { await connect() }
@@ -872,6 +895,19 @@ struct DriveSessionView: View {
                 bubbles.append(Bubble(role: .tool, text: toolLabel(n, input),
                                       toolUseId: obj["id"] as? String))
                 assistantOpen = false
+                // Brain⇄chat live link (B8): if this call touches a brain doc, glow its
+                // node (BrainView observes BrainActivity) and fire a haptic here. `touch`
+                // self-filters to `.md`, so non-doc file ops are ignored. Gate on the
+                // event's own timestamp so the backfill replay (every historical tool_use
+                // re-arriving on a fresh open / reconnect) doesn't buzz and glow the whole
+                // graph on entry — only genuinely live touches do. (`emit` stamps `t`.)
+                if let f = (input?["file_path"] as? String) ?? (input?["path"] as? String) {
+                    let t = (obj["t"] as? Double) ?? 0
+                    let ageMs = Date().timeIntervalSince1970 * 1000 - t
+                    if ageMs < 30_000 {
+                        BrainActivity.shared.touch(slug: project.slug, file: f, verb: BrainActivity.verb(forTool: n))
+                    }
+                }
             }
         case "tool_result":
             // Fold the output back into its pending tool chip (matched by toolUseId), keeping

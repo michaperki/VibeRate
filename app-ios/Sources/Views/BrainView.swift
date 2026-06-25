@@ -17,6 +17,10 @@ struct BrainView: View {
     @State private var loading = true
     @State private var error: String?
     @State private var showQuiet = false
+    // The live link (B8): observe touches, and tick `now` so a glow decays smoothly even
+    // when nothing else changes the view. The tick only matters while this screen is up.
+    @State private var brain = BrainActivity.shared
+    @State private var now = Date()
 
     private var client: APIClient { APIClient(token: TokenStore.load()) }
 
@@ -50,6 +54,8 @@ struct BrainView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
+        // Drive the glow decay (B8). 0.3s steps over the 4s window read as a smooth fade.
+        .onReceive(Timer.publish(every: 0.3, on: .main, in: .common).autoconnect()) { now = $0 }
     }
 
     // MARK: sections
@@ -106,11 +112,13 @@ struct BrainView: View {
     // MARK: a single node — tap to open (haptic), long-press to peek
 
     private func node(_ doc: BrainDoc, prominent: Bool = false) -> some View {
-        Button {
+        let g = brain.glow(slug: project.slug, base: doc.base, now: now)
+        let v = brain.verb(slug: project.slug, base: doc.base, now: now)
+        return Button {
             Haptics.tap()
             router.path.append(DocRoute(doc: doc))
         } label: {
-            BrainNodeView(doc: doc, prominent: prominent)
+            BrainNodeView(doc: doc, prominent: prominent, glow: g, glowVerb: v)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -170,28 +178,57 @@ struct BrainView: View {
 struct BrainNodeView: View {
     let doc: BrainDoc
     var prominent: Bool = false
+    /// Live-link glow 0…1 (B8), decaying since the agent last touched this doc.
+    var glow: Double = 0
+    var glowVerb: BrainActivity.Verb? = nil
 
     private var diameter: CGFloat { prominent ? 62 : 50 }
 
+    // Glow colour by verb, mirroring the web brainTouch tints: read = blue pulse,
+    // edit = warm flare, run = green ripple.
+    private var glowColor: Color {
+        switch glowVerb {
+        case .edit: return .orange
+        case .run: return .green
+        default: return .blue
+        }
+    }
+
     var body: some View {
         VStack(spacing: 8) {
-            if let c = doc.completion {
-                CompletionRing(pct: c.pct, size: diameter)
-            } else {
-                ZStack {
+            ZStack {
+                // A soft halo behind the node that fades as the touch decays.
+                if glow > 0 {
                     Circle()
-                        .fill(prominent ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
-                    Image(systemName: prominent ? "circle.hexagongrid.fill" : "doc.text")
-                        .font(prominent ? .title3 : .subheadline)
-                        .foregroundStyle(prominent ? Color.accentColor : .secondary)
+                        .fill(glowColor.opacity(0.40 * glow))
+                        .frame(width: diameter + 26, height: diameter + 26)
+                        .blur(radius: 7)
                 }
-                .frame(width: diameter, height: diameter)
+                core
+                    .scaleEffect(1 + 0.06 * glow)
             }
             Text(doc.base)
                 .font(.caption2.weight(prominent ? .semibold : .regular))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 92)
+        }
+        .animation(.easeOut(duration: 0.3), value: glow)
+    }
+
+    @ViewBuilder
+    private var core: some View {
+        if let c = doc.completion {
+            CompletionRing(pct: c.pct, size: diameter)
+        } else {
+            ZStack {
+                Circle()
+                    .fill(prominent ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
+                Image(systemName: prominent ? "circle.hexagongrid.fill" : "doc.text")
+                    .font(prominent ? .title3 : .subheadline)
+                    .foregroundStyle(prominent ? Color.accentColor : .secondary)
+            }
+            .frame(width: diameter, height: diameter)
         }
     }
 }

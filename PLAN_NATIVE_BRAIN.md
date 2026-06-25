@@ -1,9 +1,11 @@
 # PLAN_NATIVE_BRAIN — porting the brain & activity surfaces to native iOS (and what Swift unlocks)
 
-**Status:** **Phase 1 core shipped** (2026-06-25, client-only — backend already served it).
-The native app can now **show the brain**: a doc graph at rest, plan completion rings,
-tap-to-open a markdown doc reader, long-press peek, and haptics. Live-glow (B8) and the
-real drag force-sim (Phase 3) are the next batches. This is the sibling of
+**Status:** **Phase 1 + the brain⇄chat live link (B8) shipped** (2026-06-25, client-only —
+backend already served it). The native app can now **show the brain** (doc graph at rest,
+plan completion rings, tap-to-open reader, long-press peek, haptics) **and make it move**:
+a `tool_use` on a brain doc glows that node and fires a haptic, live from the Drive SSE.
+The real drag force-sim (Phase 3), activity ribbon/time-travel (Phase 4), and the
+Dynamic-Island card (Phase 5) are the next batches. This is the sibling of
 `PLAN_NATIVE_PARITY.md`. That plan closed the *agent-control* gap (stop/queue/scroll/
 tool-collapse) and is largely shipped. **It deliberately never covered the brain or the
 activity surfaces** — and those are exactly what the mobile-web build invested in, and
@@ -45,10 +47,30 @@ globs `Sources/`, so the new files build with no project-file edit.
   → peek** via `contextMenu(preview:)` showing the doc's ring + first lines + Open — the touch
   home for the desktop hover-peek (B6) that can't exist on a phone.
 
-**Next batches (deferred):** B8 brain⇄chat live glow + read/edit/complete haptics (touches
-the SSE streaming hot path — kept separate to not risk the working chat); Phase 3 real
-`Canvas`/`TimelineView` force-sim with **drag-to-fling** + pinch/pan; Phase 4 activity
-ribbon + time-travel; Phase 5 Live Activity / Dynamic Island. Matrix below marks each.
+**Next batches (deferred):** Phase 3 real `Canvas`/`TimelineView` force-sim with
+**drag-to-fling** + pinch/pan; Phase 4 activity ribbon + time-travel; Phase 5 Live
+Activity / Dynamic Island. Matrix below marks each.
+
+## ✅ Implementation log (2026-06-25) — B8, the brain⇄chat live link
+
+The "editing a memory lights up its node" moment (the web's `brainTouch`), native and
+**decoupled across two screens**. New file `app-ios/Sources/Core/BrainActivity.swift`;
+edits to `DriveSessionView.swift` and `BrainView.swift`. No backend changes — reads the
+`tool_use` events the SSE already delivers (no new agent tokens).
+
+- **`BrainActivity` — one observable bridge.** A `@MainActor @Observable` singleton records
+  recent doc touches per project (basename → verb + timestamp), with `glow(…)/verb(…)/
+  isActive(…)` decaying linearly over a 4s window. The chat *writes* touches; the brain
+  *reads* the glow — no event plumbing between the two screens.
+- **Chat side (`DriveSessionView`).** The `tool_use` ingest classifies the tool
+  (`verb(forTool:)` → read/edit/run) and calls `BrainActivity.touch(slug:file:verb:)` for
+  any `.md` path — which fires a **haptic** (sharper for an edit, soft for read/run). A new
+  **brain toolbar button** pops to `BrainView`, with a **green pulse** while the agent is
+  touching docs this turn. *Gated on the event's own `t` (≤30s old)* so the backfill replay
+  on open/reconnect doesn't buzz and glow the whole graph — only genuinely live touches do.
+- **Brain side (`BrainView`/`BrainNodeView`).** Each node renders a verb-tinted halo
+  (read = blue, edit = warm, run = green) that fades as the touch decays; a 0.3s tick drives
+  a smooth fade. Pop over mid-turn and you watch the agent work the brain in real time.
 
 ---
 
@@ -125,9 +147,9 @@ thing missing · **P1** important · **P2** nice-to-have. Every native cell belo
 | B6 | **Hover-peek** (heading + first line) | hover (desktop only) | `wireBrainPeek` `:2549` | ✅ **long-press peek** via `contextMenu(preview:)` | the touch home for hover (§3) | **P1** |
 | B7 | **Pin/unpin node label** | tap again | `selectedId` `:5917` | ❌ | tap toggle / part of selection state | **P2** |
 | **Live link** |
-| B8 | **Brain⇄chat live glow** (tool_use → node/chip flares) | passive (live) | `brainTouch` `:6576`, Slice 3 | ❌ | the SSE stream already reaches native (`SSEClient`); route `tool_use` file paths → node flash + **haptic** | **P0** |
-| B9 | **Read/edit/run reactions** (pulse / ring flare / ripple) | passive | `liveBrain` touch verbs `:5654` | ❌ | per-verb animation on the node | **P1** |
-| B10 | **Plan checkbox tick → ring fills live** | passive | `planPulse` `:5665` | ❌ | animate the B3 ring on the `Plan` tool event | **P1** |
+| B8 | **Brain⇄chat live glow** (tool_use → node/chip flares) | passive (live) | `brainTouch` `:6576`, Slice 3 | ✅ `BrainActivity` bridge — node halo + chat pulse + haptic | replay-gated on event `t` | **P0** |
+| B9 | **Read/edit/run reactions** (pulse / ring flare / ripple) | passive | `liveBrain` touch verbs `:5654` | ✅ verb-tinted halo (read/edit/run) + verb-keyed haptic | distinct per-verb *animations* still flat | **P1** |
+| B10 | **Plan checkbox tick → ring fills live** | passive | `planPulse` `:5665` | ❌ (ring updates on next brain load) | animate the B3 ring on a `Plan` tool event / doc re-fetch | **P1** |
 | **Doc lightbox** |
 | B11 | **Doc viewer** (full markdown) | open from node/chip | `openDocLightbox` `:3951` | ✅ `DocView` reuses `MarkdownView` | — | **P0** |
 | B12 | **Checklist render + progress ring + bar** | passive | `docLightboxHtml` `:3928` | ◑ ring header ✅; checklist still markdown bullets | native checklist list (toggle states) | **P1** |
@@ -199,12 +221,12 @@ is slow (~10–15 min Codemagic build, `PLAN_NATIVE_REWRITE.md`) — **batch per
 2. ✅ **Brain graph at rest** (B1/B2/B3/B4/B6): `BrainView` — anchor + plan shelf as
    laid-out nodes with completion rings, `+N docs` toggle, tap → `DocView` (haptic),
    long-press → peek. Structured/static; the real force-sim is Phase 3.
-3. ⏳ **Brain⇄chat live glow + haptic** (B8): route the SSE `tool_use` file path to a node
-   flash + a haptic tick. The signature moment — **deferred to the next batch** because it
-   touches the Drive SSE streaming hot path and shouldn't risk the working chat in the same
-   build. `Haptics.edit()`/`success()` are already in place for it.
-*Outcome (achieved for 1+2): the native app now shows the brain it's steering through — the
-thesis, not just the chat. The live link (3) makes it move.*
+3. ✅ **Brain⇄chat live glow + haptic** (B8/B9): the SSE `tool_use` file path drives a
+   verb-tinted node halo on `BrainView` + a haptic + a chat-toolbar pulse, via the
+   `BrainActivity` bridge; replay-gated on the event timestamp. (B10 live ring-fill still
+   waits on the next brain load — next batch.)
+*Outcome: the native app now shows the brain it's steering through **and makes it move** —
+the thesis, live, on the phone. Not just a chat.*
 
 ### Phase 2 — make it native to the touch — **P1**
 4. **Long-press peek + `contextMenu`** (B6 → §3): node press preview + quick actions.

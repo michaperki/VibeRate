@@ -35,10 +35,13 @@ test fixture.
   `+N docs` toggle), a `DocView` markdown reader reusing the chat's `MarkdownView` (ring header
   + render↔raw toggle), reached via a `brain` toolbar button on the cockpit; plus the native
   unlocks — tap-to-open with a **haptic**, **long-press peek** via `contextMenu(preview:)`
-  (the touch home for the desktop hover-peek). Still open: the brain⇄chat **live glow** (B8,
-  next batch — touches the SSE hot path), the real `Canvas` **drag-to-fling force-sim**
-  (Phase 3), pinch/pan, activity ribbon + time-travel (Phase 4), Dynamic-Island "cooking"
-  card (Phase 5). Charts the mobile-web brain arc (read-only viewer →
+  (the touch home for the desktop hover-peek). **The brain⇄chat live link (B8) now shipped
+  too:** a live `tool_use` on a brain doc glows that node (verb-tinted halo) + fires a
+  haptic + pulses a chat-toolbar brain button, bridged by an observable `BrainActivity`
+  store and replay-gated on the event timestamp so backfill doesn't buzz on open. Still
+  open: the real `Canvas` **drag-to-fling force-sim** (Phase 3), pinch/pan, activity ribbon
+  + time-travel (Phase 4), Dynamic-Island "cooking" card (Phase 5). Charts the mobile-web
+  brain arc (read-only viewer →
   completion rings → time-travel → mobile `.brainbar` → live link → the 2026-06-24 "nodes
   at rest" rethink), inventories every web interaction against native (all ❌/◑), and adds
   the gestures **Swift unlocks** that a WKWebView never had: long-press peek + `contextMenu`,
