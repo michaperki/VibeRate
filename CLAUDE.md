@@ -32,8 +32,15 @@ test fixture.
   message bodies render through a `UITextView`-backed `SelectableText` shim so long-press
   gives real iOS partial-copy (blue handles, range adjust, copy-the-span), which SwiftUI
   `Text(…).textSelection` can't; a `MarkdownNS` flattener gives contiguous selection across a
-  prose reply (code/table messages keep the per-block chrome path). Still open: tail-outside-array
-  (deferred — measure first), Phase D QoL. Extends `PLAN_NATIVE_REWRITE.md`.
+  prose reply (code/table messages keep the per-block chrome path). **Flipped newest-first flow
+  shipped (2026-06-25, Phase D #13):** composer pinned to the **top**, transcript reads
+  newest-first (`ForEach(bubbles.reversed())`), pin probe + jump pill moved to a top sentinel —
+  ported from the web Drive view. It's also the more *robust* layout: a streaming bubble pinned
+  at the top grows downward in place, so there's no per-token scroll and none of the
+  `LazyVStack` scroll-to-bottom overshoot that left a black gap until you scrolled up. Known
+  limit: SwiftUI has no automatic prepend scroll-anchoring, so new output while scrolled into
+  history can nudge the position (jump pill recovers; `.scrollPosition(id:)` fix deferred).
+  Still open: tail-outside-array (deferred — measure first), rest of Phase D QoL. Extends `PLAN_NATIVE_REWRITE.md`.
 - `PLAN_NATIVE_BRAIN.md` — the **other half** of native parity: the **brain & activity**
   surfaces, which `PLAN_NATIVE_PARITY.md` deliberately never covered (2026-06-25).
   **Phase 1 core shipped (2026-06-25, client-only):** native can now *show the brain* — a

@@ -62,9 +62,8 @@ struct DriveSessionView: View {
     @State private var stopArmed = false             // Stop is a two-tap armed control (thumb-width from Send)
     @State private var stopDisarmTask: Task<Void, Never>?
     @State private var expandedTools: Set<UUID> = [] // tool chips the user tapped open
-    @State private var pinnedToBottom = true         // auto-scroll only when the user is at the bottom (§3.1b)
-    @State private var showJump = false              // "↑ new activity" pill when unpinned and content arrives
-    @State private var scrollScheduled = false       // a throttled tail-scroll is already queued this frame
+    @State private var pinnedToTop = true            // flipped flow: newest rides the TOP; auto-snap only while parked there
+    @State private var showJump = false              // "↑ new activity" pill when scrolled into history and new activity arrives
     @FocusState private var composerFocused: Bool    // bring up the keyboard after a starter chip pre-fills
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -80,8 +79,12 @@ struct DriveSessionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            transcript
+            // Flipped flow (mirrors the web Drive view): composer pinned to the TOP, the
+            // transcript reads newest-first beneath it, so the live reply forms right under
+            // where you type. A bonus the keyboard makes obvious — typing no longer hides the
+            // newest activity (the keyboard covers the *bottom*, i.e. the oldest history).
             composer
+            transcript
         }
         .navigationTitle(project.name ?? project.slug)
         .navigationBarTitleDisplayMode(.inline)
@@ -156,38 +159,45 @@ struct DriveSessionView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    // Flipped flow (mirrors the web Drive view): the transcript reads
+                    // NEWEST-FIRST under the top composer. The top sentinel is both the
+                    // pin probe — in a LazyVStack it only renders near the viewport, so its
+                    // appear/disappear says whether you're parked at the newest — and the
+                    // jump target. A streaming bubble pinned here grows *downward in place*
+                    // (its top edge stays at offset 0), so there's no per-token scroll and
+                    // none of the scroll-to-bottom overshoot that left a black gap.
+                    Color.clear.frame(height: 1).id("top")
+                        .onAppear { pinnedToTop = true; showJump = false }
+                        .onDisappear { pinnedToTop = false }
+                    // Newest activity rides the top: a pending ask, then the working row,
+                    // then the reversed bubbles (latest turn first).
+                    if let ask = pendingAsk { askCard(ask) }
+                    if showWorkingRow { workingRow }
+                    ForEach(bubbles.reversed()) { b in
+                        bubbleView(b)
+                            .frame(maxWidth: .infinity, alignment: b.role == .user ? .trailing : .leading)
+                    }
                     if bubbles.isEmpty {
                         if forceNew { newAgentEmptyState }
                         else { idleEmptyState }
                     }
-                    ForEach(bubbles) { b in
-                        bubbleView(b)
-                            .frame(maxWidth: .infinity, alignment: b.role == .user ? .trailing : .leading)
-                    }
-                    if let ask = pendingAsk { askCard(ask) }
-                    if showWorkingRow { workingRow }
-                    // Bottom sentinel doubles as the scroll-pin probe: in a LazyVStack it
-                    // only renders while it's in (or near) the viewport, so its appear/
-                    // disappear tells us whether the user is parked at the bottom (§3.1b).
-                    Color.clear.frame(height: 1).id("bottom")
-                        .onAppear { pinnedToBottom = true; showJump = false }
-                        .onDisappear { pinnedToBottom = false }
                 }
                 .padding()
             }
-            // Auto-scroll ONLY when the user is pinned to the bottom; otherwise hold their
-            // position and surface a jump pill. This is the matrix #16a fix — a tool card no
-            // longer yanks you back down while you're reading history.
+            // Snap the newest to the top ONLY while parked there; once you scroll down into
+            // history, new activity raises the jump pill instead of yanking you up.
             .onChange(of: bubbles.count) { _, _ in autoScroll(proxy) }
-            // Streamed text grows one delta at a time — scrolling on *every* token thrashes
-            // the ScrollView (the P-2 smoothness cost). Coalesce to ~one scroll per frame.
-            .onChange(of: bubbles.last?.text) { _, _ in autoScrollThrottled(proxy) }
             .onChange(of: showWorkingRow) { _, on in if on { autoScroll(proxy) } }
             .onChange(of: pendingAsk?.id) { _, id in if id != nil { jump(proxy) } }
-            .overlay(alignment: .bottom) {
+            // A pinned streaming bubble grows in place (top edge fixed), so no scroll is
+            // needed on a text delta — just keep the jump pill honest when reading history.
+            .onChange(of: bubbles.last?.text) { _, _ in
+                if !pinnedToTop && !showJump { withAnimation { showJump = true } }
+            }
+            .overlay(alignment: .top) {
                 if showJump {
                     Button { jump(proxy) } label: {
-                        Label("New activity", systemImage: "arrow.down")
+                        Label("New activity", systemImage: "arrow.up")
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 12).padding(.vertical, 7)
                             .background(.thinMaterial, in: Capsule())
@@ -195,49 +205,29 @@ struct DriveSessionView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
         }
     }
 
-    /// Scroll to the foot only when the user is already there; otherwise raise the jump pill
-    /// so new activity is announced without stealing their scroll position.
-    private func autoScroll(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        if pinnedToBottom {
-            if animated { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            else { proxy.scrollTo("bottom", anchor: .bottom) }
-        } else {
+    /// Snap the newest activity to the top when parked there; otherwise raise the jump pill
+    /// so new activity is announced without stealing the reader's scroll position.
+    private func autoScroll(_ proxy: ScrollViewProxy) {
+        if pinnedToTop {
+            withAnimation { proxy.scrollTo("top", anchor: .top) }
+        } else if !showJump {
             withAnimation { showJump = true }
         }
     }
 
-    /// Throttled tail-follow for the streaming hot path: at most one scroll per ~50ms instead
-    /// of one per token. When the user has scrolled away we don't move them — just raise the
-    /// jump pill (cheap + idempotent, so it's fine to hit on every delta). This is the P-2
-    /// smoothness half; the pin-gating (only scroll when parked at the bottom) is the §3.1b
-    /// correctness half, already shipped.
-    private func autoScrollThrottled(_ proxy: ScrollViewProxy) {
-        guard pinnedToBottom else {
-            if !showJump { withAnimation { showJump = true } }
-            return
-        }
-        guard !scrollScheduled else { return }
-        scrollScheduled = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            scrollScheduled = false
-            if pinnedToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
-        }
-    }
-
-    /// Explicit jump to the foot (the pill / an ask landing) — always snaps and re-pins.
+    /// Explicit jump to the newest (the pill / an ask landing) — always snaps to the top and re-pins.
     private func jump(_ proxy: ScrollViewProxy) {
         withAnimation {
-            proxy.scrollTo("bottom", anchor: .bottom)
+            proxy.scrollTo("top", anchor: .top)
             showJump = false
-            pinnedToBottom = true
+            pinnedToTop = true
         }
     }
 

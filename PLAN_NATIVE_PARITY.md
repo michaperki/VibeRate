@@ -385,8 +385,26 @@ a bad turn, and actually read the transcript while it runs. This is the line bet
 
 ### Phase D — mobile QoL polish — **P2**
 12. **Prompt chips** any-time + saved phrases (matrix #15).
-13. **Flipped newest-first + jump pill** (matrix #16) — bigger UX change; validate it's
-    still wanted natively before porting.
+13. **Flipped newest-first + jump pill** (matrix #16) — ✅ **SHIPPED 2026-06-25.** Validated
+    on device: the bottom-composer / newest-at-bottom default made you chase the latest token
+    *and* exposed a SwiftUI `LazyVStack` scroll-to-bottom **overshoot** (auto-scroll landed in
+    un-laid-out space → a black gap until you scrolled up, made worse by the variable-height
+    `SelectableText` rows). Ported the web flip: composer pinned to the **top**, transcript
+    reads **newest-first** (`ForEach(bubbles.reversed())`), pin probe + jump target moved to a
+    **top** sentinel, jump pill flipped to the top (↑). Why it's also the more *robust* layout,
+    not just consistent with the web: a streaming bubble pinned at the top grows **downward in
+    place** (its top edge stays at offset 0), so there is **no per-token scroll** and none of
+    the bottom-chasing overshoot — the black gap is gone by construction. Keyboard bonus: it
+    now covers the *oldest* history at the bottom, never the newest activity under the composer.
+    - **Known limit:** when you've scrolled **down into history** *and* the agent emits new
+      output, the prepend-at-top can nudge your scroll position (SwiftUI has no automatic
+      prepend scroll-anchoring like the browser's `overflow-anchor`; the web flip got that for
+      free). Uncommon (history is usually read while idle), and the jump pill brings you back.
+      A proper fix would bind `.scrollPosition(id:)` and re-assert it on prepend — deferred.
+    - **Web parity note:** the web reverses at two levels (turn blocks *and* events-within-a-
+      turn via `drivePlace`, `app.js:5162` — the fix that stopped a long reply streaming
+      off-screen). Native reverses the single flat `bubbles` array, achieving the same uniform
+      newest-first without the per-turn block machinery.
 14. **Provisional cooling card** in the roster (matrix #14).
 15. **Status-row advanced reveal** + **context meter in the chat header** (matrix #17,19).
 
