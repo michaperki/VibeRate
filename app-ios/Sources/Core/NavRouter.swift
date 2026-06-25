@@ -13,6 +13,15 @@ struct DriveRoute: Hashable {
     var forceNew: Bool = false      // start a brand-new agent (the + button)
 }
 
+/// Open a project's **brain** — the doc network the agent steers through. Carries its own
+/// `project` so the destination is registered once at the stack root (like `DriveRoute`),
+/// reachable from a cockpit tap today and a deep-link later. PLAN_NATIVE_BRAIN.md.
+struct BrainRoute: Hashable { let project: Project }
+
+/// Open one brain doc in the reader. Carries the whole `BrainDoc` (it's small and already
+/// fetched for the graph) so the reader needs no re-fetch.
+struct DocRoute: Hashable { let doc: BrainDoc }
+
 /// Owns the signed-in navigation stack's `path` so both **in-app taps** (CockpitView rows)
 /// and an **out-of-app push deep-link** (ProjectsView consuming `PushManager.pendingRoute`)
 /// drive the same stack. One path, every destination registered via

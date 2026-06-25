@@ -142,6 +142,15 @@ struct APIClient {
         try await send(request("/api/projects"), as: [Project].self)
     }
 
+    /// The project's brain docs — the `.md` network the agent steers through
+    /// (`GET /api/projects/:slug/docs`). Returns the docs array; the graph/rings/role are
+    /// computed client-side (see `BrainDoc`), mirroring the web centerpiece. The endpoint
+    /// already exists (`src/server.js`), so the brain is a pure client gap, like parity.
+    func docs(slug: String) async throws -> [BrainDoc] {
+        struct Reply: Decodable { let docs: [BrainDoc]? }
+        return try await send(request("/api/projects/\(slug)/docs"), as: Reply.self).docs ?? []
+    }
+
     /// The Drive agent roster. Admin-guarded — the token resolves to the admin email
     /// (adminEmailFor), so an admin-linked token both signs you in and unlocks Drive.
     func agentSessions() async throws -> [AgentSession] {

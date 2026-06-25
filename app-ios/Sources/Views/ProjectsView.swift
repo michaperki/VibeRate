@@ -55,6 +55,14 @@ struct ProjectsView: View {
                 DriveSessionView(project: r.project, attachTo: r.sessionId, resumeCid: r.resumeCid,
                                  initialStatus: r.status, forceNew: r.forceNew)
             }
+            // Brain + doc reader, registered once at the root so the cockpit (and a future
+            // deep-link) can push them with a single `path` append. PLAN_NATIVE_BRAIN.md.
+            .navigationDestination(for: BrainRoute.self) { r in
+                BrainView(project: r.project)
+            }
+            .navigationDestination(for: DocRoute.self) { r in
+                DocView(doc: r.doc)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

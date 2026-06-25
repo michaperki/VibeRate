@@ -28,6 +28,23 @@ test fixture.
 - `PLAN_CAPACITOR.md` — native iOS via Capacitor + Codemagic (wrap the SPA, cloud-Mac build → TestFlight; no Mac needed). Scaffolded 2026-06-22. **Superseded as the live iOS path by `PLAN_NATIVE_REWRITE.md`** (2026-06-24); the Capacitor scaffold stays dormant.
 - `PLAN_NATIVE_REWRITE.md` — the **native SwiftUI rewrite** (`app-ios/`): a real native client to the same Fly backend, shipped to TestFlight via a Codemagic XcodeGen build, reusing the Capacitor build/sign/publish plumbing. Deletes the WKWebView seam (`STORY.md` Ch. 11): OAuth via `ASWebAuthenticationSession` + a cookie-free deep-link flow (`/auth/native/*` in `src/oauth.js`), SSE via `URLSession.bytes` (sets the auth header, retiring the `?access_token=` hack in `PLAN_NATIVE_AUTH.md`). Tradeoff: ~10–15 min build per UI change, no local Swift compile. Scaffolded 2026-06-24.
 - `PLAN_NATIVE_PARITY.md` — the agent-control gap between the web Drive and the native iOS app, as a feature matrix + prioritized rebuild roadmap (2026-06-25). **Phase A shipped + most of B/C (2026-06-25, client-only, no backend changes):** new `AgentRunState` enum unifies the status switches; native now has two-tap armed **Stop**, the mid-turn **queue** (`_driveQueue`/`driveFlushQueue` semantics ported), a **busy-aware composer** (Send↔Queue, failed-send re-queue), **scroll-pinning** + jump pill, **collapsed tool chips** (result paired by `toolUseId`), **plain-text-while-streaming** Markdown (P-1), **foreground/roster auto-reconnect**, **swipe-to-end**, and the **push deep-link** (#13: a tapped notification opens that exact `DriveSessionView` via a unified `NavRouter`/`DriveRoute` path — an `ask` re-surfaces inline through the SSE replay, retiring the detached `AskSheet` to a no-project fallback). **Phase B now fully shipped.** Still open: P-2 smoothness, Phase D QoL. Extends `PLAN_NATIVE_REWRITE.md`.
+- `PLAN_NATIVE_BRAIN.md` — the **other half** of native parity: the **brain & activity**
+  surfaces, which `PLAN_NATIVE_PARITY.md` deliberately never covered (2026-06-25).
+  **Phase 1 core shipped (2026-06-25, client-only):** native can now *show the brain* — a
+  `BrainView` "nodes at rest" graph (constitution anchor + plan shelf with `CompletionRing`s +
+  `+N docs` toggle), a `DocView` markdown reader reusing the chat's `MarkdownView` (ring header
+  + render↔raw toggle), reached via a `brain` toolbar button on the cockpit; plus the native
+  unlocks — tap-to-open with a **haptic**, **long-press peek** via `contextMenu(preview:)`
+  (the touch home for the desktop hover-peek). Still open: the brain⇄chat **live glow** (B8,
+  next batch — touches the SSE hot path), the real `Canvas` **drag-to-fling force-sim**
+  (Phase 3), pinch/pan, activity ribbon + time-travel (Phase 4), Dynamic-Island "cooking"
+  card (Phase 5). Charts the mobile-web brain arc (read-only viewer →
+  completion rings → time-travel → mobile `.brainbar` → live link → the 2026-06-24 "nodes
+  at rest" rethink), inventories every web interaction against native (all ❌/◑), and adds
+  the gestures **Swift unlocks** that a WKWebView never had: long-press peek + `contextMenu`,
+  drag-to-fling nodes, **haptics** as the live-activity channel, pinch/pan, ProMotion spring
+  physics, and a Dynamic-Island "agent cooking" card. Backend already serves it all
+  (`/docs`, `/dochistory`, `/git`, `/activity`, `/memory`) — a client gap, like parity.
 - `PLAN_NATIVE_AUTH.md` — why social sign-in fails in the wrapped iOS app (OAuth state-cookie context split) and the token-sign-in workaround. 2026-06-23.
 - `PROJECT_VIEW_PLAN.md` — detailed viewer/brain planning (§G holds the earlier 2026-06 legibility pass)
 - `UI_FEEDBACK.md` — synthesis of two external UI reviews (2026-06-22), prioritized by reviewer agreement + prescriptive fixes; feeds `PLAN_MOBILE.md`

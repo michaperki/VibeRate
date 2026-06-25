@@ -156,3 +156,86 @@ struct RosterAgent: Codable, Identifiable, Hashable {
     /// Declared (self-reported) plan wins over the inferred one.
     var plan: String? { declaredPlan ?? currentPlan }
 }
+
+// MARK: - Brain docs (the .md network the agent steers through)
+
+/// Coarse doc role, mirroring the web `docRole` (`public/app.js`): the constitution is
+/// the brain's anchor; plans (checklists) get a completion ring; everything else is a
+/// quiet reference node behind the `+N docs` toggle. PLAN_NATIVE_BRAIN.md B1/B3.
+enum DocRole { case constitution, reference, memory }
+
+/// A plan/checklist completion, mirroring the web `completionOf`. Non-monotonic by
+/// design — discovery work legitimately pushes % down (PROJECT_VIEW_PLAN.md) — so it's
+/// a per-doc ring, never a single headline bar.
+struct DocCompletion: Hashable {
+    let done: Int
+    let total: Int
+    var pct: Int { total == 0 ? 0 : Int((Double(done) / Double(total) * 100).rounded()) }
+}
+
+/// One brain doc (`GET /api/projects/:slug/docs`). The server returns
+/// `{ capturedAt, docs: [{name, content, bytes, mtime}] }`; we decode the docs array and
+/// compute the graph/rings/role client-side, exactly as the web centerpiece does — the
+/// backend already serves this, so the brain is a pure client gap (PLAN_NATIVE_BRAIN.md).
+struct BrainDoc: Codable, Identifiable, Hashable {
+    let name: String
+    let content: String?
+    let bytes: Int?
+    let mtime: Double?
+
+    var id: String { name }
+
+    /// Display basename — the repo-relative name's last path component.
+    var base: String { name.split(separator: "/").last.map(String.init) ?? name }
+
+    /// Checkbox completion — nil when the doc has no checklist (so it isn't a "plan").
+    /// Mirrors the web regex `^[ \t>*+-]*\[([ xX])\]` over each line.
+    var completion: DocCompletion? {
+        guard let text = content,
+              let re = try? NSRegularExpression(pattern: "(?m)^[ \\t>*+-]*\\[([ xX])\\]")
+        else { return nil }
+        let ns = text as NSString
+        let matches = re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return nil }
+        let done = matches.filter {
+            ns.substring(with: $0.range).range(of: "[xX]", options: .regularExpression) != nil
+        }.count
+        return DocCompletion(done: done, total: matches.count)
+    }
+
+    /// A doc with a checklist reads as a plan (gets a ring on the shelf).
+    var isPlan: Bool { completion != nil }
+
+    /// Coarse role, mirroring the web `docRole`.
+    var role: DocRole {
+        let b = base.uppercased()
+        if b == "MEMORY.MD" { return .memory }
+        if b.contains("SOUL")
+            || ["AGENTS.MD", "AGENT.MD", "CLAUDE.MD", "CLAUDE.LOCAL.MD", "SEED.MD", "SEED_V2.MD"].contains(b) {
+            return .constitution
+        }
+        return .reference
+    }
+
+    /// First heading / non-empty line, stripped of `#` — the summary shown under a node
+    /// and at the top of a long-press peek.
+    var summaryLine: String {
+        guard let content else { return base }
+        for raw in content.components(separatedBy: "\n") {
+            let l = raw.trimmingCharacters(in: .whitespaces)
+            if l.isEmpty { continue }
+            return l.replacingOccurrences(of: "^#{1,6}\\s+", with: "", options: .regularExpression)
+        }
+        return base
+    }
+
+    /// A few lines for the long-press peek card (PLAN_NATIVE_BRAIN.md §3 — the touch home
+    /// for the desktop hover-peek that can't exist on a phone).
+    var peekText: String {
+        guard let content else { return base }
+        let lines = content.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return lines.prefix(6).joined(separator: "\n")
+    }
+}

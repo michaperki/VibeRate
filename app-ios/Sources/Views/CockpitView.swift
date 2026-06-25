@@ -69,6 +69,20 @@ struct CockpitView: View {
         .navigationBarTitleDisplayMode(.inline)
         .appBackButton { dismiss() }
         .toolbar {
+            // Open the project's brain — the doc network the agent steers through. The
+            // cockpit shows what the agent is *doing*; the brain shows what it's steering
+            // *through* (PLAN_NATIVE_BRAIN.md). Quiet accent icon, left of "New agent".
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    router.path.append(BrainRoute(project: project))
+                } label: {
+                    Image(systemName: "brain")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel("Brain")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     router.path.append(DriveRoute(project: project, forceNew: true))
