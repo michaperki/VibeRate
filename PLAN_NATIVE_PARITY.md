@@ -340,11 +340,20 @@ its full delta log; the web doesn't flash only because `driveScheduleMd` coalesc
   appended `bubbles` into a single view update) and batches the `eventCount`/`lastSeq`/
   `historyLoaded` bookkeeping too. The backfill burst now paints in a couple of passes instead
   of hundreds; live streaming flushes every ~50ms (≈20fps), still reading as live.
-- **Deeper root-cause follow-up (server, deferred):** the replay could consolidate runs of
-  `assistant_text_start`+deltas+`block_stop` into one `assistant_text` (and drop ephemeral
-  thinking, which the client clears at turn end anyway) so backfill ships a handful of events,
-  not thousands — benefiting bandwidth and *all* clients. Riskier (touches the shared stream
-  contract + seq semantics), so left for when the client batch proves insufficient.
+- **Root-cause fix ✅ (server, shipped 2026-06-25):** the client batch made the flash *fast*
+  but not *instant* (a long convo still filled in over a few passes), so the replay itself is
+  now consolidated. `consolidateBackfill` (`agent.js`) folds each finished assistant block's
+  `assistant_text_start`+deltas+`block_stop` into one `assistant_text`, drops streamed thinking
+  + `raw` noise, and passes everything else through — a 14-frame turn becomes 6, a
+  thousand-delta turn becomes ~6, so `after=0` ships a handful of events that paint in **one**
+  pass. Genuinely instant, and it cuts replay bandwidth for **all** clients (web too).
+  Invariants kept: every frame carries a real `seq` (so `Last-Event-ID`/`after=` resume still
+  works; any dropped tail replays harmlessly on reconnect); a still-streaming trailing reply is
+  emitted as `assistant_text_start`+one `assistant_text_delta` so the open SSE connection's live
+  deltas append seamlessly instead of starting a new bubble. **Consolidation is gated to
+  `after=0` only** — a reconnect *gap* (`after>0`) is small (no flash) and may continue a block
+  the client already has open, so it streams raw. Validated with a synthetic harness
+  (completed / mid-stream-open / empty / noise-only) + the harness smoke gate.
 - **Windowing** (a "load earlier" cap for very long resumes) still open — measure first.
 
 **Load-faster wins:** the cockpit already does instant-fetch-then-stream (good). The

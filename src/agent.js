@@ -1011,12 +1011,71 @@ export function endSession({ id }) {
   return { ok: true, id, ended: true };
 }
 
+// Per-token noise we never replay on backfill: the live log records every
+// `assistant_text_delta`/`thinking_delta` (so the typing effect streams), plus `raw`
+// (status pings / hooks the client doesn't render). A late joiner doesn't need any of it —
+// see `consolidateBackfill`.
+const BACKFILL_DROP = new Set(['thinking_start', 'thinking_delta', 'raw']);
+
+// Compact a slice of the event log for a late joiner. Replaying the raw log re-streams the
+// entire transcript token-by-token — thousands of frames the client repaints through. Here we
+// fold each finished assistant block into a single `assistant_text`, drop streamed thinking +
+// `raw` noise, and pass everything else through unchanged, so a fresh open ships a handful of
+// events that paint in one pass.
+//
+// Two invariants kept so resume still works:
+//  - Every emitted frame carries a real `seq` (the route tags `id: <seq>` for Last-Event-ID),
+//    monotonic and <= the session's current max; any tail we drop just replays harmlessly on a
+//    later reconnect.
+//  - A still-streaming trailing reply (you opened mid-turn) is emitted as `assistant_text_start`
+//    + one `assistant_text_delta`, leaving the client's block OPEN so the live deltas that keep
+//    arriving on the same connection append to it seamlessly instead of starting a new bubble.
+export function consolidateBackfill(events) {
+  const out = [];
+  let acc = null; // accumulating assistant-text run: { text, startSeq, seq, t }
+
+  const flush = (closed) => {
+    if (!acc) return;
+    if (closed) {
+      out.push({ seq: acc.seq, t: acc.t, kind: 'assistant_text', text: acc.text });
+    } else {
+      // trailing, still-streaming reply → keep the block open for the live deltas to come
+      out.push({ seq: acc.startSeq, t: acc.t, kind: 'assistant_text_start' });
+      out.push({ seq: acc.seq, t: acc.t, kind: 'assistant_text_delta', text: acc.text });
+    }
+    acc = null;
+  };
+
+  for (const e of events) {
+    if (e.kind === 'assistant_text_start') { flush(true); acc = { text: '', startSeq: e.seq, seq: e.seq, t: e.t }; continue; }
+    if (e.kind === 'assistant_text_delta') {
+      if (!acc) acc = { text: '', startSeq: e.seq, seq: e.seq, t: e.t };
+      acc.text += e.text || ''; acc.seq = e.seq; acc.t = e.t;
+      continue;
+    }
+    if (e.kind === 'block_stop') { flush(true); continue; } // closes a text or (dropped) thinking block
+    if (BACKFILL_DROP.has(e.kind)) continue;
+    flush(true); // any other real event ends an open assistant run
+    out.push(e);
+  }
+  flush(false); // a run left open at the end is the live in-progress reply
+  return out;
+}
+
 // Subscribe to live events. `afterSeq` backfills everything the caller missed
-// (SSE reconnects, late joiners). Returns an unsubscribe fn.
+// (SSE reconnects, late joiners) — consolidated so the replay is a handful of events, not the
+// whole token-by-token history. Live events after this point stream raw (deltas and all), so
+// the typing effect is unaffected. Returns an unsubscribe fn.
 export function subscribe(id, onEvent, afterSeq = 0) {
   const session = sessions.get(id);
   if (!session) throw new Error('unknown session');
-  for (const e of session.events) if (e.seq > afterSeq) onEvent(e);
+  const backlog = session.events.filter((e) => e.seq > afterSeq);
+  // Consolidate ONLY the full initial backfill (after=0), where the whole token-by-token
+  // history would otherwise replay (the flash). A reconnect gap (after>0) is small — no flash
+  // — and may *continue* a block the client already has open, so stream it raw: the live
+  // deltas append seamlessly instead of a synthesized start splitting the reply.
+  const frames = afterSeq === 0 ? consolidateBackfill(backlog) : backlog;
+  for (const e of frames) onEvent(e);
   session.subscribers.add(onEvent);
   return () => session.subscribers.delete(onEvent);
 }

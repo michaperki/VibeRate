@@ -42,10 +42,15 @@ test fixture.
   history can nudge the position (jump pill recovers; `.scrollPosition(id:)` fix deferred).
   **P-4 backfill repaint flash fixed (2026-06-25):** opening a convo replayed the whole
   token-by-token history (the server logs every `assistant_text_delta`) and the old loop
-  ingested one frame per `@State` mutation → a ~2s "speed-load" repaint on every open; now an
-  `IngestBuffer` throttles frame ingest to ≤1 flush/~50ms, committing each batch in one
-  synchronous pass (server-side replay consolidation is the deeper, deferred follow-up). Still
-  open: tail-outside-array (deferred — measure first), rest of Phase D QoL. Extends `PLAN_NATIVE_REWRITE.md`.
+  ingested one frame per `@State` mutation → a ~2s "speed-load" repaint on every open. Fixed in
+  two layers: an `IngestBuffer` throttles client frame ingest to ≤1 flush/~50ms (one synchronous
+  pass per batch), **and** the server now consolidates the `after=0` replay — `consolidateBackfill`
+  (`agent.js`) folds each assistant block's deltas into one `assistant_text` + drops streamed
+  thinking/`raw`, so a thousand-delta turn replays as ~6 frames and the transcript paints in one
+  pass (genuinely instant; cuts bandwidth for web too). Seqs preserved for `Last-Event-ID` resume;
+  a still-streaming reply stays open so live deltas append; gated to `after=0` (reconnect gaps
+  stream raw). Still open: tail-outside-array (deferred — measure first), rest of Phase D QoL.
+  Extends `PLAN_NATIVE_REWRITE.md`.
 - `PLAN_NATIVE_BRAIN.md` — the **other half** of native parity: the **brain & activity**
   surfaces, which `PLAN_NATIVE_PARITY.md` deliberately never covered (2026-06-25).
   **Phase 1 core shipped (2026-06-25, client-only):** native can now *show the brain* — a
