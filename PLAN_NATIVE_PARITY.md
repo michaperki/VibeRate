@@ -326,11 +326,26 @@ frames but a large `tool_result` is fully parsed before being sliced to 240 char
 1-second `Timer` (`:113`) re-renders every roster/conversation row each tick; gate it to
 re-render only rows with a *running* elapsed timer.
 
-### P-4 (low): initial backfill paints the whole transcript
-`openStream(after:0)` replays the entire buffered transcript into the `LazyVStack` at
-once (no windowing). Fine for short convos; for a long resumed one it's a visible hitch.
-Lazy stack mitigates layout, but consider a "load earlier" cap if long-conversation
-resume feels slow on device. **Lower priority — measure first.**
+### P-4: initial backfill repaints the whole transcript per token — ✅ FIXED 2026-06-25
+`openStream(after:0)` replays the entire buffered transcript, and the server logs **every**
+`assistant_text_delta`/`thinking_delta` (`agent.js:598/601`), so the replay re-streams the
+whole token-by-token history. The old loop ingested one frame per `@State` mutation
+(`eventCount`/`lastSeq`/`bubbles`), so SwiftUI re-rendered the whole `LazyVStack` *per token*
+— a ~2s "speed-load" flash on **every** open (it recurs because the in-memory session keeps
+its full delta log; the web doesn't flash only because `driveScheduleMd` coalesces renders to
+≤1/frame).
+- **Fix ✅ (client-only):** an `IngestBuffer` (reference type, outside SwiftUI observation)
+  accumulates raw frames; `scheduleIngestFlush` throttles to ≤ one `flushIngest` per ~50ms,
+  which commits the batch in **one synchronous pass** (SwiftUI coalesces the `@State` writes +
+  appended `bubbles` into a single view update) and batches the `eventCount`/`lastSeq`/
+  `historyLoaded` bookkeeping too. The backfill burst now paints in a couple of passes instead
+  of hundreds; live streaming flushes every ~50ms (≈20fps), still reading as live.
+- **Deeper root-cause follow-up (server, deferred):** the replay could consolidate runs of
+  `assistant_text_start`+deltas+`block_stop` into one `assistant_text` (and drop ephemeral
+  thinking, which the client clears at turn end anyway) so backfill ships a handful of events,
+  not thousands — benefiting bandwidth and *all* clients. Riskier (touches the shared stream
+  contract + seq semantics), so left for when the client batch proves insufficient.
+- **Windowing** (a "load earlier" cap for very long resumes) still open — measure first.
 
 **Load-faster wins:** the cockpit already does instant-fetch-then-stream (good). The
 main *perceived* load cost is P-1 during the first streamed reply. Fixing P-1 + P-2 is
@@ -377,11 +392,12 @@ a bad turn, and actually read the transcript while it runs. This is the line bet
    chips into a "🔧 N steps" group. Stops a tool-heavy turn from burying the reasoning.
    (P0/P1 — pair with the Phase-A scroll-pin; together they fix §3.1.)
 
-### Phase C — performance pass — **P1 (do alongside A/B)** ◑ P-1 ✅; P-2 ✅ (tail-outside-array deferred); P-3/P-4 deferred
+### Phase C — performance pass — **P1 (do alongside A/B)** ◑ P-1 ✅; P-2 ✅; P-4 ✅; P-3 deferred
 9. **P-1 Markdown memoization / stream-as-plain-then-parse.** ✅
 10. **P-2 throttled auto-scroll** ✅ + **native transcript text selection** ✅ (P-2b);
     tail-outside-array deferred (measure first).
-11. **P-3/P-4** only if device testing shows them.
+11. **P-4 backfill repaint flash** ✅ — batched/throttled frame ingest (`IngestBuffer`).
+12. **P-3** (main-actor decode + 1s roster re-render) only if device testing shows it.
 
 ### Phase D — mobile QoL polish — **P2**
 12. **Prompt chips** any-time + saved phrases (matrix #15).

@@ -40,7 +40,12 @@ test fixture.
   `LazyVStack` scroll-to-bottom overshoot that left a black gap until you scrolled up. Known
   limit: SwiftUI has no automatic prepend scroll-anchoring, so new output while scrolled into
   history can nudge the position (jump pill recovers; `.scrollPosition(id:)` fix deferred).
-  Still open: tail-outside-array (deferred — measure first), rest of Phase D QoL. Extends `PLAN_NATIVE_REWRITE.md`.
+  **P-4 backfill repaint flash fixed (2026-06-25):** opening a convo replayed the whole
+  token-by-token history (the server logs every `assistant_text_delta`) and the old loop
+  ingested one frame per `@State` mutation → a ~2s "speed-load" repaint on every open; now an
+  `IngestBuffer` throttles frame ingest to ≤1 flush/~50ms, committing each batch in one
+  synchronous pass (server-side replay consolidation is the deeper, deferred follow-up). Still
+  open: tail-outside-array (deferred — measure first), rest of Phase D QoL. Extends `PLAN_NATIVE_REWRITE.md`.
 - `PLAN_NATIVE_BRAIN.md` — the **other half** of native parity: the **brain & activity**
   surfaces, which `PLAN_NATIVE_PARITY.md` deliberately never covered (2026-06-25).
   **Phase 1 core shipped (2026-06-25, client-only):** native can now *show the brain* — a

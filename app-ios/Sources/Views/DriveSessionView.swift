@@ -50,6 +50,7 @@ struct DriveSessionView: View {
     @State private var streamHTTP: Int?              // diagnostics: stream response status
     @State private var lastSeq = 0                   // highest event seq seen — resume point for reconnect
     @State private var historyLoaded = false         // a fresh open has backfilled the transcript
+    @State private var ingestBuffer = IngestBuffer() // coalesce SSE frames → one render per batch (kills the backfill repaint flash)
     @State private var awaitingResponse = false      // sent a prompt, nothing has streamed back yet
     @State private var showSetup = false             // a fresh project needs its workspace cloned first
     @State private var queuedPrompt: String?         // the prompt to re-send once the workspace is ready
@@ -704,32 +705,66 @@ struct DriveSessionView: View {
     /// history), or `lastSeq` on a reconnect (it backfills only the gap, no dupes).
     private func openStream(_ id: String, after: Int = 0) {
         streamTask?.cancel()
-        if after == 0 { eventCount = 0; lastSeq = 0 }
+        if after == 0 { eventCount = 0; lastSeq = 0; ingestBuffer.reset() }
         streamHTTP = nil
         let url = APIConfig.url("/api/agent/sessions/\(id)/stream?after=\(after)")
         let sse = SSEClient(url: url, token: token)
         sse.onOpen = { code in Task { @MainActor in streamHTTP = code } }
         streamTask = Task { @MainActor in
             do {
+                // Opening a conversation replays the WHOLE token-by-token history (the server
+                // logs every `assistant_text_delta`). Ingesting one frame per `@State` mutation
+                // repainted the entire transcript per token — the ~2s "speed-load" flash on
+                // every open. Buffer the frames and commit them in coalesced batches instead
+                // (≤ one render per ~50ms), so the backfill burst paints in a couple of passes
+                // and live streaming stays ≤50ms responsive.
                 for try await event in sse.events() {
-                    eventCount += 1
-                    if after == 0 { historyLoaded = true }   // a fresh open backfilled history
-                    if let idStr = event.id, let n = Int(idStr) { lastSeq = n }
-                    ingest(event.data)
+                    if let idStr = event.id, let n = Int(idStr) { ingestBuffer.maxSeq = max(ingestBuffer.maxSeq, n) }
+                    ingestBuffer.pending.append(event.data)
+                    scheduleIngestFlush(after: after)
                 }
-                // Stream closed by the server (idle drop / deploy cycle). Zero events on a
-                // *fresh* open means an empty buffer; otherwise reconnect to keep updates
-                // flowing — the native client has no auto-reconnect, so without this live
-                // events stop after the first backfill and only reappear on re-entry.
+                // Stream closed by the server (idle drop / deploy cycle) — render any buffered
+                // tail now so nothing is lost, then decide. Zero events on a *fresh* open means
+                // an empty buffer; otherwise reconnect to keep updates flowing — the native
+                // client has no auto-reconnect, so without this live events stop after the
+                // first backfill and only reappear on re-entry.
+                flushIngest(after: after)
                 if eventCount == 0 && after == 0 { status = "Connected, but no transcript came back." }
                 await reconnect(id)
             } catch is CancellationError {
                 // we re-opened the stream or left the view — not an error to surface
             } catch {
+                flushIngest(after: after)
                 status = "Stream error: \(friendly(error))"
                 await reconnect(id)
             }
         }
+    }
+
+    /// Throttle frame ingestion to ≤ one flush per ~50ms. A burst (the open-time backfill)
+    /// accumulates in the buffer and lands in a couple of coalesced renders instead of one
+    /// per token; steady live streaming flushes every ~50ms (≈20fps), still reading as live.
+    private func scheduleIngestFlush(after: Int) {
+        guard !ingestBuffer.flushScheduled else { return }
+        ingestBuffer.flushScheduled = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            ingestBuffer.flushScheduled = false
+            flushIngest(after: after)
+        }
+    }
+
+    /// Commit the buffered frames in ONE synchronous pass — SwiftUI coalesces the `@State`
+    /// writes (and the appended `bubbles`) into a single view update. Bookkeeping is batched
+    /// too, so the header doesn't re-diff per frame either.
+    private func flushIngest(after: Int) {
+        let batch = ingestBuffer.pending
+        ingestBuffer.pending = []
+        guard !batch.isEmpty else { return }
+        eventCount += batch.count
+        if ingestBuffer.maxSeq > lastSeq { lastSeq = ingestBuffer.maxSeq }
+        if after == 0 { historyLoaded = true }
+        for data in batch { ingest(data) }
     }
 
     /// Re-open a dropped stream, resuming from `lastSeq`. This is what the browser's
@@ -1066,4 +1101,16 @@ struct DriveSessionView: View {
 
     /// Pull the server's `{error: "…"}` message out of an HTTP error body when present.
     private func friendly(_ error: Error) -> String { apiMessage(error) }
+}
+
+/// A reference-type holder for in-flight SSE frames, deliberately *outside* SwiftUI's
+/// observation: mutating its array does NOT trigger a view update, so a burst of frames can
+/// accumulate and be committed to `@State` in one synchronous pass (`flushIngest`). Touched
+/// only on the main actor (every caller is an `@MainActor` context), so no locking is needed.
+final class IngestBuffer {
+    var pending: [String] = []      // raw SSE `data` payloads awaiting ingest
+    var maxSeq = 0                  // highest seq seen in the buffer → committed to lastSeq on flush
+    var flushScheduled = false      // a coalescing flush is already queued for this window
+
+    func reset() { pending = []; maxSeq = 0; flushScheduled = false }
 }
