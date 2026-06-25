@@ -15,14 +15,15 @@ struct MarkdownView: View {
 
     var body: some View {
         let blocks = MarkdownParser.parse(text)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { item in
                 blockView(item.element)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Assistant body text was rendering at full .body (17pt) — slightly smaller reads
-        // better in a phone bubble and lets more words fit per line. Headings override.
+        // Assistant body text at .subheadline (15pt), not full .body (17pt): denser
+        // technical replies stay scannable on a phone instead of reading like a blown-up
+        // desktop transcript. Headings override (kept modest, not huge).
         .font(.subheadline)
     }
 
@@ -41,11 +42,13 @@ struct MarkdownView: View {
                 .padding(.top, 2)
 
         case .code(let code):
+            // Code reads at .caption mono (12pt) — distinctly smaller than the 15pt prose,
+            // so a code block sits quietly inside a reply rather than dominating it.
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
-                    .font(.system(.footnote, design: .monospaced))
+                    .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
-                    .padding(10)
+                    .padding(9)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.secondary.opacity(0.12))
@@ -91,12 +94,15 @@ struct MarkdownView: View {
         }
     }
 
+    // Modest heading scale for a phone bubble: an h1 at .headline (17pt) is just a step
+    // above the 15pt body, not the old 20pt .title3 that read as "huge". Lower levels
+    // lean on weight, not size, to stay legible without shouting.
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .title3
-        case 2: return .headline
-        case 3: return .subheadline
-        default: return .footnote
+        case 1: return .headline
+        case 2: return .subheadline
+        case 3: return .footnote
+        default: return .caption
         }
     }
 

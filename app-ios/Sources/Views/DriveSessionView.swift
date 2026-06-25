@@ -46,6 +46,7 @@ struct DriveSessionView: View {
     @State private var showSetup = false             // a fresh project needs its workspace cloned first
     @State private var queuedPrompt: String?         // the prompt to re-send once the workspace is ready
     @FocusState private var composerFocused: Bool    // bring up the keyboard after a starter chip pre-fills
+    @Environment(\.dismiss) private var dismiss
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -57,6 +58,11 @@ struct DriveSessionView: View {
         }
         .navigationTitle(project.name ?? project.slug)
         .navigationBarTitleDisplayMode(.inline)
+        .appBackButton { dismiss() }
+        // Give the nav bar a definite background so transcript text doesn't blur through it
+        // as it scrolls past — the translucent default made the header feel like an unstable
+        // floating overlay. A visible bar reads as a stable, anchored nav.
+        .toolbarBackground(.visible, for: .navigationBar)
         // Status lives *inside* the nav bar as a thin subtitle line — no separate strip,
         // so the header stays a single compact iOS nav bar instead of a stacked block.
         .toolbar {
@@ -165,9 +171,35 @@ struct DriveSessionView: View {
                     .disabled(!ready || sending)
                 }
             }
+            newAgentHint
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 24)
+    }
+
+    /// A quiet "what happens after you send" footer so the new-agent screen reads as
+    /// intentional rather than half-empty — without adding a heavy card. Three faint lines:
+    /// where it runs, that nothing's running yet, and what sending does.
+    private var newAgentHint: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider().padding(.vertical, 4)
+            hintRow("folder", "Runs in \(project.name ?? project.slug)")
+            hintRow("moon.zzz", "No agent running yet")
+            hintRow("paperplane", "Your message starts a fresh agent — you'll watch it work here.")
+        }
+        .padding(.top, 8)
+    }
+
+    private func hintRow(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(width: 16)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// Pre-fill the composer with a starter prompt (don't auto-send) — on mobile, users
@@ -259,21 +291,40 @@ struct DriveSessionView: View {
     // MARK: - Composer
 
     private var composer: some View {
-        HStack(spacing: 8) {
-            TextField("Message the agent…", text: $draft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...4)
-                .focused($composerFocused)
-                .disabled(sending || !ready)
+        HStack(alignment: .bottom, spacing: 10) {
+            // Custom soft field (not .roundedBorder) so we control the placeholder contrast
+            // and the internal padding — the bordered field felt cramped and its placeholder
+            // read too dim. An explicit `.secondary` placeholder is a touch clearer.
+            ZStack(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text("Message the agent…")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 9)
+                        .padding(.horizontal, 13)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .lineLimit(1...5)
+                    .focused($composerFocused)
+                    .disabled(sending || !ready)
+                    .padding(.vertical, 9)
+                    .padding(.horizontal, 13)
+            }
+            .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 18))
             Button {
                 Task { @MainActor in await send() }
             } label: {
                 Image(systemName: sending ? "ellipsis.circle" : "arrow.up.circle.fill")
                     .font(.title2)
             }
+            .padding(.bottom, 3)
             .disabled(sending || !ready || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(.bar)
     }
 

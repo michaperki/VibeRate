@@ -10,6 +10,7 @@ import Combine
 struct CockpitView: View {
     let project: Project
     @Environment(AuthModel.self) private var auth
+    @Environment(\.dismiss) private var dismiss
 
     @State private var store: RosterStore?
     @State private var driveTarget: DriveTarget?
@@ -72,18 +73,25 @@ struct CockpitView: View {
                 ProgressView().frame(maxWidth: .infinity)
             }
         }
+        // Plain rows on the page background (matching the Projects list) instead of one big
+        // rounded "card inside page" — the grouped style read as a heavy floating container.
+        .listStyle(.plain)
         .navigationTitle(project.name ?? project.slug)
         .navigationBarTitleDisplayMode(.inline)
+        .appBackButton { dismiss() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     driveTarget = DriveTarget()   // all-nil → forceNew
                 } label: {
-                    // Title + a thin plus (not a heavy filled circle) so the action is
-                    // unmistakably "start a new agent" without dominating the bar.
+                    // A quiet accent text+icon button (plain style → no iOS 26 glass capsule)
+                    // so "start a new agent" reads as a normal nav action, not a heavy circle.
                     Label("New agent", systemImage: "plus")
                         .labelStyle(.titleAndIcon)
+                        .font(.subheadline.weight(.semibold))
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
             }
         }
         .navigationDestination(item: $driveTarget) { t in
