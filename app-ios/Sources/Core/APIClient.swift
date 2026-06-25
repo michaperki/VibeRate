@@ -91,6 +91,24 @@ struct APIClient {
         try await send(request("/api/agent/sessions/\(id)"), as: AgentSession.self)
     }
 
+    /// Kill the active turn (SIGTERM), leaving the session — and its claude id — alive so
+    /// it can still be resumed. The only server-supported "redirect now" is stop-then-send
+    /// (`stopSession`, `agent.js`); the server emits a `stopped` event we render as a system
+    /// line. Returns the session's post-stop record.
+    @discardableResult
+    func stop(sessionId: String) async throws -> AgentSession {
+        try await send(request("/api/agent/sessions/\(sessionId)/stop", method: "POST"), as: AgentSession.self)
+    }
+
+    /// End a session and drop it from the live roster (the cockpit's "swipe to end" — there
+    /// is no terminal ctrl-c on a phone). Non-destructive: kills any in-flight turn but the
+    /// transcript stays on disk and re-adoptable. Unknown id is a server-side no-op ack.
+    @discardableResult
+    func endSession(id: String) async throws -> Bool {
+        struct Reply: Decodable { let ok: Bool? }
+        return try await send(request("/api/agent/sessions/\(id)/end", method: "POST"), as: Reply.self).ok ?? true
+    }
+
     /// Answer a pending `ask` picker — resolves the parked MCP tool call so the agent's
     /// turn continues. The `:id` path segment is cosmetic (the server keys on `askId`),
     /// but we send the real session id anyway.

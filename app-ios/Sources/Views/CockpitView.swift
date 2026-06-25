@@ -59,6 +59,16 @@ struct CockpitView: View {
                                 AgentRow(agent: agent, now: tick)
                             }
                             .buttonStyle(.plain)
+                            // Swipe to end an agent — there's no terminal ctrl-c on a phone,
+                            // so without this idle agents accrue on the roster (matrix #18).
+                            // Non-destructive: the transcript survives and stays resumable.
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    Task { await endAgent(agent.id) }
+                                } label: {
+                                    Label("End", systemImage: "xmark.circle")
+                                }
+                            }
                         }
                     } header: {
                         // The noun is the label ("Agents" / "2 agents"); the status mix
@@ -145,6 +155,14 @@ struct CockpitView: View {
 
     private func loadPast() async {
         if let s = try? await client.workspaceSessions(slug: project.slug) { past = s }
+    }
+
+    /// End a live agent (swipe): drop it from the roster immediately, then tell the server.
+    /// The transcript stays on disk and re-adoptable from the Conversations section.
+    private func endAgent(_ id: String) async {
+        store?.removeLocally(id: id)
+        try? await client.endSession(id: id)
+        await loadPast()   // it may reappear as a resumable past conversation
     }
 
     // MARK: - Empty state
@@ -239,29 +257,17 @@ private struct AgentRow: View {
     }
 
     /// The status as a short label for the pill: "Working" / "Needs input" / "Error" / "Idle".
-    private var statusLabel: String {
-        switch agent.status {
-        case "working", "running", "starting": return "Working"
-        case "waiting", "waiting_for_input", "blocked": return "Needs input"
-        case "error", "failed": return "Error"
-        default: return "Idle"
-        }
-    }
+    /// One canonical mapping (`AgentRunState`, §1) shared with Drive and the roster sort.
+    private var statusLabel: String { AgentRunState.from(agent.status).pill }
 
-    private var statusColor: Color {
-        switch agent.status {
-        case "working", "running", "starting": return .green
-        case "waiting", "waiting_for_input", "blocked": return .orange
-        case "error", "failed": return .red
-        default: return .secondary
-        }
-    }
+    private var statusColor: Color { AgentRunState.from(agent.status).color }
 
     /// Elapsed on the current turn — only while actively working (idle agents have no
     /// running turn to time). `promptStartedAt` is ms-epoch.
     private var elapsed: String? {
+        let state = AgentRunState.from(agent.status)
         guard let start = agent.promptStartedAt,
-              ["working", "running", "starting"].contains(agent.status ?? "") else { return nil }
+              state == .working || state == .starting else { return nil }
         let secs = max(0, Int(now.timeIntervalSince1970 - start / 1000))
         if secs < 60 { return "\(secs)s" }
         if secs < 3600 { return "\(secs / 60)m" }

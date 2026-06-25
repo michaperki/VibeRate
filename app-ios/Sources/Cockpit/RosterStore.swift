@@ -33,26 +33,43 @@ final class RosterStore {
         let id: String?
     }
 
-    /// Open the live stream. Safe to call repeatedly — it tears down any prior stream.
+    /// Open the live stream. Safe to call repeatedly — it tears down any prior stream. The
+    /// stream auto-reconnects with backoff (matrix #8): a backgrounded/idle/deploy-dropped
+    /// socket self-heals instead of demanding a pull-to-refresh.
     func start() {
         stop()
         let encoded = project.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? project
-        let sse = SSEClient(url: APIConfig.url("/api/agent/roster/stream?project=\(encoded)"), token: token)
         task = Task { @MainActor in
-            do {
-                for try await event in sse.events() {
-                    guard let frame = try? JSONDecoder().decode(Frame.self, from: Data(event.data.utf8)) else { continue }
-                    apply(frame)
-                    connected = true
-                    error = nil
+            var attempt = 0
+            while !Task.isCancelled {
+                let sse = SSEClient(url: APIConfig.url("/api/agent/roster/stream?project=\(encoded)"), token: token)
+                do {
+                    for try await event in sse.events() {
+                        guard let frame = try? JSONDecoder().decode(Frame.self, from: Data(event.data.utf8)) else { continue }
+                        apply(frame)
+                        connected = true
+                        error = nil
+                        attempt = 0   // a live event clears the backoff
+                    }
+                    // Server closed the stream (idle/deploy) — fall through and reconnect.
+                } catch is CancellationError {
+                    return          // we left the view / re-opened — not an error
+                } catch {
+                    connected = false
+                    self.error = "Live roster reconnecting…"
                 }
-            } catch is CancellationError {
-                // We re-opened the stream (or left the view) — not an error to surface.
-            } catch {
-                connected = false
-                self.error = "Live roster disconnected — pull to refresh."
+                if Task.isCancelled { return }
+                let secs = min(8, 1 << min(attempt, 3))   // 1 → 2 → 4 → 8s
+                attempt += 1
+                try? await Task.sleep(nanoseconds: UInt64(secs) * 1_000_000_000)
             }
         }
+    }
+
+    /// Optimistically drop an agent the user just ended (swipe-to-end), so the row leaves
+    /// immediately; the stream's `removed` frame confirms it.
+    func removeLocally(id: String) {
+        agents.removeAll { $0.id == id }
     }
 
     func stop() {

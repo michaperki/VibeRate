@@ -22,14 +22,22 @@ struct DriveSessionView: View {
     var forceNew: Bool = false
 
     struct Bubble: Identifiable {
-        enum Role { case user, assistant, tool, thinking, error }
+        enum Role { case user, assistant, tool, thinking, error, system }
         let id = UUID()
         let role: Role
         var text: String
+        // Tool-call fields (role == .tool). One chip per call: the result is paired back
+        // into the *same* bubble by `toolUseId` instead of a second stacked bubble, so a
+        // tool-heavy turn reads as a list of steps, not a wall of cards (§3.1a / matrix #16b).
+        var toolUseId: String? = nil
+        var toolResult: String? = nil   // full result text, shown behind a tap
+        var toolError: Bool = false
+        var toolPending: Bool = true     // no result yet → show a spinner dot
     }
 
     @State private var bubbles: [Bubble] = []
     @State private var status = "Connecting…"
+    @State private var runState: AgentRunState = .idle   // canonical agent state (§1) — Source of truth for `busy`
     @State private var sessionId: String?
     @State private var streamTask: Task<Void, Never>?
     @State private var draft = ""
@@ -47,8 +55,22 @@ struct DriveSessionView: View {
     @State private var queuedPrompt: String?         // the prompt to re-send once the workspace is ready
     @State private var pendingAsk: AskRequest?       // the agent called the MCP ask picker; blocked on you
     @State private var askSubmitting = false         // answering the pending ask
+    // Mid-turn control (Phase A): the server 400s a send while a turn is in flight, so the
+    // queue is a *client* contract — hold follow-ups and drain one per turn on idle.
+    @State private var queue: [String] = []          // follow-ups typed while the agent is busy
+    @State private var flushing = false              // re-entrancy guard while a drain is in flight
+    @State private var stopArmed = false             // Stop is a two-tap armed control (thumb-width from Send)
+    @State private var stopDisarmTask: Task<Void, Never>?
+    @State private var expandedTools: Set<UUID> = [] // tool chips the user tapped open
+    @State private var pinnedToBottom = true         // auto-scroll only when the user is at the bottom (§3.1b)
+    @State private var showJump = false              // "↑ new activity" pill when unpinned and content arrives
     @FocusState private var composerFocused: Bool    // bring up the keyboard after a starter chip pre-fills
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// The one "is a turn in flight" predicate, mirroring the web `driveBusy()`. Everything
+    /// mid-turn (queue vs send, Stop visibility, working row) keys off this.
+    private var busy: Bool { runState.busy }
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -84,7 +106,13 @@ struct DriveSessionView: View {
             }
         }
         .task { await connect() }
-        .onDisappear { streamTask?.cancel() }
+        .onDisappear { streamTask?.cancel(); stopDisarmTask?.cancel() }
+        // A backgrounded URLSession SSE socket freezes (matrix #7): on return to the
+        // foreground, tear down and reopen from the high-water seq so we don't sit on a
+        // dead stream until re-entry. No-op if we never opened one.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, let id = sessionId, ready { openStream(id, after: lastSeq) }
+        }
         .sheet(isPresented: $showSetup) {
             WorkspaceSetupView(project: project, token: token) {
                 // Workspace cloned + ready — re-send the prompt that 409'd, which now
@@ -114,22 +142,57 @@ struct DriveSessionView: View {
                     }
                     if let ask = pendingAsk { askCard(ask) }
                     if showWorkingRow { workingRow }
+                    // Bottom sentinel doubles as the scroll-pin probe: in a LazyVStack it
+                    // only renders while it's in (or near) the viewport, so its appear/
+                    // disappear tells us whether the user is parked at the bottom (§3.1b).
                     Color.clear.frame(height: 1).id("bottom")
+                        .onAppear { pinnedToBottom = true; showJump = false }
+                        .onDisappear { pinnedToBottom = false }
                 }
                 .padding()
             }
-            .onChange(of: bubbles.count) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            // Auto-scroll ONLY when the user is pinned to the bottom; otherwise hold their
+            // position and surface a jump pill. This is the matrix #16a fix — a tool card no
+            // longer yanks you back down while you're reading history.
+            .onChange(of: bubbles.count) { _, _ in autoScroll(proxy) }
+            .onChange(of: bubbles.last?.text) { _, _ in autoScroll(proxy, animated: false) }
+            .onChange(of: showWorkingRow) { _, on in if on { autoScroll(proxy) } }
+            .onChange(of: pendingAsk?.id) { _, id in if id != nil { jump(proxy) } }
+            .overlay(alignment: .bottom) {
+                if showJump {
+                    Button { jump(proxy) } label: {
+                        Label("New activity", systemImage: "arrow.down")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(.thinMaterial, in: Capsule())
+                            .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.3)))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
-            .onChange(of: bubbles.last?.text) { _, _ in
-                proxy.scrollTo("bottom", anchor: .bottom)
-            }
-            .onChange(of: showWorkingRow) { _, on in
-                if on { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            }
-            .onChange(of: pendingAsk?.id) { _, id in
-                if id != nil { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            }
+        }
+    }
+
+    /// Scroll to the foot only when the user is already there; otherwise raise the jump pill
+    /// so new activity is announced without stealing their scroll position.
+    private func autoScroll(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        if pinnedToBottom {
+            if animated { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            else { proxy.scrollTo("bottom", anchor: .bottom) }
+        } else {
+            withAnimation { showJump = true }
+        }
+    }
+
+    /// Explicit jump to the foot (the pill / an ask landing) — always snaps and re-pins.
+    private func jump(_ proxy: ScrollViewProxy) {
+        withAnimation {
+            proxy.scrollTo("bottom", anchor: .bottom)
+            showJump = false
+            pinnedToBottom = true
         }
     }
 
@@ -226,10 +289,27 @@ struct DriveSessionView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .textSelection(.enabled)
         case .assistant:
-            MarkdownView(text: b.text)
-                .textSelection(.enabled)
+            // P-1: while THIS bubble is the live streaming one, render plain Text. Parsing
+            // Markdown inline in `body` re-parses the whole accumulated reply on every token
+            // (O(n²) as it grows — the "streaming gets janky" cost). Swap to formatted
+            // Markdown once, when the block settles (assistantOpen flips false).
+            if assistantOpen && b.id == bubbles.last?.id {
+                Text(b.text)
+                    .font(.subheadline)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                MarkdownView(text: b.text)
+                    .textSelection(.enabled)
+            }
         case .tool:
-            toolChip(b.text)
+            toolChip(b)
+        case .system:
+            // A neutral system line (turn stopped / ended) — centered, quiet, not an error.
+            Text(b.text)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
         case .thinking:
             // Claude's live extended thinking — the same line-by-line reasoning the
             // terminal shows, streamed as it happens. Rendered dimmed/italic to read as
@@ -251,27 +331,54 @@ struct DriveSessionView: View {
         }
     }
 
-    /// A tool call ("→ Read PLAN.md") or its result ("⤷ …output…") rendered as a compact
-    /// chip — visible but quiet, so a tool-heavy turn reads as a list of steps rather than
-    /// a wall of mono text that crowds out the agent's actual replies.
+    /// One tool call as a single compact chip ("Read app.js") with a status dot and the
+    /// full output folded behind a tap — the `tool_result` is paired into this same bubble
+    /// by `toolUseId` (see `ingest`), so a tool-heavy turn reads as a tidy list of steps
+    /// instead of two stacked cards per call burying the agent's reasoning (§3.1a).
     @ViewBuilder
-    private func toolChip(_ text: String) -> some View {
-        let isResult = text.hasPrefix("⤷")
-        let body = text.hasPrefix("→ ") ? String(text.dropFirst(2))
-                 : text.hasPrefix("⤷ ") ? String(text.dropFirst(2))
-                 : text
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: isResult ? "arrow.turn.down.right" : "wrench.and.screwdriver")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(body)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(isResult ? 3 : 2)
+    private func toolChip(_ b: Bubble) -> some View {
+        let expanded = expandedTools.contains(b.id)
+        let hasResult = !(b.toolResult ?? "").isEmpty
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(b.text)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Spacer(minLength: 6)
+                // Status dot: pending (spinner), ok (green), or error (red).
+                if b.toolPending {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Circle().fill(b.toolError ? Color.red : Color.green).frame(width: 6, height: 6)
+                }
+                if hasResult {
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if expanded, let r = b.toolResult, !r.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(r)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(.top, 2)
+                }
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard hasResult else { return }
+            if expanded { expandedTools.remove(b.id) } else { expandedTools.insert(b.id) }
+        }
     }
 
     /// Show a "Working…" row whenever the agent is busy but nothing is actively
@@ -279,8 +386,8 @@ struct DriveSessionView: View {
     /// event, and the pauses between tool calls. Hidden while assistant text or a
     /// thinking trace is growing (that text is its own progress signal).
     private var showWorkingRow: Bool {
-        (awaitingResponse || status == "Working…" || status == "Thinking…")
-            && !assistantOpen && !thinkingOpen
+        (awaitingResponse || runState == .working || runState == .starting || status == "Thinking…")
+            && !assistantOpen && !thinkingOpen && pendingAsk == nil
     }
 
     /// The inline picker for a pending `ask` — the in-app twin of the push selector. The
@@ -330,41 +437,111 @@ struct DriveSessionView: View {
     // MARK: - Composer
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            // Custom soft field (not .roundedBorder) so we control the placeholder contrast
-            // and the internal padding — the bordered field felt cramped and its placeholder
-            // read too dim. An explicit `.secondary` placeholder is a touch clearer.
-            ZStack(alignment: .topLeading) {
-                if draft.isEmpty {
-                    Text("Message the agent…")
+        VStack(spacing: 8) {
+            if !queue.isEmpty { queuedChips }
+            HStack(alignment: .bottom, spacing: 10) {
+                // Stop sits a thumb-width from Send and killing an in-flight turn is
+                // destructive, so it only appears while a turn runs and is two-tap armed.
+                if busy { stopButton }
+                // Custom soft field (not .roundedBorder) so we control the placeholder contrast
+                // and the internal padding. Stays enabled while the agent works so you can
+                // type-ahead — the message queues (busy-aware composer).
+                ZStack(alignment: .topLeading) {
+                    if draft.isEmpty {
+                        Text(busy ? "Queue a follow-up…" : "Message the agent…")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 9)
+                            .padding(.horizontal, 13)
+                            .allowsHitTesting(false)
+                    }
+                    TextField("", text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .lineLimit(1...5)
+                        .focused($composerFocused)
+                        .disabled(!ready)
                         .padding(.vertical, 9)
                         .padding(.horizontal, 13)
-                        .allowsHitTesting(false)
                 }
-                TextField("", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.body)
-                    .lineLimit(1...5)
-                    .focused($composerFocused)
-                    .disabled(sending || !ready)
-                    .padding(.vertical, 9)
-                    .padding(.horizontal, 13)
+                .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 18))
+                sendButton
             }
-            .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 18))
-            Button {
-                Task { @MainActor in await send() }
-            } label: {
-                Image(systemName: sending ? "ellipsis.circle" : "arrow.up.circle.fill")
-                    .font(.title2)
-            }
-            .padding(.bottom, 3)
-            .disabled(sending || !ready || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// Relabels to "Queue" while the agent is busy so the button tells you what a tap does:
+    /// land now (idle) vs. wait for the current turn to finish (busy) — matrix #4.
+    @ViewBuilder
+    private var sendButton: some View {
+        let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if busy {
+            Button { Task { @MainActor in await send() } } label: {
+                Text("Queue")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color.accentColor.opacity(empty ? 0.10 : 0.20), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .disabled(!ready || empty)
+        } else {
+            Button { Task { @MainActor in await send() } } label: {
+                Image(systemName: sending ? "ellipsis.circle" : "arrow.up.circle.fill")
+                    .font(.title2)
+            }
+            .padding(.bottom, 3)
+            .disabled(sending || !ready || empty)
+        }
+    }
+
+    /// Two-tap armed Stop: first tap arms (red "Tap to confirm", auto-disarms after ~4s);
+    /// a confirming second tap kills the turn. Ported from the web `#dv-stop` pattern.
+    @ViewBuilder
+    private var stopButton: some View {
+        Button { stopTapped() } label: {
+            if stopArmed {
+                Text("Tap to confirm")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Color.red.opacity(0.18), in: Capsule())
+                    .foregroundStyle(.red)
+            } else {
+                Image(systemName: "stop.circle")
+                    .font(.title2)
+                    .foregroundStyle(.red)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 3)
+    }
+
+    /// The pending follow-up chips above the composer — each cancelable before it's
+    /// delivered, mirroring the web `renderDriveQueue`.
+    private var queuedChips: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Queued · sends when the turn finishes")
+                .font(.caption2).foregroundStyle(.secondary)
+            ForEach(Array(queue.enumerated()), id: \.offset) { item in
+                HStack(spacing: 8) {
+                    Image(systemName: "clock").font(.caption2).foregroundStyle(.tertiary)
+                    Text(item.element).font(.caption).lineLimit(2)
+                    Spacer(minLength: 6)
+                    Button {
+                        if queue.indices.contains(item.offset) { queue.remove(at: item.offset) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Networking
@@ -376,13 +553,14 @@ struct DriveSessionView: View {
             //    otherwise drop us back into the agent already running here).
             if forceNew {
                 status = "New agent — send a message to start one."
+                runState = .idle
                 ready = true
                 return
             }
             // 1. The cockpit handed us a specific agent — attach straight to it.
             if let id = attachTo {
                 sessionId = id
-                status = humanStatus(initialStatus)
+                applyStatus(initialStatus)
                 openStream(id)
                 ready = true
                 // Best-effort: learn this session's durable id so we can adopt it later
@@ -395,10 +573,11 @@ struct DriveSessionView: View {
             //     the deliberate-resume path, distinct from the step-3 best-effort adopt.
             if let cid = resumeCid {
                 status = "Resuming agent…"
+                runState = .idle
                 let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
                 sessionId = adopted.id
                 store(cid)
-                status = humanStatus(adopted.status)
+                applyStatus(adopted.status)
                 openStream(adopted.id)
                 ready = true
                 return
@@ -410,7 +589,7 @@ struct DriveSessionView: View {
             if let s = mine.first(where: { isLive($0.status) }) ?? mine.first {
                 sessionId = s.id
                 if let cid = s.claudeSessionId { store(cid) }
-                status = humanStatus(s.status)
+                applyStatus(s.status)
                 openStream(s.id)
                 ready = true
                 return
@@ -419,16 +598,19 @@ struct DriveSessionView: View {
             //    redeploy that push-to-main triggers; transcript is still on disk).
             if let cid = stored() {
                 status = "Resuming agent…"
+                runState = .idle
                 let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
                 sessionId = adopted.id
-                status = humanStatus(adopted.status)
+                applyStatus(adopted.status)
                 openStream(adopted.id)
                 ready = true
                 return
             }
             status = "No agent running yet — send a message to start one."
+            runState = .idle
         } catch {
             status = friendly(error)
+            runState = .idle
         }
         ready = true
     }
@@ -527,6 +709,14 @@ struct DriveSessionView: View {
     private func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // Busy → the server 400s a mid-turn send (the queue is a *client* contract). Hold
+        // the message and drain it the moment the turn settles (flushQueue). Don't echo it
+        // into the transcript yet; it sits in the queued chips above the composer.
+        if busy {
+            queue.append(text)
+            draft = ""
+            return
+        }
         draft = ""
         sending = true
         defer { sending = false }
@@ -544,9 +734,10 @@ struct DriveSessionView: View {
                 let session = try await client.startSession(projectSlug: project.slug, prompt: text)
                 sessionId = session.id
                 if let cid = session.claudeSessionId { store(cid) }
-                status = humanStatus(session.status)
+                applyStatus(session.status)
                 openStream(session.id)
             }
+            runState = .working       // optimistic: a turn is now in flight (gates the queue)
             awaitingResponse = true   // sent; show "Working…" until the stream moves
         } catch {
             // Roll back the optimistic bubble — the send didn't take.
@@ -556,11 +747,68 @@ struct DriveSessionView: View {
             if isWorkspaceNotSetup(error) {
                 queuedPrompt = text
                 status = "This project needs a workspace before an agent can run."
+                runState = .idle
                 showSetup = true
                 return
             }
             bubbles.append(Bubble(role: .error, text: friendly(error)))
         }
+    }
+
+    /// Drain ONE queued follow-up once the turn settles to idle. Each delivery starts a new
+    /// turn (→ busy), so the next idle drains the next, in order — the queue empties one
+    /// message per turn. A re-entrancy guard plus the `busy` re-check stop a double-send if
+    /// `turn_end` and a `status:idle` both fire. Re-queues on failure. (web `driveFlushQueue`.)
+    private func flushQueue() async {
+        guard !flushing, !busy, !queue.isEmpty, let id = sessionId else { return }
+        flushing = true
+        defer { flushing = false }
+        let prompt = queue.removeFirst()
+        bubbles.append(Bubble(role: .user, text: prompt))
+        assistantOpen = false
+        pendingEcho = prompt
+        do {
+            try await client.sendMessage(sessionId: id, prompt: prompt)
+            runState = .working
+            awaitingResponse = true
+        } catch {
+            rollbackOptimistic(prompt)
+            queue.insert(prompt, at: 0)   // delivery failed → keep it queued, retry next idle
+            bubbles.append(Bubble(role: .error, text: friendly(error)))
+        }
+    }
+
+    /// Two-tap armed Stop. First tap arms (auto-disarms after ~4s so a forgotten arm can't
+    /// linger); a confirming second tap SIGTERMs the turn via `/stop`. The session survives.
+    private func stopTapped() {
+        guard busy, let id = sessionId else { return }
+        if !stopArmed {
+            stopArmed = true
+            stopDisarmTask?.cancel()
+            stopDisarmTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                if !Task.isCancelled { stopArmed = false }
+            }
+            return
+        }
+        disarmStop()
+        Task { @MainActor in
+            do { _ = try await client.stop(sessionId: id) }
+            catch { bubbles.append(Bubble(role: .error, text: friendly(error))) }
+        }
+    }
+
+    private func disarmStop() {
+        stopDisarmTask?.cancel()
+        stopDisarmTask = nil
+        stopArmed = false
+    }
+
+    /// Set the header string and the canonical run state together from a raw server status,
+    /// so `busy` and the displayed status never drift (§1).
+    private func applyStatus(_ raw: String?) {
+        status = humanStatus(raw)
+        runState = .from(raw)
     }
 
     /// Remove the optimistic user bubble when a send fails before it took.
@@ -617,34 +865,39 @@ struct DriveSessionView: View {
                 assistantOpen = false
             }
         case "tool_use":
+            // One chip per call; the result folds into THIS bubble (paired by id below),
+            // so a tool-heavy turn reads as a list of steps, not stacked cards (§3.1a).
             if let n = obj["name"] as? String {
                 let input = obj["input"] as? [String: Any]
-                let file = (input?["file_path"] as? String) ?? (input?["path"] as? String)
-                let suffix = file.map { " " + ($0 as NSString).lastPathComponent } ?? ""
-                bubbles.append(Bubble(role: .tool, text: "→ \(n)\(suffix)"))
+                bubbles.append(Bubble(role: .tool, text: toolLabel(n, input),
+                                      toolUseId: obj["id"] as? String))
                 assistantOpen = false
             }
         case "tool_result":
-            // Show a short slice of tool output so a tool-heavy turn visibly progresses
-            // instead of looking frozen between assistant replies.
-            if let t = obj["text"] as? String {
-                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    bubbles.append(Bubble(role: .tool, text: "⤷ " + String(trimmed.prefix(240))))
-                    assistantOpen = false
-                }
-            }
+            // Fold the output back into its pending tool chip (matched by toolUseId), keeping
+            // the full text behind a tap — no second bubble.
+            let raw = (obj["text"] as? String) ?? ""
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            attachToolResult(toolUseId: obj["toolUseId"] as? String,
+                             text: trimmed, isError: (obj["isError"] as? Bool) ?? false)
+            assistantOpen = false
         case "block_stop":
             assistantOpen = false
         case "turn_end", "result", "stopped":
             // Turn over — drop the ephemeral thinking trace, leaving a clean transcript
             // of prompts, replies, and tool activity (matches the web Drive view).
+            let kind = obj["kind"] as? String
             assistantOpen = false
             awaitingResponse = false
+            if kind == "stopped" { bubbles.append(Bubble(role: .system, text: "Turn stopped")) }
+            markPendingToolsDone()       // any chip still pending resolves quietly (no result coming)
+            runState = .idle
             // No status event may follow a turn end; clear a lingering "Working…" so the
             // spinner row doesn't stick when the agent has actually gone idle.
-            if status == "Working…" || status == "Thinking…" { status = "Idle" }
+            if ["Working…", "Thinking…", "Starting…"].contains(status) { status = "Idle" }
+            disarmStop()
             clearThinking()
+            Task { @MainActor in await flushQueue() }   // drain the next queued follow-up
         case "ask":
             // The agent called the MCP ask picker — render the inline selector. Decode the
             // full event (questions) from the raw frame; `sessionId` is our live session,
@@ -652,6 +905,7 @@ struct DriveSessionView: View {
             if let ev = try? JSONDecoder().decode(AskEvent.self, from: Data(data.utf8)), let sid = sessionId {
                 pendingAsk = AskRequest(askId: ev.askId, sessionId: sid, projectSlug: project.slug, questions: ev.questions)
                 status = "Waiting for you"
+                runState = .waiting        // still an in-flight turn — keeps follow-ups queued
                 awaitingResponse = false
                 clearThinking()
             }
@@ -661,8 +915,9 @@ struct DriveSessionView: View {
             else if obj["askId"] == nil { pendingAsk = nil }
         case "status":
             if let s = obj["status"] as? String {
-                status = humanStatus(s)
+                applyStatus(s)
                 awaitingResponse = false   // a real status now drives the working row
+                if !busy { disarmStop(); Task { @MainActor in await flushQueue() } }
             }
         case "error":
             awaitingResponse = false
@@ -699,6 +954,49 @@ struct DriveSessionView: View {
     private func clearThinking() {
         bubbles.removeAll { $0.role == .thinking }
         thinkingOpen = false
+    }
+
+    /// A compact one-line label for a tool call ("Read app.js", "Bash: npm install"). The
+    /// full input/output is reachable behind the chip's tap, so this stays terse.
+    private func toolLabel(_ name: String, _ input: [String: Any]?) -> String {
+        if let f = (input?["file_path"] as? String) ?? (input?["path"] as? String) {
+            return "\(name) \((f as NSString).lastPathComponent)"
+        }
+        if let cmd = input?["command"] as? String { return "\(name): \(String(cmd.prefix(48)))" }
+        if let pat = input?["pattern"] as? String { return "\(name) \(String(pat.prefix(48)))" }
+        return name
+    }
+
+    /// Pair a `tool_result` into its pending tool chip: by `toolUseId` when present, else the
+    /// most recent pending chip (older buffers replay results without ids). Folds the output
+    /// into the same bubble instead of stacking a second card. An unmatched result with
+    /// content shows as a standalone chip.
+    private func attachToolResult(toolUseId: String?, text: String, isError: Bool) {
+        var idx: Int? = nil
+        if let tid = toolUseId {
+            idx = bubbles.lastIndex { $0.role == .tool && $0.toolPending && $0.toolUseId == tid }
+        }
+        if idx == nil {
+            idx = bubbles.lastIndex { $0.role == .tool && $0.toolPending }
+        }
+        if let i = idx {
+            bubbles[i].toolResult = text
+            bubbles[i].toolError = isError
+            bubbles[i].toolPending = false
+        } else if !text.isEmpty || isError {
+            var b = Bubble(role: .tool, text: isError ? "tool error" : "tool result")
+            b.toolResult = text
+            b.toolError = isError
+            b.toolPending = false
+            bubbles.append(b)
+        }
+    }
+
+    /// At a turn boundary, settle any chip still showing a spinner — no result is coming.
+    private func markPendingToolsDone() {
+        for i in bubbles.indices where bubbles[i].role == .tool && bubbles[i].toolPending {
+            bubbles[i].toolPending = false
+        }
     }
 
     /// Turn raw session/status strings into something a first-time user understands —
