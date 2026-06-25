@@ -37,6 +37,13 @@ all of it). New file `app-ios/Sources/Core/AgentRunState.swift`; edits to
 - **P-1 Markdown perf** — the live streaming assistant bubble renders as plain `Text` and
   swaps to parsed Markdown once at `block_stop` (kills the O(n²) re-parse-per-token). P-2's
   smoothness half is partly covered by the pin-gated scroll.
+- **P-2 smoothness (shipped 2026-06-25)** — (a) **throttled tail-scroll**: streamed deltas
+  coalesce to ~one `scrollTo` per 50ms instead of one per token (`autoScrollThrottled`),
+  killing the ScrollView thrash as a reply grows; (b) **native transcript text selection**:
+  message bodies render through a `UITextView`-backed `SelectableText` shim, so long-press
+  gives real iOS partial-copy — blue highlight, drag-handles, range adjust, copy just the
+  span — which SwiftUI `Text(…).textSelection(.enabled)` cannot (it selects the whole element
+  and offers Copy-only).
 - **Foreground resync (matrix #7, P1)** — `onChange(of: scenePhase)` reopens the stream
   from `lastSeq` on `.active`, healing a frozen backgrounded socket.
 - **Roster auto-reconnect (matrix #8, P1)** — `RosterStore.start()` now loops with 1→8s
@@ -274,17 +281,43 @@ reply grows" cost.**
   web app already coalesces md renders to one per frame via `requestAnimationFrame`
   (`driveScheduleMd` `app.js:5224`) — same idea.
 
-### P-2 (medium): scroll-to-bottom + full-array diff on every token
-`onChange(of: bubbles.last?.text)` (`DriveSessionView.swift:124`) fires
-`proxy.scrollTo("bottom")` on every delta, and rewriting `bubbles[last]` re-diffs the
-whole `ForEach`. The `LazyVStack` saves off-screen rows, but the visible bubble churns.
-- **Fix:** throttle the auto-scroll to ~30–60ms (or scroll only on `bubbles.count`
-  change + a coalesced tail tick), and/or hold the streaming tail in a separate
-  `@State String` rendered as one view *outside* the array, committing to `bubbles` only
-  at `block_stop`. Removes per-token array diffing. **Note:** the *correctness* half of
-  this — only scrolling when the user is pinned to the bottom — is the §3.1b / matrix #16a
-  P0 fix; this P-2 item is the *smoothness* half (throttle + tail-outside-array). Do them
-  together.
+### P-2 (medium): scroll-to-bottom + full-array diff on every token — ✅ throttle SHIPPED
+`onChange(of: bubbles.last?.text)` fired `proxy.scrollTo("bottom")` on every delta, and
+rewriting `bubbles[last]` re-diffs the whole `ForEach`. The `LazyVStack` saves off-screen
+rows, but the visible bubble churns.
+- **Throttle ✅ (2026-06-25)** — the tail-scroll is coalesced to ~one `scrollTo` per 50ms
+  via `autoScrollThrottled` (a one-shot `scrollScheduled` gate + a 50ms `Task.sleep`), so a
+  long streamed reply no longer thrashes the ScrollView. The pin-gating (only scroll when
+  parked at the bottom) is the §3.1b / matrix #16a correctness half, already shipped; this is
+  its smoothness twin.
+- **Tail-outside-array — deferred (measure first).** Holding the streaming tail in a separate
+  `@State String` rendered *outside* the `ForEach` (committing to `bubbles` only at
+  `block_stop`) would remove the per-token array re-diff entirely. With P-1 already rendering
+  the live bubble as plain `Text`, the remaining per-row cost is small — defer until on-device
+  profiling shows it's worth the refactor.
+
+### P-2b (UX): native transcript text selection — ✅ SHIPPED 2026-06-25
+SwiftUI `Text(…).textSelection(.enabled)` on iOS selects the *whole* `Text` element and
+offers a Copy/Share menu only — **no** draggable grab-handles to pick a sub-range — and
+`MarkdownView` is a `VStack` of separate `Text` blocks, so even per-element selection can't
+span paragraphs. Audit found **no** competing gesture in the chat (no `.contextMenu`, no
+long-press; the only handler is the tool chip's `.onTapGesture`; the brain `contextMenu(preview:)`
+peek lives in `BrainView`/`DocView`, not here) — the limitation is SwiftUI `Text` itself.
+- **Fix ✅** — message bodies render through `SelectableText`, a non-scrolling
+  `UITextView` (`isSelectable`, `isScrollEnabled = false`) wrapped as a `UIViewRepresentable`
+  with a `sizeThatFits` self-sizer. Long-press now gives real iOS partial-copy: blue
+  highlight, handles, range adjust, copy exactly the span. The text view owns no pan
+  recognizer, so the enclosing `ScrollView` keeps vertical panning — a drag scrolls, a
+  long-press selects; no gesture fight with peek/copy/brain. `MarkdownNS` flattens parsed
+  blocks to one `NSAttributedString` so a whole prose reply selects **contiguously** across
+  paragraphs/lists (resolving `inlinePresentationIntent` to UIKit font traits, which
+  `NSAttributedString` — unlike SwiftUI `Text` — doesn't render on its own).
+- **Streaming stays plain `Text`** (P-1) until the block settles, so a live selection is
+  never yanked out from under the user and the per-token UITextView churn is avoided.
+- **Known limit:** a message that contains a **code fence or table** takes `MarkdownView`'s
+  per-block SwiftUI path (to keep the mobile table cards + code background chrome), so those
+  blocks select per-element, not contiguously. The common prose/list reply selects whole.
+  Upgrading code/table messages to contiguous selection is a follow-up.
 
 ### P-3 (low): main-actor JSON decode + 1s roster re-render
 `ingest` (`:587`) does `JSONSerialization` per event on `@MainActor`; fine for small
@@ -344,9 +377,10 @@ a bad turn, and actually read the transcript while it runs. This is the line bet
    chips into a "🔧 N steps" group. Stops a tool-heavy turn from burying the reasoning.
    (P0/P1 — pair with the Phase-A scroll-pin; together they fix §3.1.)
 
-### Phase C — performance pass — **P1 (do alongside A/B)** ◑ P-1 SHIPPED; P-2 partial; P-3/P-4 deferred
-9. **P-1 Markdown memoization / stream-as-plain-then-parse.**
-10. **P-2 throttled auto-scroll + tail-outside-array.**
+### Phase C — performance pass — **P1 (do alongside A/B)** ◑ P-1 ✅; P-2 ✅ (tail-outside-array deferred); P-3/P-4 deferred
+9. **P-1 Markdown memoization / stream-as-plain-then-parse.** ✅
+10. **P-2 throttled auto-scroll** ✅ + **native transcript text selection** ✅ (P-2b);
+    tail-outside-array deferred (measure first).
 11. **P-3/P-4** only if device testing shows them.
 
 ### Phase D — mobile QoL polish — **P2**

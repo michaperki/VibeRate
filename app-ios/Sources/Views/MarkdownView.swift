@@ -15,6 +15,22 @@ struct MarkdownView: View {
 
     var body: some View {
         let blocks = MarkdownParser.parse(text)
+        if MarkdownNS.hasBlockChrome(blocks) {
+            // Rich path: a code fence or table needs SwiftUI chrome (the mobile table
+            // key/value cards, the code background) that a flat attributed string can't
+            // carry — keep the per-block render. Its `Text`s stay SwiftUI-selectable.
+            richBody(blocks)
+        } else {
+            // Common path: one selectable `UITextView` for the whole reply, so a long-press
+            // selection drags *contiguously* across paragraphs and lists and copies exactly
+            // the chosen span — real iOS partial-copy, which SwiftUI `Text` selection can't
+            // do (it selects the whole element, Copy-only). See `SelectableText`.
+            SelectableText(attributed: MarkdownNS.whole(blocks))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func richBody(_ blocks: [MDBlock]) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { item in
                 blockView(item.element)

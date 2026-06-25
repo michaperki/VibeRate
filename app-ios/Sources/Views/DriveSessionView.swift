@@ -64,6 +64,7 @@ struct DriveSessionView: View {
     @State private var expandedTools: Set<UUID> = [] // tool chips the user tapped open
     @State private var pinnedToBottom = true         // auto-scroll only when the user is at the bottom (§3.1b)
     @State private var showJump = false              // "↑ new activity" pill when unpinned and content arrives
+    @State private var scrollScheduled = false       // a throttled tail-scroll is already queued this frame
     @FocusState private var composerFocused: Bool    // bring up the keyboard after a starter chip pre-fills
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -178,7 +179,9 @@ struct DriveSessionView: View {
             // position and surface a jump pill. This is the matrix #16a fix — a tool card no
             // longer yanks you back down while you're reading history.
             .onChange(of: bubbles.count) { _, _ in autoScroll(proxy) }
-            .onChange(of: bubbles.last?.text) { _, _ in autoScroll(proxy, animated: false) }
+            // Streamed text grows one delta at a time — scrolling on *every* token thrashes
+            // the ScrollView (the P-2 smoothness cost). Coalesce to ~one scroll per frame.
+            .onChange(of: bubbles.last?.text) { _, _ in autoScrollThrottled(proxy) }
             .onChange(of: showWorkingRow) { _, on in if on { autoScroll(proxy) } }
             .onChange(of: pendingAsk?.id) { _, id in if id != nil { jump(proxy) } }
             .overlay(alignment: .bottom) {
@@ -207,6 +210,25 @@ struct DriveSessionView: View {
             else { proxy.scrollTo("bottom", anchor: .bottom) }
         } else {
             withAnimation { showJump = true }
+        }
+    }
+
+    /// Throttled tail-follow for the streaming hot path: at most one scroll per ~50ms instead
+    /// of one per token. When the user has scrolled away we don't move them — just raise the
+    /// jump pill (cheap + idempotent, so it's fine to hit on every delta). This is the P-2
+    /// smoothness half; the pin-gating (only scroll when parked at the bottom) is the §3.1b
+    /// correctness half, already shipped.
+    private func autoScrollThrottled(_ proxy: ScrollViewProxy) {
+        guard pinnedToBottom else {
+            if !showJump { withAnimation { showJump = true } }
+            return
+        }
+        guard !scrollScheduled else { return }
+        scrollScheduled = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            scrollScheduled = false
+            if pinnedToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
 
@@ -306,11 +328,14 @@ struct DriveSessionView: View {
     private func bubbleView(_ b: Bubble) -> some View {
         switch b.role {
         case .user:
-            Text(b.text)
+            // Native partial-copy (long-press → blue handles → adjust range → copy the span)
+            // via the UITextView-backed shim, not SwiftUI `Text` selection (whole-element,
+            // Copy-only). Prompts show verbatim, so render them plain.
+            SelectableText(attributed: MarkdownNS.plain(
+                b.text, font: .preferredFont(forTextStyle: .body), color: .label))
                 .padding(10)
                 .background(Color.accentColor.opacity(0.18))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
-                .textSelection(.enabled)
         case .assistant:
             // P-1: while THIS bubble is the live streaming one, render plain Text. Parsing
             // Markdown inline in `body` re-parses the whole accumulated reply on every token
