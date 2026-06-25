@@ -16,6 +16,9 @@ struct CockpitView: View {
     @State private var store: RosterStore?
     @State private var past: [WorkspaceSession] = []
     @State private var tick = Date()
+    /// False until the first roster paint completes, so the loading state actually shows
+    /// (the store is created synchronously, so without this it'd flash straight to "empty").
+    @State private var didLoad = false
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
@@ -33,48 +36,35 @@ struct CockpitView: View {
 
     var body: some View {
         List {
-            if let store {
-                if let err = store.error {
-                    Text(err).font(.footnote).foregroundStyle(.red)
+            if let store, didLoad {
+                // A transient stream drop *while we already have rows* is a thin inline
+                // banner, not the full error state — the roster stays readable underneath.
+                if let err = store.error, !store.agents.isEmpty {
+                    Text(err)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .listRowInsets(rowInsets)
+                        .listRowSeparator(.hidden)
                 }
-                if store.agents.isEmpty {
-                    emptyState
+
+                if store.agents.isEmpty && offlineConversations.isEmpty {
+                    // Nothing to show: distinguish a load *failure* (offer retry) from a
+                    // genuinely empty project (offer to start the first agent).
+                    if store.error != nil { errorState(store.error!) } else { emptyState }
                 } else {
-                    Section {
-                        ForEach(store.agents) { agent in
-                            Button {
-                                router.path.append(DriveRoute(project: project, sessionId: agent.id, status: agent.status))
-                            } label: {
-                                AgentRow(agent: agent, now: tick)
-                            }
-                            .buttonStyle(.plain)
-                            // Swipe to end an agent — there's no terminal ctrl-c on a phone,
-                            // so without this idle agents accrue on the roster (matrix #18).
-                            // Non-destructive: the transcript survives and stays resumable.
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await endAgent(agent.id) }
-                                } label: {
-                                    Label("End", systemImage: "xmark.circle")
-                                }
-                            }
-                        }
-                    } header: {
-                        // The noun is the label ("Agents" / "2 agents"); the status mix
-                        // ("1 working · 1 idle") is detail in the footer, not the heading.
-                        Text(agentCountLabel(store.agents))
-                    } footer: {
-                        Text(agentsFooter(store.agents)).font(.caption2)
-                    }
+                    if store.agents.isEmpty { noAgentsRow } else { agentsSection(store) }
+                    conversationsSection
                 }
-                conversationsSection
             } else {
-                ProgressView().frame(maxWidth: .infinity)
+                loadingState
             }
         }
         // Plain rows on the page background (matching the Projects list) instead of one big
         // rounded "card inside page" — the grouped style read as a heavy floating container.
         .listStyle(.plain)
+        // A clear gap between the "Agents" (Now) and "Conversations" zones so they read as
+        // two sections, not one run of rows.
+        .listSectionSpacing(28)
         .navigationTitle(project.name ?? project.slug)
         .navigationBarTitleDisplayMode(.inline)
         .appBackButton { dismiss() }
@@ -103,11 +93,55 @@ struct CockpitView: View {
             let s = store ?? RosterStore(project: project.slug, token: token)
             store = s
             await s.refresh(client: client)   // instant paint from the list endpoint…
+            didLoad = true                    // first paint done — leave the loading state.
             s.start()                         // …then go live on the stream.
             await loadPast()                  // durable past conversations (survive redeploy)
         }
         .onDisappear { store?.stop() }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick = $0 }
+    }
+
+    // MARK: - Agents (the live "Now" roster)
+
+    /// Shared row insets so every row — agent, conversation, banner — lines up with the
+    /// screen margins, and crucially *stays* aligned when a row is swiped open (the default
+    /// insets shift the content under the revealed action). 16pt matches the nav title.
+    private var rowInsets: EdgeInsets { EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16) }
+
+    @ViewBuilder
+    private func agentsSection(_ store: RosterStore) -> some View {
+        Section {
+            ForEach(store.agents) { agent in
+                Button {
+                    router.path.append(DriveRoute(project: project, sessionId: agent.id, status: agent.status))
+                } label: {
+                    AgentRow(agent: agent, now: tick)
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(rowInsets)
+                // Swipe to end an agent — there's no terminal ctrl-c on a phone,
+                // so without this idle agents accrue on the roster (matrix #18).
+                // Non-destructive: the transcript survives and stays resumable.
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        Task { await endAgent(agent.id) }
+                    } label: {
+                        // Just the glyph — the destructive red already says "end", and a
+                        // bare ✕ reads as native (Mail/Messages) instead of a squeezed
+                        // "End" word. VoiceOver still gets the verb.
+                        Image(systemName: "xmark")
+                    }
+                    .tint(.red)
+                    .accessibilityLabel("End agent")
+                }
+            }
+        } header: {
+            // The noun is the label ("Agents" / "2 agents"); the status mix
+            // ("1 working · 1 idle") is detail in the footer, not the heading.
+            Text(agentCountLabel(store.agents))
+        } footer: {
+            Text(agentsFooter(store.agents)).font(.caption2)
+        }
     }
 
     // MARK: - Conversations (durable past sessions)
@@ -118,8 +152,14 @@ struct CockpitView: View {
     /// live roster), so the project never looks empty when it has history.
     @ViewBuilder
     private var conversationsSection: some View {
-        if !offlineConversations.isEmpty {
-            Section {
+        Section {
+            if offlineConversations.isEmpty {
+                Text("No past conversations yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .listRowInsets(rowInsets)
+                    .listRowSeparator(.hidden)
+            } else {
                 ForEach(offlineConversations) { s in
                     Button {
                         if let lid = s.liveId {
@@ -131,10 +171,13 @@ struct CockpitView: View {
                         ConversationRow(session: s, now: tick)
                     }
                     .buttonStyle(.plain)
+                    .listRowInsets(rowInsets)
                 }
-            } header: {
-                Text("Conversations")
-            } footer: {
+            }
+        } header: {
+            Text("Conversations")
+        } footer: {
+            if !offlineConversations.isEmpty {
                 Text("Tap to resume a past conversation, or + above to start a new agent.").font(.caption2)
             }
         }
@@ -152,30 +195,116 @@ struct CockpitView: View {
         await loadPast()   // it may reappear as a resumable past conversation
     }
 
-    // MARK: - Empty state
+    // MARK: - Whole-screen states (loading / empty / error)
 
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "wind")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("No agents running.")
-                .font(.headline)
-            Text("Start one to drive this project from your phone.")
+    /// Project still loading — before the first roster paint. Centered so it doesn't read
+    /// as a stray row.
+    private var loadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+            Text("Loading project…")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
+        .listRowSeparator(.hidden)
+    }
+
+    /// Both the live roster and the past list are empty *and there's no error* — a genuinely
+    /// empty project. Invite the first agent.
+    private var emptyState: some View {
+        stateCard(
+            icon: "wind",
+            title: "No agents running.",
+            message: "Start one to drive this project from your phone."
+        ) {
             Button {
                 router.path.append(DriveRoute(project: project, forceNew: true))
             } label: {
                 Label("New agent", systemImage: "plus.circle.fill")
             }
             .buttonStyle(.borderedProminent)
-            .padding(.top, 4)
+        }
+    }
+
+    /// Roster + past list both failed to load — show the error and a retry, rather than a
+    /// bare red string with no way forward.
+    private func errorState(_ message: String) -> some View {
+        stateCard(
+            icon: "exclamationmark.triangle",
+            iconColor: .orange,
+            title: "Couldn't load this project.",
+            message: message
+        ) {
+            Button {
+                Task { await retry() }
+            } label: {
+                Label("Try again", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    /// Compact agents empty state used when there *are* past conversations below — a slim
+    /// inline note rather than the full-screen card, so the conversations still lead.
+    private var noAgentsRow: some View {
+        Section {
+            HStack(spacing: 10) {
+                Image(systemName: "wind").foregroundStyle(.secondary)
+                Text("No agents running right now.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button("New") {
+                    router.path.append(DriveRoute(project: project, forceNew: true))
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+            .listRowInsets(rowInsets)
+            .listRowSeparator(.hidden)
+        } header: {
+            Text("Agents")
+        }
+    }
+
+    /// Shared layout for the full-screen loading/empty/error cards — one icon, a title, a
+    /// muted message, and an action — so they read as a family.
+    private func stateCard<Action: View>(
+        icon: String,
+        iconColor: Color = .secondary,
+        title: String,
+        message: String,
+        @ViewBuilder action: () -> Action
+    ) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.largeTitle)
+                .foregroundStyle(iconColor)
+            Text(title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            action().padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
+        .padding(.horizontal, 24)
         .listRowSeparator(.hidden)
+    }
+
+    /// Retry a failed load (error-state button): clear the error, repaint from the list
+    /// endpoint, and make sure the live stream is running.
+    private func retry() async {
+        guard let store else { return }
+        await store.refresh(client: client)
+        store.start()
+        await loadPast()
     }
 
     /// "Agent" / "2 agents" — the section's noun label (replaces the bare "2 idle").
@@ -206,29 +335,45 @@ private struct AgentRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Line 1 — title first. The dot + title own the flexible width and truncate
+            // tail-first; the elapsed timer is fixed and never compresses the title (and
+            // there's no meter on this line, so the title can't be pushed off-screen).
             HStack(spacing: 8) {
                 Circle().fill(statusColor).frame(width: 9, height: 9)
                 Text(primaryLine)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
                 Spacer(minLength: 8)
-                if let elapsed { Text(elapsed).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                if let elapsed {
+                    Text(elapsed)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
             }
+            // Line 2 — secondary. Status word + (truncating) plan chip on the left; the
+            // context meter holds its intrinsic width on the right (`fixedSize`), so a
+            // long plan name truncates instead of clipping the meter's "%".
             HStack(spacing: 8) {
                 // Explicit status word — not just the colored dot — so "what state is
                 // this agent in" never has to be inferred.
                 StatusPill(text: statusLabel, color: statusColor)
+                    .fixedSize()
                 if let plan = agent.plan {
                     Label(plan, systemImage: "diamond.fill")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 Spacer(minLength: 8)
-                if let pct = agent.ctxPct, pct > 0 { CtxMeter(label: "Context", pct: pct) }
+                if let pct = agent.ctxPct, pct > 0 {
+                    CtxMeter(label: "Context", pct: pct).fixedSize()
+                }
             }
         }
-        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 
@@ -275,22 +420,26 @@ private struct ConversationRow: View {
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                // Title is primary; everything else collapses to one quiet metadata line
-                // ("Resumable · 3 messages · 55m ago") so the row scans cleanly.
+                // Title is primary (medium weight) and owns the flexible width; everything
+                // else collapses to one quiet metadata line ("Resumable · 3 messages · 55m
+                // ago") so the row scans cleanly and truncates tail-first.
                 Text(title)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(1)
-                Text(metadataLine)
+                    .truncationMode(.tail)
+                metadataText
                     .font(.caption2)
-                    .foregroundStyle(statusColor)
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
+            // Aligned, fixed chevron — a quiet "tap to open" affordance that never compresses.
             Image(systemName: "chevron.right")
-                .font(.caption2)
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.tertiary)
+                .fixedSize()
         }
-        .padding(.vertical, 3)
         .contentShape(Rectangle())
     }
 
@@ -299,13 +448,23 @@ private struct ConversationRow: View {
         return "Untitled conversation"
     }
 
-    /// One line: the state, then message count and last-active — the metadata that tells
-    /// apart same-prefix truncated titles, without an icon per field.
-    private var metadataLine: String {
-        var parts = [statusLabel]
+    /// One muted metadata line, with only the *status word* tinted by state (green/orange
+    /// for a live convo; secondary for a resumable one) and the rest — message count,
+    /// last-active — kept quietly muted. Disambiguates same-prefix truncated titles without
+    /// an icon per field.
+    private var metadataText: Text {
+        let status = Text(statusLabel).foregroundColor(statusColor)
+        let detail = detailParts.joined(separator: " · ")
+        guard !detail.isEmpty else { return status }
+        return status + Text(" · " + detail).foregroundColor(.secondary)
+    }
+
+    /// The non-status metadata fields (message count, last-active), kept muted.
+    private var detailParts: [String] {
+        var parts: [String] = []
         if let t = session.userTurns, t > 0 { parts.append("\(t) message\(t == 1 ? "" : "s")") }
         if let rel = relative { parts.append(rel) }
-        return parts.joined(separator: " · ")
+        return parts
     }
 
     /// A live convo shows its running state; an offline one is explicitly "Resumable".

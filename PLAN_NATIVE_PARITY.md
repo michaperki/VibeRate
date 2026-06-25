@@ -55,6 +55,37 @@ all of it). New file `app-ios/Sources/Core/AgentRunState.swift`; edits to
   session's SSE replay — so you answer in context, and the old "questions stripped past the
   4KB cap → tap routed nowhere" gap is closed too.
 
+### Cockpit + conversation-list polish pass (2026-06-25, client-only, `CockpitView.swift`)
+
+A legibility/polish pass over the project cockpit screen and the swipe-to-end state —
+no behavior change, no backend. All in `app-ios/Sources/Views/CockpitView.swift`.
+
+- **Swipe-to-end layout fixed (the reported clip/shift).** The destructive action is now a
+  bare **✕ glyph** (`Image("xmark")` + `.tint(.red)`, VoiceOver "End agent") — the "End"
+  word was redundant next to the red and read as squeezed. Rows carry a **shared
+  `rowInsets` (16pt h)** via `.listRowInsets` so they stay aligned to the screen margin
+  *while swiped* (the default insets shifted content under the revealed action). The agent
+  title now has `.layoutPriority(1)` + `.truncationMode(.tail)` so a long title truncates
+  cleanly instead of pushing the row; the elapsed timer, status pill, and **context meter
+  are `.fixedSize()`** so the meter never clips its "%" and the *plan chip* is the one that
+  truncates — the meter can no longer overflow the title/row.
+- **Agent rows scan title-first.** Title is `.subheadline.weight(.medium)` on line 1 (with
+  the status dot); status pill + plan chip + context meter are the secondary line. (No meter
+  on the title line, so the title can never be pushed off-screen by context fill.)
+- **Section spacing.** `.listSectionSpacing(28)` puts a clear gap between the **Agents**
+  (Now) and **Conversations** zones so they read as two sections, not one run of rows.
+- **Conversation rows polished.** Strong title (`.weight(.medium)`, tail-truncated), a
+  **muted** metadata line where only the *status word* is tinted (green/orange live,
+  secondary when resumable) and the rest (message count · last-active) stays quiet, and a
+  fixed, aligned chevron that never compresses.
+- **Empty / loading / error states.** A shared `stateCard` family backs four states:
+  **project loading** (`didLoad` gate → centered spinner, no "empty" flash), **project load
+  failure** (warning + **Try again** → `retry()`, instead of a bare red string),
+  **no agents** (full card when the project is otherwise empty; a slim inline "No agents
+  running right now · New" row when there *are* past conversations below), and
+  **no conversations** ("No past conversations yet."). A transient stream drop while rows
+  exist stays a thin inline banner, not the full error state.
+
 **Still open (deferred, lower priority):**
 P-2 throttle/tail-outside-array smoothness; P-3/P-4 (measure on device first); Phase D QoL
 (#14 cooling card, #15 any-time chips, #16 flipped newest-first, #19 advanced reveal,
