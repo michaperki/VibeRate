@@ -124,6 +124,8 @@ struct AskSelection: Codable {
 struct AgentSession: Codable, Identifiable {
     let id: String
     let claudeSessionId: String?
+    let codexSessionId: String?
+    let type: String?
     let projectSlug: String?
     let cwd: String?
     let status: String?

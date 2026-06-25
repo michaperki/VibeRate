@@ -9,6 +9,7 @@ struct DriveRoute: Hashable {
     let project: Project
     var sessionId: String? = nil   // attach to a live agent (a Now-roster row, or a push)
     var resumeCid: String? = nil   // adopt a durable past conversation (a Conversations row)
+    var agentType: String? = nil    // "claude" or "codex"; nil keeps legacy Claude routes
     var status: String? = nil      // roster's last-known status, so the entry bar reads right
     var forceNew: Bool = false      // start a brand-new agent (the + button)
 }

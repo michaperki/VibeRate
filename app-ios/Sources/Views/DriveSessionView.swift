@@ -14,6 +14,9 @@ struct DriveSessionView: View {
     /// on-disk transcript — used when the session is no longer live in memory (e.g. after
     /// a redeploy). Ignored when `attachTo` or `forceNew` is set.
     var resumeCid: String? = nil
+    /// Runtime for a live row tap. Fresh sessions default to Codex but can be switched
+    /// before the first send.
+    var agentType: String? = nil
     /// The roster's last-known status for `attachTo`, so the bar reads right on entry.
     var initialStatus: String? = nil
     /// Force a brand-new agent: skip the live-session lookup *and* the adopt path so the
@@ -39,6 +42,7 @@ struct DriveSessionView: View {
     @State private var status = "Connecting…"
     @State private var runState: AgentRunState = .idle   // canonical agent state (§1) — Source of truth for `busy`
     @State private var sessionId: String?
+    @State private var activeAgentType = "codex"
     @State private var streamTask: Task<Void, Never>?
     @State private var draft = ""
     @State private var sending = false
@@ -77,6 +81,7 @@ struct DriveSessionView: View {
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
+    private var canChooseAgent: Bool { sessionId == nil && !busy && resumeCid == nil && attachTo == nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -477,6 +482,7 @@ struct DriveSessionView: View {
 
     private var composer: some View {
         VStack(spacing: 8) {
+            if canChooseAgent { agentPicker }
             if !queue.isEmpty { queuedChips }
             HStack(alignment: .bottom, spacing: 10) {
                 // Stop sits a thumb-width from Send and killing an in-flight turn is
@@ -510,6 +516,15 @@ struct DriveSessionView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    private var agentPicker: some View {
+        Picker("Agent", selection: $activeAgentType) {
+            Text("Codex").tag("codex")
+            Text("Claude").tag("claude")
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Agent")
     }
 
     /// Relabels to "Queue" while the agent is busy so the button tells you what a tap does:
@@ -585,8 +600,18 @@ struct DriveSessionView: View {
 
     // MARK: - Networking
 
+    private func normalizeAgentType(_ raw: String?) -> String {
+        raw == "codex" ? "codex" : "claude"
+    }
+
+    private func streamPath(id: String, after: Int) -> String {
+        let base = activeAgentType == "codex" ? "/api/agent/codex" : "/api/agent"
+        return "\(base)/sessions/\(id)/stream?after=\(after)"
+    }
+
     private func connect() async {
         do {
+            if let agentType { activeAgentType = normalizeAgentType(agentType) }
             // 0. The + asked for a fresh agent — don't attach or adopt anything. Leave a
             //    blank composer; the first message starts a new session (steps 1–3 would
             //    otherwise drop us back into the agent already running here).
@@ -599,18 +624,20 @@ struct DriveSessionView: View {
             // 1. The cockpit handed us a specific agent — attach straight to it.
             if let id = attachTo {
                 sessionId = id
+                activeAgentType = normalizeAgentType(agentType)
                 applyStatus(initialStatus)
                 openStream(id)
                 ready = true
                 // Best-effort: learn this session's durable id so we can adopt it later
                 // if a redeploy wipes the live record (don't block the composer on it).
-                if let s = try? await client.session(id: id), let cid = s.claudeSessionId { store(cid) }
+                if let s = try? await client.session(id: id, agentType: activeAgentType), let cid = s.claudeSessionId { store(cid) }
                 return
             }
             // 1b. A "Conversations" row handed us a specific past session to resume —
             //     adopt exactly that claude id (replays its on-disk transcript). This is
             //     the deliberate-resume path, distinct from the step-3 best-effort adopt.
             if let cid = resumeCid {
+                activeAgentType = "claude"
                 status = "Resuming agent…"
                 runState = .idle
                 let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
@@ -627,6 +654,7 @@ struct DriveSessionView: View {
             let mine = try await client.agentSessions().filter { $0.projectSlug == project.slug }
             if let s = mine.first(where: { isLive($0.status) }) ?? mine.first {
                 sessionId = s.id
+                activeAgentType = normalizeAgentType(s.type)
                 if let cid = s.claudeSessionId { store(cid) }
                 applyStatus(s.status)
                 openStream(s.id)
@@ -636,6 +664,7 @@ struct DriveSessionView: View {
             // 3. Nothing live — adopt the last session we drove here (survives the
             //    redeploy that push-to-main triggers; transcript is still on disk).
             if let cid = stored() {
+                activeAgentType = "claude"
                 status = "Resuming agent…"
                 runState = .idle
                 let adopted = try await client.adopt(claudeSessionId: cid, projectSlug: project.slug)
@@ -707,7 +736,7 @@ struct DriveSessionView: View {
         streamTask?.cancel()
         if after == 0 { eventCount = 0; lastSeq = 0; ingestBuffer.reset() }
         streamHTTP = nil
-        let url = APIConfig.url("/api/agent/sessions/\(id)/stream?after=\(after)")
+        let url = APIConfig.url(streamPath(id: id, after: after))
         let sse = SSEClient(url: url, token: token)
         sse.onOpen = { code in Task { @MainActor in streamHTTP = code } }
         streamTask = Task { @MainActor in
@@ -802,10 +831,11 @@ struct DriveSessionView: View {
 
         do {
             if let id = sessionId {
-                try await client.sendMessage(sessionId: id, prompt: text)
+                try await client.sendMessage(sessionId: id, prompt: text, agentType: activeAgentType)
             } else {
-                let session = try await client.startSession(projectSlug: project.slug, prompt: text)
+                let session = try await client.startSession(projectSlug: project.slug, prompt: text, agentType: activeAgentType)
                 sessionId = session.id
+                activeAgentType = normalizeAgentType(session.type ?? activeAgentType)
                 if let cid = session.claudeSessionId { store(cid) }
                 applyStatus(session.status)
                 openStream(session.id)
@@ -841,7 +871,7 @@ struct DriveSessionView: View {
         assistantOpen = false
         pendingEcho = prompt
         do {
-            try await client.sendMessage(sessionId: id, prompt: prompt)
+            try await client.sendMessage(sessionId: id, prompt: prompt, agentType: activeAgentType)
             runState = .working
             awaitingResponse = true
         } catch {
@@ -866,7 +896,7 @@ struct DriveSessionView: View {
         }
         disarmStop()
         Task { @MainActor in
-            do { _ = try await client.stop(sessionId: id) }
+            do { _ = try await client.stop(sessionId: id, agentType: activeAgentType) }
             catch { bubbles.append(Bubble(role: .error, text: friendly(error))) }
         }
     }

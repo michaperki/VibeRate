@@ -53,7 +53,7 @@ struct ProjectsView: View {
             // out-of-app deep-link. PLAN_NATIVE_PARITY §13.
             .navigationDestination(for: DriveRoute.self) { r in
                 DriveSessionView(project: r.project, attachTo: r.sessionId, resumeCid: r.resumeCid,
-                                 initialStatus: r.status, forceNew: r.forceNew)
+                                 agentType: r.agentType, initialStatus: r.status, forceNew: r.forceNew)
             }
             // Brain + doc reader, registered once at the root so the cockpit (and a future
             // deep-link) can push them with a single `path` append. PLAN_NATIVE_BRAIN.md.

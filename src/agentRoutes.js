@@ -8,6 +8,7 @@
 
 import fs from 'node:fs';
 import { startSession, adoptSession, sendMessage, stopSession, endSession, subscribe, subscribeRoster, getSession, listSessions, registerAsk, resolveAsk, recordReport } from './agent.js';
+import { startCodexSession, sendCodexMessage, stopCodexSession, endCodexSession, subscribeCodex, subscribeCodexRoster, getCodexSession, listCodexSessions } from './codexAgent.js';
 import { harnessReport, invalidateHost } from './harness.js';
 import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { listWorkspaceSessions } from './driveIngest.js';
@@ -120,7 +121,12 @@ export function mountAgent(app, opts = {}) {
 
   // Is the runtime usable here? (UI uses this to show a clear banner.)
   app.get('/api/agent/health', guard, (_req, res) => {
-    res.json({ ok: true, bin: process.env.VBRT_CLAUDE_BIN || 'claude', defaultCwd });
+    res.json({
+      ok: true,
+      bin: process.env.VBRT_CLAUDE_BIN || 'claude',
+      codexBin: process.env.VBRT_CODEX_BIN || 'codex',
+      defaultCwd,
+    });
   });
 
   // Harness rail data (PLAN_HARNESS_VERSIONING.md WS1/WS5): per harness — installed
@@ -139,7 +145,7 @@ export function mountAgent(app, opts = {}) {
   });
 
   app.get('/api/agent/sessions', guard, (_req, res) => {
-    res.json(listSessions());
+    res.json([...listSessions(), ...listCodexSessions()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
   });
 
   // Aggregate roster stream (PLAN_COCKPIT.md §3.1c): one project-scoped SSE that
@@ -158,7 +164,7 @@ export function mountAgent(app, opts = {}) {
     });
     res.flushHeaders?.();
     // Snapshot first, so a fresh/reconnecting client paints the whole roster at once.
-    res.write(`data: ${JSON.stringify({ kind: 'snapshot', sessions: listSessions().filter(matches) })}\n\n`);
+    res.write(`data: ${JSON.stringify({ kind: 'snapshot', sessions: [...listSessions(), ...listCodexSessions()].filter(matches) })}\n\n`);
     const unsub = subscribeRoster((msg) => {
       // 'agent' frames carry a full view we can filter by project; 'removed' carries
       // only an id (the session is already gone), so we forward it unfiltered — the
@@ -166,8 +172,12 @@ export function mountAgent(app, opts = {}) {
       if (msg.kind === 'agent' && !matches(msg.session)) return;
       res.write(`data: ${JSON.stringify(msg)}\n\n`);
     });
+    const unsubCodex = subscribeCodexRoster((msg) => {
+      if (msg.kind === 'agent' && !matches(msg.session)) return;
+      res.write(`data: ${JSON.stringify(msg)}\n\n`);
+    });
     const ping = setInterval(() => res.write(': ping\n\n'), 15000);
-    req.on('close', () => { clearInterval(ping); unsub(); });
+    req.on('close', () => { clearInterval(ping); unsub(); unsubCodex(); });
   });
 
   // Start a new driven session (spawns the real claude binary for turn 1). When a
@@ -188,6 +198,24 @@ export function mountAgent(app, opts = {}) {
       // real project — ad-hoc sessions on the default cwd have nowhere to land.
       // githubToken lets the agent push with the owner's connected GitHub (Slice 2).
       res.json(startSession({ cwd: workdir, prompt, permissionMode, projectSlug: projectSlug || null, githubToken: githubTokenForProject(projectSlug) }));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Start a Codex-driven session in the same project workspace shape as Claude Drive.
+  // Kept under /codex so existing iOS/web clients continue to hit the Claude runtime
+  // until they deliberately opt into Codex.
+  app.post('/api/agent/codex/sessions', guard, (req, res) => {
+    try {
+      const { cwd, prompt, permissionMode, projectSlug } = req.body || {};
+      let workdir = cwd || defaultCwd;
+      if (projectSlug) {
+        const resolved = resolveProjectCwd(projectSlug);
+        if (!resolved) return res.status(409).json({ error: 'project workspace is not set up yet; clone it first' });
+        workdir = resolved;
+      }
+      res.json(startCodexSession({ cwd: workdir, prompt, permissionMode, projectSlug: projectSlug || null, githubToken: githubTokenForProject(projectSlug) }));
     } catch (err) {
       fail(res, err);
     }
@@ -286,6 +314,64 @@ export function mountAgent(app, opts = {}) {
     const rel = req.params[0] || 'index.html';
     res.sendFile(rel, { root: base, dotfiles: 'deny' }, (err) => {
       if (err && !res.headersSent) res.status(err.status === 403 ? 403 : 404).end();
+    });
+  });
+
+  app.get('/api/agent/codex/sessions/:id', guard, (req, res) => {
+    const s = getCodexSession(req.params.id);
+    if (!s) return res.status(404).json({ error: 'unknown session' });
+    res.json(s);
+  });
+
+  app.post('/api/agent/codex/sessions/:id/message', guard, (req, res) => {
+    try {
+      res.json(sendCodexMessage({ id: req.params.id, prompt: (req.body || {}).prompt }));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.post('/api/agent/codex/sessions/:id/stop', guard, (req, res) => {
+    try {
+      res.json(stopCodexSession({ id: req.params.id }));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.post('/api/agent/codex/sessions/:id/end', guard, (req, res) => {
+    try {
+      res.json(endCodexSession({ id: req.params.id }));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.get('/api/agent/codex/sessions/:id/stream', streamGuard, (req, res) => {
+    const lastEventId = Number(req.headers['last-event-id']);
+    const after = Number.isFinite(lastEventId) ? lastEventId : (Number(req.query.after || 0) || 0);
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+
+    let unsub;
+    try {
+      unsub = subscribeCodex(req.params.id, (event) => {
+        res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
+      }, after);
+    } catch (err) {
+      res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+      return res.end();
+    }
+
+    const ping = setInterval(() => res.write(': ping\n\n'), 15000);
+    req.on('close', () => {
+      clearInterval(ping);
+      unsub && unsub();
     });
   });
 

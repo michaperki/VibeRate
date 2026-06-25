@@ -127,7 +127,7 @@ struct CockpitView: View {
         Section {
             ForEach(store.agents) { agent in
                 Button {
-                    router.path.append(DriveRoute(project: project, sessionId: agent.id, status: agent.status))
+                    router.path.append(DriveRoute(project: project, sessionId: agent.id, agentType: agent.type, status: agent.status))
                 } label: {
                     AgentRow(agent: agent, now: tick)
                 }
@@ -138,7 +138,7 @@ struct CockpitView: View {
                 // Non-destructive: the transcript survives and stays resumable.
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
-                        Task { await endAgent(agent.id) }
+                        Task { await endAgent(agent.id, agentType: agent.type) }
                     } label: {
                         // Just the glyph — the destructive red already says "end", and a
                         // bare ✕ reads as native (Mail/Messages) instead of a squeezed
@@ -203,9 +203,9 @@ struct CockpitView: View {
 
     /// End a live agent (swipe): drop it from the roster immediately, then tell the server.
     /// The transcript stays on disk and re-adoptable from the Conversations section.
-    private func endAgent(_ id: String) async {
+    private func endAgent(_ id: String, agentType: String?) async {
         store?.removeLocally(id: id)
-        try? await client.endSession(id: id)
+        try? await client.endSession(id: id, agentType: agentType)
         await loadPast()   // it may reappear as a resumable past conversation
     }
 

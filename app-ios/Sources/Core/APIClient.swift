@@ -30,6 +30,10 @@ struct APIClient {
         return req
     }
 
+    private func agentBase(_ agentType: String?) -> String {
+        agentType == "codex" ? "/api/agent/codex" : "/api/agent"
+    }
+
     private func send<T: Decodable>(_ req: URLRequest, as: T.Type) async throws -> T {
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.http(0, "no response") }
@@ -56,20 +60,20 @@ struct APIClient {
     /// Start a new Drive session in a project's bound workspace, with the first prompt.
     /// 409s if the project's checkout isn't set up yet.
     @discardableResult
-    func startSession(projectSlug: String, prompt: String) async throws -> AgentSession {
+    func startSession(projectSlug: String, prompt: String, agentType: String? = nil) async throws -> AgentSession {
         // Drive from the phone runs headless — there's no permission prompt we can route
         // to the device, so `default` mode silently denies every edit/exec. Always ask
         // for bypass; the native client is steering on the user's behalf.
         let body = try JSONEncoder().encode(["projectSlug": projectSlug, "prompt": prompt, "permissionMode": "bypassPermissions"])
-        return try await send(request("/api/agent/sessions", method: "POST", body: body), as: AgentSession.self)
+        return try await send(request("\(agentBase(agentType))/sessions", method: "POST", body: body), as: AgentSession.self)
     }
 
     /// Send a follow-up prompt to an existing session (resumes it). 400s if the session
     /// is mid-turn ("busy") — surface that to the user rather than dropping it.
     @discardableResult
-    func sendMessage(sessionId: String, prompt: String) async throws -> AgentSession {
+    func sendMessage(sessionId: String, prompt: String, agentType: String? = nil) async throws -> AgentSession {
         let body = try JSONEncoder().encode(["prompt": prompt])
-        return try await send(request("/api/agent/sessions/\(sessionId)/message", method: "POST", body: body), as: AgentSession.self)
+        return try await send(request("\(agentBase(agentType))/sessions/\(sessionId)/message", method: "POST", body: body), as: AgentSession.self)
     }
 
     /// Re-adopt a session whose in-memory record a server redeploy wiped (push-to-main
@@ -87,8 +91,8 @@ struct APIClient {
 
     /// Fetch one session's full record (incl. `claudeSessionId`), e.g. to persist a
     /// durable handle after the cockpit hands us a session id to attach to.
-    func session(id: String) async throws -> AgentSession {
-        try await send(request("/api/agent/sessions/\(id)"), as: AgentSession.self)
+    func session(id: String, agentType: String? = nil) async throws -> AgentSession {
+        try await send(request("\(agentBase(agentType))/sessions/\(id)"), as: AgentSession.self)
     }
 
     /// Kill the active turn (SIGTERM), leaving the session — and its claude id — alive so
@@ -96,17 +100,17 @@ struct APIClient {
     /// (`stopSession`, `agent.js`); the server emits a `stopped` event we render as a system
     /// line. Returns the session's post-stop record.
     @discardableResult
-    func stop(sessionId: String) async throws -> AgentSession {
-        try await send(request("/api/agent/sessions/\(sessionId)/stop", method: "POST"), as: AgentSession.self)
+    func stop(sessionId: String, agentType: String? = nil) async throws -> AgentSession {
+        try await send(request("\(agentBase(agentType))/sessions/\(sessionId)/stop", method: "POST"), as: AgentSession.self)
     }
 
     /// End a session and drop it from the live roster (the cockpit's "swipe to end" — there
     /// is no terminal ctrl-c on a phone). Non-destructive: kills any in-flight turn but the
     /// transcript stays on disk and re-adoptable. Unknown id is a server-side no-op ack.
     @discardableResult
-    func endSession(id: String) async throws -> Bool {
+    func endSession(id: String, agentType: String? = nil) async throws -> Bool {
         struct Reply: Decodable { let ok: Bool? }
-        return try await send(request("/api/agent/sessions/\(id)/end", method: "POST"), as: Reply.self).ok ?? true
+        return try await send(request("\(agentBase(agentType))/sessions/\(id)/end", method: "POST"), as: Reply.self).ok ?? true
     }
 
     /// Answer a pending `ask` picker — resolves the parked MCP tool call so the agent's
