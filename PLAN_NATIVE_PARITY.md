@@ -43,9 +43,19 @@ all of it). New file `app-ios/Sources/Core/AgentRunState.swift`; edits to
   backoff instead of demanding a pull-to-refresh.
 - **End agent (matrix #18, P1)** — swipe-to-end on cockpit roster rows → `APIClient.endSession`
   → `POST /sessions/:id/end`; optimistic local removal, then re-loads the resumable past list.
+- **Push deep-link to the convo (matrix #13, P1)** — ✅ **SHIPPED 2026-06-25, client-only.**
+  A tapped notification (finished/error/ask) now lands you *in the conversation* instead of
+  just foregrounding. `PushManager.handle` sets a `pendingRoute` (project + session) for any
+  tap that identifies a session; a new app-level `NavRouter` owns the signed-in
+  `NavigationStack` path, and `ProjectsView.consumeRoute` pushes Cockpit + `DriveSessionView`
+  in one path assignment. The whole stack was unified onto that one path (`DriveRoute`
+  registered once at the root; CockpitView's old `navigationDestination(item:)` retired) so
+  there's no item/path mixing. The detached global `AskSheet` is now a fallback for the
+  no-project case only: a deep-linked `ask` re-surfaces as the **inline** `askCard` via the
+  session's SSE replay — so you answer in context, and the old "questions stripped past the
+  4KB cap → tap routed nowhere" gap is closed too.
 
-**Still open (deferred, lower priority):** push deep-link to the convo (matrix #13 — needs
-navigation-path plumbing across the view tree, intentionally left out of this client batch);
+**Still open (deferred, lower priority):**
 P-2 throttle/tail-outside-array smoothness; P-3/P-4 (measure on device first); Phase D QoL
 (#14 cooling card, #15 any-time chips, #16 flipped newest-first, #19 advanced reveal,
 #20 harness version).
@@ -115,7 +125,7 @@ cockpit" · **P1** important QoL · **P2** nice-to-have.
 | 10 | **Cross-device session list** | ✅ server index merged w/ local log | ✅ `workspaceSessions` → Conversations section | iOS `loadPast` `:146`; web `fetchWorkspaceSessions` `:4274` | both: phone-started session resumes on laptop | `/workspace/:slug/sessions` (exists) | — | **done** |
 | 11 | **Ask/answer inline picker** | ✅ `driveRenderAsk` `:5328` | ✅ `AskView`/`AskSheet`, parses from push payload | iOS `AskView.swift`, `PushManager` `:74`; web `:5328`; backend `mcpAsk.js` | both: agent blocks on a question, you tap an answer | `/sessions/:id/answer` (exists) | — | **done** |
 | 12 | **Push notifications** | ❌ **web has none** (APNs-only) | ✅ register, `ask` deep-link to picker | iOS `PushManager.swift`, `apns.js`; web: ABSENT | iOS-only win: agent reaches out | `/push/register` + APNs | — | **iOS wins** |
-| 13 | **Push tap → correct context** | n/a | ◑ **only `ask` restores the picker; `finished`/`error` just foregrounds** | iOS `PushManager.handle` `:74-82`; payload carries `sessionId`/`projectSlug` (`apns.js:149`) | tapping a "finished" push doesn't open that convo | payload already carries the ids | Med | **P1** |
+| 13 | **Push tap → correct context** | n/a | ✅ **any tap (finished/error/ask) deep-links into that `DriveSessionView`; ask re-surfaces inline via SSE backfill** | iOS `PushManager.handle`+`pendingRoute`, `NavRouter`/`DriveRoute`, `ProjectsView.consumeRoute`; payload `sessionId`/`projectSlug` (`apns.js:149`) | tapping any push opens that exact convo | payload already carries the ids | — | **done** |
 | 14 | **Provisional "cooling" card** | ✅ optimistic rail card → cools on `result` | ◑ optimistic bubble only, no roster card | web `driveProvisionalRow` `:5990`; iOS `send()` `:536` | web: convo never visibly vanishes between turn-end and ingest | none | Med | **P2** |
 | 15 | **Prompt chips / suggested starters** | ✅ data-seeded chips, ★ save, mid-session | ◑ 4 hardcoded starters, **new-agent only** | iOS `starters` `:149`; web `renderDriveChips` `:4220` | web: tappable openers any time, saved phrases; iOS: only on empty new agent | none | Low | **P2** |
 | 16 | **Flipped newest-first + jump pill** | ✅ sticky-top composer, "↑ new activity" | ❌ standard bottom-up chat + auto-scroll | web `driveScroll` `:5136`, `#dv-jump`; iOS `:121` scroll-to-bottom | web: type at top, reply below, no scroll-chase; iOS: classic chat | none | Med | **P2** |
@@ -288,13 +298,14 @@ the native loop is slow (~10–15 min Codemagic build per change, `PLAN_NATIVE_R
 a bad turn, and actually read the transcript while it runs. This is the line between
 "chat viewer" and "cockpit."*
 
-### Phase B — resilience & continuity — **P1** ◑ MOSTLY SHIPPED 2026-06-25 (deep-link #13 deferred)
+### Phase B — resilience & continuity — **P1** ✅ SHIPPED 2026-06-25 (incl. deep-link #13)
 5. **Foreground resync** (matrix #7): on `scenePhase == .active`, tear down + reopen the
    stream from `lastSeq` (handles the frozen backgrounded socket).
 6. **Roster auto-reconnect** (matrix #8): `RosterStore` retries with backoff instead of
    demanding pull-to-refresh.
-7. **Push deep-link to convo** (matrix #13): a `finished`/`error` tap opens the relevant
-   `DriveSessionView` using the payload's `sessionId`/`projectSlug`.
+7. **Push deep-link to convo** (matrix #13) — ✅ shipped: any tap (finished/error/ask)
+   opens that `DriveSessionView` via `pendingRoute` → `NavRouter` path; an `ask` re-surfaces
+   inline through the SSE replay, so the global `AskSheet` is now a no-project fallback.
 8. **End-agent affordance** (matrix #18): confirm/ensure swipe-to-end on roster rows so
    idle agents don't accrue (no phone ctrl-c).
 9. **Collapse tool-call cards** (matrix #16b, §3.1a): one tappable chip per tool call

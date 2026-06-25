@@ -15,9 +15,17 @@ import UserNotifications
 final class PushManager {
     static let shared = PushManager()
 
-    /// Set when a tapped `ask` notification carried renderable questions — drives the
-    /// global `AskSheet` over the root. Cleared when the sheet is dismissed/answered.
+    /// Set when a tapped `ask` notification carried renderable questions but couldn't be
+    /// deep-linked (no project to route to) — drives the global `AskSheet` over the root as
+    /// a fallback. Cleared when the sheet is dismissed/answered.
     var pendingAsk: AskRequest?
+
+    /// Set when a tapped notification identifies a conversation to open (project + session).
+    /// Consumed by `ProjectsView`, which drives the nav stack into that `DriveSessionView`.
+    /// This is §13: a `finished`/`error`/`ask` tap lands you *in the conversation*, not just
+    /// foregrounded — and the session's own SSE backfill re-surfaces a still-pending ask as
+    /// the inline picker, so you answer in context. Cleared once consumed.
+    var pendingRoute: PushRoute?
 
     /// The APNs device token (hex), once iOS hands it to us. Persisted so we can
     /// re-register after a sign-in that happens later than registration.
@@ -68,25 +76,36 @@ final class PushManager {
     }
 
     /// Handle a delivered notification. `fromTap` distinguishes the user tapping the
-    /// banner (open the selector) from a foreground delivery (just let iOS show it). Only
-    /// an `ask` with renderable questions opens the sheet; a `finished`/`error` tap just
-    /// brings the app forward for now.
+    /// banner (open the conversation) from a foreground delivery (just let iOS show it).
     func handle(userInfo: [AnyHashable: Any], fromTap: Bool) {
         guard fromTap else { return }
         guard let vbrt = userInfo["vbrt"] as? [String: Any] else { return }
-        guard (vbrt["kind"] as? String) == "ask",
-              let askId = vbrt["askId"] as? String,
-              let sessionId = vbrt["sessionId"] as? String else { return }
-        let questions = Self.parseQuestions(vbrt["questions"])
-        // No questions in the payload (stripped for the 4KB cap) → nothing to render
-        // here; the in-app SSE backfill shows the picker when the convo is opened.
-        guard !questions.isEmpty else { return }
-        pendingAsk = AskRequest(
-            askId: askId,
-            sessionId: sessionId,
-            projectSlug: vbrt["projectSlug"] as? String,
-            questions: questions
-        )
+        let kind = (vbrt["kind"] as? String) ?? ""
+        let sessionId = vbrt["sessionId"] as? String
+        let projectSlug = vbrt["projectSlug"] as? String
+
+        // Prefer deep-linking into the actual conversation for ANY tap that identifies a
+        // session + project (finished / error / ask). Once the DriveSessionView opens, its
+        // SSE replay re-surfaces a still-pending ask as the inline picker — so we answer in
+        // context, and this also fixes the case where the `ask` questions were stripped for
+        // the 4KB cap (a tap used to route nowhere). PLAN_NATIVE_PARITY §13.
+        if let sessionId, let projectSlug, !projectSlug.isEmpty {
+            pendingRoute = PushRoute(projectSlug: projectSlug, sessionId: sessionId, kind: kind)
+            return
+        }
+
+        // Fallback: the payload can't route (no project) — if it's an `ask` with renderable
+        // questions, open the global selector so you can still answer from anywhere.
+        if kind == "ask", let askId = vbrt["askId"] as? String, let sessionId {
+            let questions = Self.parseQuestions(vbrt["questions"])
+            guard !questions.isEmpty else { return }
+            pendingAsk = AskRequest(
+                askId: askId,
+                sessionId: sessionId,
+                projectSlug: projectSlug,
+                questions: questions
+            )
+        }
     }
 
     /// Decode the loosely-typed `vbrt.questions` array from a notification payload into
@@ -107,6 +126,16 @@ final class PushManager {
             )
         }
     }
+}
+
+/// A pending deep-link from a tapped notification: open this project's conversation.
+/// `kind` (finished/error/ask) is carried only so a future entry could tune the landing;
+/// today every kind routes the same — straight into the session's `DriveSessionView`.
+struct PushRoute: Identifiable, Hashable {
+    let projectSlug: String
+    let sessionId: String
+    let kind: String
+    var id: String { kind + "|" + projectSlug + "|" + sessionId }
 }
 
 /// The UIKit delegate that receives the push callbacks SwiftUI doesn't surface, and

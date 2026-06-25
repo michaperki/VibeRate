@@ -11,25 +11,14 @@ struct CockpitView: View {
     let project: Project
     @Environment(AuthModel.self) private var auth
     @Environment(\.dismiss) private var dismiss
+    @Environment(NavRouter.self) private var router
 
     @State private var store: RosterStore?
-    @State private var driveTarget: DriveTarget?
     @State private var past: [WorkspaceSession] = []
     @State private var tick = Date()
 
     private var token: String? { TokenStore.load() }
     private var client: APIClient { APIClient(token: token) }
-
-    /// Where a tap goes. All-nil = start a fresh agent (the ✦ button). `sessionId` = a
-    /// live in-memory agent (a Now-roster row). `resumeCid` = a durable past conversation
-    /// to adopt (a Conversations row).
-    struct DriveTarget: Hashable, Identifiable {
-        var sessionId: String? = nil
-        var resumeCid: String? = nil
-        var status: String? = nil
-        var id: String { sessionId ?? resumeCid ?? "new" }
-        var isNew: Bool { sessionId == nil && resumeCid == nil }
-    }
 
     /// Past conversations not represented by a row already in the live "Now" roster —
     /// the ones a redeploy left offline, plus any never-live history. Resuming one adopts
@@ -54,7 +43,7 @@ struct CockpitView: View {
                     Section {
                         ForEach(store.agents) { agent in
                             Button {
-                                driveTarget = DriveTarget(sessionId: agent.id, status: agent.status)
+                                router.path.append(DriveRoute(project: project, sessionId: agent.id, status: agent.status))
                             } label: {
                                 AgentRow(agent: agent, now: tick)
                             }
@@ -92,7 +81,7 @@ struct CockpitView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    driveTarget = DriveTarget()   // all-nil → forceNew
+                    router.path.append(DriveRoute(project: project, forceNew: true))
                 } label: {
                     // A quiet accent text+icon button (plain style → no iOS 26 glass capsule)
                     // so "start a new agent" reads as a normal nav action, not a heavy circle.
@@ -104,10 +93,8 @@ struct CockpitView: View {
                 .foregroundStyle(Color.accentColor)
             }
         }
-        .navigationDestination(item: $driveTarget) { t in
-            DriveSessionView(project: project, attachTo: t.sessionId, resumeCid: t.resumeCid,
-                             initialStatus: t.status, forceNew: t.isNew)
-        }
+        // The DriveRoute destination is registered once at the stack root (ProjectsView) so
+        // a push deep-link can push Cockpit + Drive together; here we just append to it.
         .refreshable {
             if let store { await store.refresh(client: client) }
             await loadPast()
@@ -136,9 +123,9 @@ struct CockpitView: View {
                 ForEach(offlineConversations) { s in
                     Button {
                         if let lid = s.liveId {
-                            driveTarget = DriveTarget(sessionId: lid, status: s.status)
+                            router.path.append(DriveRoute(project: project, sessionId: lid, status: s.status))
                         } else {
-                            driveTarget = DriveTarget(resumeCid: s.claudeSessionId, status: "idle")
+                            router.path.append(DriveRoute(project: project, resumeCid: s.claudeSessionId, status: "idle"))
                         }
                     } label: {
                         ConversationRow(session: s, now: tick)
@@ -179,7 +166,7 @@ struct CockpitView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button {
-                driveTarget = DriveTarget()   // all-nil → forceNew
+                router.path.append(DriveRoute(project: project, forceNew: true))
             } label: {
                 Label("New agent", systemImage: "plus.circle.fill")
             }

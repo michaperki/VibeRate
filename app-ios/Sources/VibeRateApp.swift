@@ -6,11 +6,14 @@ struct VibeRateApp: App {
     // them to PushManager.shared.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var auth = AuthModel()
+    // Owns the signed-in nav stack's path, so a push tap can deep-link into a conversation.
+    @State private var router = NavRouter()
 
     var body: some Scene {
         WindowGroup {
             RootContainer()
                 .environment(auth)
+                .environment(router)
                 .task { await auth.bootstrap() }
         }
     }
