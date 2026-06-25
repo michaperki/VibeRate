@@ -91,6 +91,35 @@ struct APIClient {
         try await send(request("/api/agent/sessions/\(id)"), as: AgentSession.self)
     }
 
+    /// Answer a pending `ask` picker — resolves the parked MCP tool call so the agent's
+    /// turn continues. The `:id` path segment is cosmetic (the server keys on `askId`),
+    /// but we send the real session id anyway.
+    @discardableResult
+    func answer(sessionId: String, askId: String, selections: [AskSelection]) async throws -> Bool {
+        struct Body: Encodable { let askId: String; let selections: [AskSelection] }
+        struct Reply: Decodable { let ok: Bool? }
+        let body = try JSONEncoder().encode(Body(askId: askId, selections: selections))
+        let reply = try await send(request("/api/agent/sessions/\(sessionId)/answer", method: "POST", body: body), as: Reply.self)
+        return reply.ok ?? false
+    }
+
+    /// Register this device's APNs token so the server can push "your agent needs you /
+    /// finished / errored". Idempotent server-side (upsert by token).
+    func registerPush(deviceToken: String) async throws {
+        struct Body: Encodable { let deviceToken: String; let platform: String }
+        struct Reply: Decodable { let ok: Bool? }
+        let body = try JSONEncoder().encode(Body(deviceToken: deviceToken, platform: "ios"))
+        _ = try await send(request("/api/agent/push/register", method: "POST", body: body), as: Reply.self)
+    }
+
+    /// Drop this device's APNs token (e.g. on sign-out) so it stops receiving pushes.
+    func unregisterPush(deviceToken: String) async throws {
+        struct Body: Encodable { let deviceToken: String }
+        struct Reply: Decodable { let ok: Bool? }
+        let body = try JSONEncoder().encode(Body(deviceToken: deviceToken))
+        _ = try await send(request("/api/agent/push/unregister", method: "POST", body: body), as: Reply.self)
+    }
+
     func projects() async throws -> [Project] {
         try await send(request("/api/projects"), as: [Project].self)
     }

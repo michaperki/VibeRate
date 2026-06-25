@@ -15,6 +15,7 @@ import { currentUser } from './oauth.js';
 import { bearer, hashToken } from './auth.js';
 import { findUserByOwnerHash, getGithubToken } from './accounts.js';
 import { getProject } from './storage.js';
+import { registerDevice, unregisterDevice, pushEnabled } from './apns.js';
 
 // The decrypted per-user GitHub token to clone/push a project with, or null. We use
 // the project OWNER's connected token (not the requester's) so the repo is always
@@ -351,6 +352,25 @@ export function mountAgent(app, opts = {}) {
     const { askId, selections } = req.body || {};
     const ok = resolveAsk(askId, selections);
     res.json({ ok });
+  });
+
+  // The native app registers its APNs device token here so the server can push it
+  // "your agent needs you / finished / errored" (PLAN_NATIVE_REWRITE.md). Admin-guarded
+  // like the rest of the control plane; the resolved admin email is stored alongside the
+  // token for a future per-owner fan-out (single-user today, so notifyAll sends to all).
+  app.post('/api/agent/push/register', guard, (req, res) => {
+    const { deviceToken, platform, env } = req.body || {};
+    if (!deviceToken || typeof deviceToken !== 'string') return res.status(400).json({ error: 'deviceToken required' });
+    registerDevice({ token: deviceToken, owner: adminEmailFor(req), platform: platform || 'ios', env: env || null });
+    // Report whether APNs is actually configured, so the app can tell "registered but the
+    // server can't send" from "all set" without leaking the secrets.
+    res.json({ ok: true, pushConfigured: pushEnabled() });
+  });
+
+  app.post('/api/agent/push/unregister', guard, (req, res) => {
+    const { deviceToken } = req.body || {};
+    if (deviceToken) unregisterDevice(deviceToken);
+    res.json({ ok: true });
   });
 
   // Live event stream (SSE). `?after=N` backfills everything past seq N first, so

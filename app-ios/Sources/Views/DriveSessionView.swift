@@ -45,6 +45,8 @@ struct DriveSessionView: View {
     @State private var awaitingResponse = false      // sent a prompt, nothing has streamed back yet
     @State private var showSetup = false             // a fresh project needs its workspace cloned first
     @State private var queuedPrompt: String?         // the prompt to re-send once the workspace is ready
+    @State private var pendingAsk: AskRequest?       // the agent called the MCP ask picker; blocked on you
+    @State private var askSubmitting = false         // answering the pending ask
     @FocusState private var composerFocused: Bool    // bring up the keyboard after a starter chip pre-fills
     @Environment(\.dismiss) private var dismiss
 
@@ -110,6 +112,7 @@ struct DriveSessionView: View {
                         bubbleView(b)
                             .frame(maxWidth: .infinity, alignment: b.role == .user ? .trailing : .leading)
                     }
+                    if let ask = pendingAsk { askCard(ask) }
                     if showWorkingRow { workingRow }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -123,6 +126,9 @@ struct DriveSessionView: View {
             }
             .onChange(of: showWorkingRow) { _, on in
                 if on { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+            .onChange(of: pendingAsk?.id) { _, id in
+                if id != nil { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
         }
     }
@@ -275,6 +281,39 @@ struct DriveSessionView: View {
     private var showWorkingRow: Bool {
         (awaitingResponse || status == "Working…" || status == "Thinking…")
             && !assistantOpen && !thinkingOpen
+    }
+
+    /// The inline picker for a pending `ask` — the in-app twin of the push selector. The
+    /// agent's turn is parked until you answer (`/answer` → resolveAsk), so it sits at the
+    /// foot of the transcript like a prompt waiting on you.
+    @ViewBuilder
+    private func askCard(_ ask: AskRequest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Agent asks", systemImage: "questionmark.bubble.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+            AskView(questions: ask.questions, submitting: askSubmitting) { sels in
+                Task { @MainActor in await answerAsk(ask, sels) }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.accentColor.opacity(0.25)))
+    }
+
+    /// Submit the inline ask's selections. On success clear the card optimistically (the
+    /// `ask_resolved` event also clears it); on failure surface the error and leave the
+    /// card so the user can retry.
+    private func answerAsk(_ ask: AskRequest, _ sels: [AskSelection]) async {
+        askSubmitting = true
+        defer { askSubmitting = false }
+        do {
+            _ = try await client.answer(sessionId: ask.sessionId, askId: ask.askId, selections: sels)
+            pendingAsk = nil
+        } catch {
+            bubbles.append(Bubble(role: .error, text: friendly(error)))
+        }
     }
 
     private var workingRow: some View {
@@ -606,6 +645,20 @@ struct DriveSessionView: View {
             // spinner row doesn't stick when the agent has actually gone idle.
             if status == "Working…" || status == "Thinking…" { status = "Idle" }
             clearThinking()
+        case "ask":
+            // The agent called the MCP ask picker — render the inline selector. Decode the
+            // full event (questions) from the raw frame; `sessionId` is our live session,
+            // which is what `/answer` posts against.
+            if let ev = try? JSONDecoder().decode(AskEvent.self, from: Data(data.utf8)), let sid = sessionId {
+                pendingAsk = AskRequest(askId: ev.askId, sessionId: sid, projectSlug: project.slug, questions: ev.questions)
+                status = "Waiting for you"
+                awaitingResponse = false
+                clearThinking()
+            }
+        case "ask_resolved":
+            // Answered (by us, another client, or a timeout) — drop the picker.
+            if let aid = obj["askId"] as? String, aid == pendingAsk?.askId { pendingAsk = nil }
+            else if obj["askId"] == nil { pendingAsk = nil }
         case "status":
             if let s = obj["status"] as? String {
                 status = humanStatus(s)

@@ -41,6 +41,16 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Support/Info.plist
+    # Push Notifications capability. XcodeGen writes this entitlements file and wires
+    # CODE_SIGN_ENTITLEMENTS to it. TestFlight + App Store builds use the PRODUCTION APNs
+    # environment ("production"); only a development-signed Xcode run would use
+    # "development". The App ID (com.viberate.app) must have Push Notifications enabled in
+    # the Apple Developer portal, and an APNs Auth Key (.p8) must back the server's
+    # APNS_* secrets — see PLAN_NATIVE_REWRITE.md.
+    entitlements:
+      path: Support/VibeRate.entitlements
+      properties:
+        aps-environment: production
     info:
       path: Support/Info.plist
       properties:
@@ -55,6 +65,10 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Let APNs deliver/refresh in the background so a "your agent needs you" alert
+        # can arrive while the app is suspended.
+        UIBackgroundModes:
+          - remote-notification
         # Custom URL scheme that catches the OAuth deep-link return (viberate://auth).
         CFBundleURLTypes:
           - CFBundleURLName: com.viberate.app

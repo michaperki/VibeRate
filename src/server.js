@@ -16,7 +16,8 @@ import { newToken, hashToken, bearer, signValue, verifyValue, readCookie, setCoo
 import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner, findUserByOwnerHash } from './accounts.js';
 import { mountAgent } from './agentRoutes.js';
-import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl, setIngestHook, setTranscriptLoader } from './agent.js';
+import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl, setIngestHook, setTranscriptLoader, setPushNotifier } from './agent.js';
+import { notifyAll as notifyPushDevices } from './apns.js';
 import { ingestDriveTurn, loadDriveTranscript } from './driveIngest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -381,6 +382,11 @@ export function startServer(port = 4317) {
   // record: it asks for the saved transcript by claude session id, we locate +
   // parse the on-disk JSONL (driveIngest), and it replays that to reconnect.
   setTranscriptLoader((claudeSessionId) => loadDriveTranscript(claudeSessionId));
+
+  // Fan agent lifecycle events (asks / finished / errors) to the registered iOS
+  // devices as APNs pushes — the "steer an async agent without watching it" loop
+  // (PLAN_NATIVE_REWRITE.md). No-ops unless the APNs secrets are configured.
+  setPushNotifier((n) => notifyPushDevices(n));
 
   // Read guard: resolves the project and enforces visibility. Returns null (and
   // sends 404 — we don't reveal that a private project exists) when not allowed.

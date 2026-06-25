@@ -48,7 +48,10 @@ struct ProjectsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         if let email = me.email { Text(email) }
-                        Button("Sign out", role: .destructive) { auth.signOut() }
+                        Button("Sign out", role: .destructive) {
+                            PushManager.shared.onSignedOut()
+                            auth.signOut()
+                        }
                     } label: {
                         Image(systemName: "person.crop.circle")
                     }
@@ -56,6 +59,9 @@ struct ProjectsView: View {
             }
             .refreshable { await load() }
             .task { await load() }
+            // Signed in and on the home screen — request push permission (first time only)
+            // and register this device so the agent can reach you when it needs a decision.
+            .task { PushManager.shared.onSignedIn() }
         }
     }
 

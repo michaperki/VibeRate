@@ -72,6 +72,54 @@ struct WorkspaceSession: Codable, Identifiable, Hashable {
     var id: String { claudeSessionId }
 }
 
+// MARK: - Ask (the MCP picker)
+
+/// One choice in an `ask` question. The user can also answer with free text.
+struct AskOption: Codable, Hashable {
+    let label: String
+    let description: String?
+}
+
+/// One question the agent put to you via the MCP `ask` tool (mirrors the web picker,
+/// public/app.js `driveRenderAsk`). `options` may be empty/absent for a free-text-only
+/// prompt; `multiSelect` allows picking more than one.
+struct AskQuestion: Codable, Hashable, Identifiable {
+    let question: String
+    let header: String?
+    let multiSelect: Bool?
+    let options: [AskOption]?
+
+    var id: String { (header ?? "") + "|" + question }
+}
+
+/// The `ask` SSE event payload (`{ kind:"ask", askId, questions:[…] }`). Extra frame
+/// keys (`seq`, `t`, `kind`) are ignored on decode.
+struct AskEvent: Codable {
+    let askId: String
+    let questions: [AskQuestion]
+}
+
+/// A pending question to answer — assembled from either the SSE `ask` event (in-app) or
+/// a tapped push notification's `vbrt` payload (out-of-app). `sessionId` is the agent
+/// session the answer POSTs to; `askId` is what `resolveAsk` keys on server-side.
+struct AskRequest: Identifiable, Hashable {
+    let askId: String
+    let sessionId: String
+    let projectSlug: String?
+    let questions: [AskQuestion]
+
+    var id: String { askId }
+}
+
+/// One answer, aligned to a question, in the shape the server's `formatAnswer` expects:
+/// the picked option label(s) and/or a free-text note kept distinct.
+struct AskSelection: Codable {
+    let header: String?
+    let question: String?
+    let selectedLabels: [String]
+    let customText: String?
+}
+
 /// A live/known Drive agent session (`GET /api/agent/sessions`).
 struct AgentSession: Codable, Identifiable {
     let id: String

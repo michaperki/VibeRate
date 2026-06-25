@@ -124,7 +124,10 @@ Server side lives in `../src/oauth.js` (the `native` branch of the OAuth callbac
   live agent rows, tap-to-drive, ✦ new agent. *Pending Codemagic build + on-device verify.*
 - Cockpit "Latest" + "Next" zones (commit bursts / brain-doc changes, plans-closest-to-done).
 - Rich transcript rendering (thinking, tool I/O, diffs) instead of one line per event.
-- APNs push ("your agent is asking a question / finished") for the App Store 4.2 guardrail —
-  now has a destination to open into (the cockpit row / Drive).
+- ✅ APNs push ("your agent is asking a question / finished / errored") + the native
+  ask selector (`AskView`/`AskSheet`, inline in `DriveSessionView` and from a tapped
+  notification). Server `src/apns.js` + `/api/agent/push/{register,unregister}`. *Pending
+  build + the one-time portal/secret setup in `../PLAN_NATIVE_REWRITE.md` (enable Push on
+  the App ID, create an APNs .p8, set `APNS_KEY_P8`/`APNS_KEY_ID`/`APNS_TEAM_ID` on Fly).*
 - Brain view (`/api/projects/:slug/docs`) — low priority; the cockpit owns legibility now.
 - Polish the app icon (currently a generated branded "V" placeholder — fine for TestFlight).

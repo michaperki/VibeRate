@@ -346,5 +346,47 @@ Scaffolded 2026-06-24; first TestFlight build landed the same day after the fixe
       `git`/`dochistory`/`activity` + per-plan completion the web cockpit uses.
 - ◻ Brain view (`/api/projects/:slug/docs`) — note Ch. 12 demoted the brain; the cockpit
       owns legibility now, so this is low priority on the phone.
-- ◻ APNs push end to end ("agent needs you / finished") — now has a destination (the
-      cockpit row / Drive); also the App Store 4.2 anchor.
+- [x] **APNs push + native ask/selector** (2026-06-25) — the headline native-only
+      capability (App Store 4.2 anchor): a Drive turn runs for minutes then blocks on you
+      (the MCP `ask` picker), so the agent now *reaches out* instead of you babysitting.
+      Two halves landed together because the iOS app had **no** `ask` handling at all (the
+      web inline picker, `public/app.js` `driveRenderAsk`, was never ported) — push with
+      nowhere to land would be useless.
+      - **Server (no new deps).** `src/apns.js`: an ES256 provider JWT signed with Node's
+        `crypto` (`dsaEncoding: 'ieee-p1363'` → the raw r‖s JOSE signature APNs wants; DER
+        would 403) and an HTTP/2 POST to `api.push.apple.com` — plus a device-token store
+        persisted to the data volume (survives the push-to-main redeploy). Absent the
+        `APNS_*` secrets, `pushEnabled()` is false and every send no-ops, so the box runs
+        exactly as before. New routes `POST /api/agent/push/{register,unregister}` (admin-
+        guarded; store the resolved admin email for a future per-owner fan-out — single-user
+        today, so `notifyAll` sends to all). `agent.js` gets a `setPushNotifier` DI hook
+        (like `setTranscriptLoader`, so agent.js stays network-free) wired in `server.js` to
+        `apns.notifyAll`. Fired from: `registerAsk` → **always** (it's blocking, and you've
+        left the app for it; payload carries the questions so the tapped notification renders
+        the selector before the stream connects, capped at APNs's 4KB); `turn_end`/child-exit
+        error → **only when `session.subscribers.size === 0`** (nobody has the live stream
+        open), so a convo you're actively watching doesn't buzz you.
+      - **iOS.** `PushManager` (`Sources/Core/PushManager.swift`, `@MainActor @Observable`
+        singleton) + an `AppDelegate` (`@UIApplicationDelegateAdaptor`): request auth on
+        first signed-in home screen, register the APNs token with the server, and turn a
+        tapped `ask` notification into a `pendingAsk`. The shared **`AskView`**
+        (`Sources/Views/AskView.swift`) is the native rebuild of the web picker (single/
+        multi-select + free-text "Other"), used in **both** places: inline in
+        `DriveSessionView` when the `ask` SSE event streams in (new `ask`/`ask_resolved`
+        cases → `askCard`, posts `/answer`), and in a global **`AskSheet`** presented over
+        the root (`VibeRateApp` → `RootContainer`) so a notification tap opens the selector
+        from a cold launch / any screen, independent of the nav stack. Foreground delivery
+        shows the banner for `ask` only (suppresses finished/error while you're watching).
+        `project.yml` gains the `aps-environment: production` entitlement (TestFlight uses
+        production APNs) + `UIBackgroundModes: [remote-notification]`. **Pending Codemagic
+        build + on-device verify**, and the human-only setup below.
+      - ◻ **You (one-time, before triggering the build):** (1) In the Apple Developer portal,
+        **enable the Push Notifications capability on the `com.viberate.app` App ID** — the
+        `fetch-signing-files --create` step provisions a profile but does *not* turn on the
+        capability, so the signed build would otherwise be rejected for an `aps-environment`
+        the profile doesn't grant. (2) Create an **APNs Auth Key (.p8)** (Keys → +, APNs) and
+        note its Key ID + your Team ID. (3) Set the Fly secrets `APNS_KEY_P8` (the .p8
+        contents — real PEM, `\n`-escaped, or base64 all accepted), `APNS_KEY_ID`,
+        `APNS_TEAM_ID` (and optionally `APNS_BUNDLE_ID`, default `com.viberate.app`). Until
+        the secrets are set the server registers tokens but sends nothing
+        (`/push/register` returns `pushConfigured:false`).

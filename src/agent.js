@@ -70,6 +70,21 @@ export function setTranscriptLoader(fn) {
   loadTranscript = fn;
 }
 
+// Push notifier (APNs) — injected so agent.js stays free of the push layer (and of
+// any network import in tests). server.js wires this to apns.notifyAll. We fan a
+// notification when the agent asks you a question, finishes a turn, or errors — the
+// "steer an async agent without babysitting it" half of the native app.
+let pushNotifier = null;
+export function setPushNotifier(fn) {
+  pushNotifier = fn;
+}
+function notifyPush(n) {
+  if (!pushNotifier) return;
+  try {
+    Promise.resolve(pushNotifier(n)).catch(() => { /* push is opportunistic */ });
+  } catch { /* a push failure must never touch a turn */ }
+}
+
 // Pending `ask` round-trips, keyed by askId: the sidecar's POST is parked here
 // until the Drive UI answers (resolveAsk) or the wait times out.
 const pendingAsks = new Map();
@@ -81,11 +96,26 @@ export function registerAsk(sessionId, questions) {
   const session = sessions.get(sessionId);
   if (!session) return null;
   const askId = randomUUID();
-  emit(session, { kind: 'ask', askId, questions: Array.isArray(questions) ? questions : [] });
+  const qs = Array.isArray(questions) ? questions : [];
+  emit(session, { kind: 'ask', askId, questions: qs });
   // The turn's child is alive but blocked on the human — surface a real `waiting`
   // lifecycle state (PLAN_COCKPIT.md §3.1) so the cockpit roster can sort
   // needs-attention agents first. Cleared back to `working` when the ask settles.
   setStatus(session, 'waiting');
+  // The headline push: the agent is blocked on your choice. Always send — this is the
+  // case you've left the app for. (If you're watching, the in-app picker covers it and
+  // iOS suppresses the foreground banner.) The payload carries the questions so the
+  // tapped notification can render the selector before the stream even connects.
+  const q0 = qs[0] || null;
+  notifyPush({
+    kind: 'ask',
+    title: 'Your agent needs you',
+    body: (q0 && (q0.question || q0.header)) || 'Tap to pick how it should proceed.',
+    sessionId,
+    projectSlug: session.projectSlug,
+    askId,
+    questions: qs,
+  });
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       if (pendingAsks.delete(askId)) {
@@ -813,6 +843,30 @@ function runTurn(session, prompt, { resume }) {
       setStatus(session, 'idle');
     }
     emit(session, { kind: 'turn_end', code });
+
+    // Push "finished"/"errored" only when nobody has the live stream open — if a
+    // subscriber is connected the user is watching this convo, so a banner would just
+    // be noise (and iOS would suppress it in the foreground anyway). `ask` doesn't gate
+    // on this: it's blocking and you've usually left the app for it.
+    if (session.subscribers.size === 0) {
+      if (code !== 0) {
+        notifyPush({
+          kind: 'error',
+          title: 'Your agent hit an error',
+          body: session.title ? `“${String(session.title).slice(0, 80)}” stopped.` : 'A turn ended with an error — tap to review.',
+          sessionId: session.id,
+          projectSlug: session.projectSlug,
+        });
+      } else {
+        notifyPush({
+          kind: 'finished',
+          title: 'Your agent finished',
+          body: session.title ? `“${String(session.title).slice(0, 80)}” is done.` : 'A turn finished — tap to review what it did.',
+          sessionId: session.id,
+          projectSlug: session.projectSlug,
+        });
+      }
+    }
 
     // Fold this turn's transcript into its bound project so the convo lands in the
     // rail. The CLI wrote a durable JSONL as a side effect; in hosted Drive nothing
