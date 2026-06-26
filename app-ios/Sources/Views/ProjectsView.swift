@@ -19,6 +19,7 @@ struct ProjectsView: View {
             List {
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(.red)
+                        .listRowBackground(Color.clear)
                 }
                 ForEach(projects) { project in
                     NavigationLink(value: project) {
@@ -43,13 +44,22 @@ struct ProjectsView: View {
                             .foregroundStyle(.secondary)
                         }
                     }
+                    .listRowBackground(Color.clear)
                 }
             }
             // Plain style: rows sit directly on the background (iOS Settings-ish) rather
             // than inside one big rounded "web card" container.
             .listStyle(.plain)
+            // Hued, layered backdrop instead of pure-black `systemBackground` (the rows are
+            // cleared above so it shows through), with a faint brain watermark filling the
+            // dead air below a short list.
+            .screenBackground()
             .overlay {
-                if loading && projects.isEmpty { ProgressView() }
+                if loading && projects.isEmpty {
+                    ProgressView()
+                } else if projects.isEmpty && error == nil {
+                    GlyphWatermark(systemName: "square.stack.3d.up").offset(y: 40)
+                }
             }
             .navigationTitle("Projects")
             .navigationDestination(for: Project.self) { project in

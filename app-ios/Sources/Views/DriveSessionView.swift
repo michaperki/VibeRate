@@ -93,6 +93,7 @@ struct DriveSessionView: View {
             composer
             transcript
         }
+        .screenBackground()
         .navigationTitle(project.name ?? project.slug)
         .navigationBarTitleDisplayMode(.inline)
         .appBackButton { dismiss() }
@@ -109,7 +110,9 @@ struct DriveSessionView: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     HStack(spacing: 4) {
-                        Circle().fill(connectionColor).frame(width: 5, height: 5)
+                        // Pulses while connecting (no events yet) — a live "reaching the
+                        // agent…" heartbeat; steady once the stream is flowing.
+                        PulsingDot(color: connectionColor, active: eventCount == 0, size: 5)
                         Text(headerSubtitle)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -278,7 +281,7 @@ struct DriveSessionView: View {
                             .padding(.horizontal, 8)
                             .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .disabled(!ready || sending)
                 }
             }
@@ -286,6 +289,10 @@ struct DriveSessionView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 24)
+        // Fill the void below a fresh agent with a faint brand glyph — "this is a place".
+        .background(alignment: .bottomTrailing) {
+            GlyphWatermark(systemName: "sparkles", size: 180).offset(x: 30, y: 30)
+        }
     }
 
     /// A quiet "what happens after you send" footer so the new-agent screen reads as
@@ -331,7 +338,9 @@ struct DriveSessionView: View {
             SelectableText(attributed: MarkdownNS.plain(
                 b.text, font: .preferredFont(forTextStyle: .body), color: .label))
                 .padding(10)
-                .background(Color.accentColor.opacity(0.18))
+                // Your own prompts wear the brand gradient — the identity color on the thing
+                // you create, distinct from the agent's flat replies.
+                .background(Theme.brandGradient.opacity(0.22))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         case .assistant:
             // P-1: while THIS bubble is the live streaming one, render plain Text. Parsing

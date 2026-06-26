@@ -45,6 +45,7 @@ struct CockpitView: View {
                         .foregroundStyle(.secondary)
                         .listRowInsets(rowInsets)
                         .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
 
                 if store.agents.isEmpty && offlineConversations.isEmpty {
@@ -62,6 +63,9 @@ struct CockpitView: View {
         // Plain rows on the page background (matching the Projects list) instead of one big
         // rounded "card inside page" — the grouped style read as a heavy floating container.
         .listStyle(.plain)
+        // Hued, layered backdrop instead of pure-black `systemBackground`; rows are cleared
+        // individually (`.listRowBackground(.clear)`) so the depth shows through.
+        .screenBackground()
         // A clear gap between the "Agents" (Now) and "Conversations" zones so they read as
         // two sections, not one run of rows.
         .listSectionSpacing(28)
@@ -131,8 +135,9 @@ struct CockpitView: View {
                 } label: {
                     AgentRow(agent: agent, now: tick)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .listRowInsets(rowInsets)
+                .listRowBackground(Color.clear)
                 // Swipe to end an agent — there's no terminal ctrl-c on a phone,
                 // so without this idle agents accrue on the roster (matrix #18).
                 // Non-destructive: the transcript survives and stays resumable.
@@ -176,6 +181,7 @@ struct CockpitView: View {
                     .foregroundStyle(.secondary)
                     .listRowInsets(rowInsets)
                     .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
             } else {
                 ForEach(offlineConversations) { s in
                     Button {
@@ -187,8 +193,9 @@ struct CockpitView: View {
                     } label: {
                         ConversationRow(session: s, now: tick)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .listRowInsets(rowInsets)
+                    .listRowBackground(Color.clear)
                 }
             }
         } header: {
@@ -229,6 +236,7 @@ struct CockpitView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
         .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
     }
 
     /// Both the live roster and the past list are empty *and there's no error* — a genuinely
@@ -246,6 +254,7 @@ struct CockpitView: View {
             }
             .buttonStyle(.borderedProminent)
         }
+        .background { GlyphWatermark(systemName: "wind").offset(y: 8) }
     }
 
     /// Roster + past list both failed to load — show the error and a retry, rather than a
@@ -285,6 +294,7 @@ struct CockpitView: View {
             }
             .listRowInsets(rowInsets)
             .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         } header: {
             Text("Agents")
         }
@@ -316,6 +326,7 @@ struct CockpitView: View {
         .padding(.vertical, 40)
         .padding(.horizontal, 24)
         .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
     }
 
     /// Retry a failed load (error-state button): clear the error, repaint from the list
@@ -362,7 +373,9 @@ private struct AgentRow: View {
             // tail-first; the elapsed timer is fixed and never compresses the title (and
             // there's no meter on this line, so the title can't be pushed off-screen).
             HStack(spacing: 8) {
-                Circle().fill(statusColor).frame(width: 9, height: 9)
+                // The dot pulses while the agent is actively working — the cheapest "this is
+                // live right now" signal on the roster; steady otherwise.
+                PulsingDot(color: statusColor, active: isWorking, size: 9)
                 Text(primaryLine)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
@@ -385,8 +398,10 @@ private struct AgentRow: View {
                 StatusPill(text: statusLabel, color: statusColor)
                     .fixedSize()
                 if let plan = agent.plan {
+                    // The plan is a file (PLAN_*.md) — mono is the "developer-terminal" voice
+                    // for anything file/code/agent-flavored (2026-06-26 type pass).
                     Label(plan, systemImage: "diamond.fill")
-                        .font(.caption2)
+                        .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -416,6 +431,12 @@ private struct AgentRow: View {
     private var statusLabel: String { AgentRunState.from(agent.status).pill }
 
     private var statusColor: Color { AgentRunState.from(agent.status).color }
+
+    /// Whether the agent is mid-turn — drives the pulsing status dot.
+    private var isWorking: Bool {
+        let s = AgentRunState.from(agent.status)
+        return s == .working || s == .starting
+    }
 
     /// Elapsed on the current turn — only while actively working (idle agents have no
     /// running turn to time). `promptStartedAt` is ms-epoch.
@@ -551,6 +572,7 @@ private struct CtxMeter: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.2)).frame(width: width, height: 5)
                 Capsule().fill(color).frame(width: width * CGFloat(min(pct, 100)) / 100, height: 5)
+                    .animation(.easeInOut(duration: 0.45), value: pct)
             }
             Text(readout)
                 .font(.caption2.monospacedDigit())

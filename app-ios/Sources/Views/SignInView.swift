@@ -10,7 +10,9 @@ struct SignInView: View {
             Spacer()
             VStack(spacing: 8) {
                 Text("VibeRate")
-                    .font(.largeTitle.bold())
+                    .font(.system(size: 46, weight: .heavy))
+                    .tracking(-1)
+                    .foregroundStyle(Theme.brandGradient)
                 Text("Drive your coding agents from your phone.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -64,5 +66,7 @@ struct SignInView: View {
             Spacer()
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { Theme.ambient.ignoresSafeArea() }
     }
 }

@@ -9,11 +9,19 @@ struct VibeRateApp: App {
     // Owns the signed-in nav stack's path, so a push tap can deep-link into a conversation.
     @State private var router = NavRouter()
 
+    init() {
+        // Theme the nav bar + title type before any view paints (2026-06-26 "fun" pass).
+        configureGlobalAppearance()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootContainer()
                 .environment(auth)
                 .environment(router)
+                // The app's identity is the dark, characterful dev-tool look — lock it so the
+                // hued palette reads the same regardless of the phone's light/dark setting.
+                .preferredColorScheme(.dark)
                 .task { await auth.bootstrap() }
         }
     }

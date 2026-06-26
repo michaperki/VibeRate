@@ -41,6 +41,7 @@ struct BrainView: View {
             } else if docs.isEmpty {
                 stateCard(icon: "brain", title: "No brain docs yet",
                           message: "This project has no .md docs captured yet. The brain fills in as the agent reads and writes docs.")
+                    .background { GlyphWatermark().offset(y: 20) }
             } else {
                 VStack(alignment: .leading, spacing: 28) {
                     anchorSection
@@ -52,6 +53,7 @@ struct BrainView: View {
         }
         .navigationTitle("Brain")
         .navigationBarTitleDisplayMode(.inline)
+        .screenBackground()
         .task { await load() }
         .refreshable { await load() }
         // Drive the glow decay (B8). 0.3s steps over the 4s window read as a smooth fade.
@@ -128,7 +130,7 @@ struct BrainView: View {
         } label: {
             BrainNodeView(doc: doc, prominent: prominent, glow: g, glowVerb: v)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .contextMenu {
             Button {
                 Haptics.tap()
@@ -151,9 +153,11 @@ struct BrainView: View {
     }
 
     private func sectionLabel(_ s: String) -> some View {
+        // Brand-tinted, slightly off full strength — lets the identity color carry the
+        // section structure instead of yet another grey (2026-06-26 "fun" pass).
         Text(s.uppercased())
             .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.accentColor.opacity(0.85))
             .tracking(0.5)
     }
 
@@ -232,8 +236,14 @@ struct BrainNodeView: View {
             CompletionRing(pct: c.pct, size: diameter)
         } else {
             ZStack {
-                Circle()
-                    .fill(prominent ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
+                // The constitution anchor wears the brand gradient (the brand color off its
+                // leash on the brain's most important node); quiet docs stay a flat grey.
+                if prominent {
+                    Circle().fill(Theme.brandGradient.opacity(0.22))
+                    Circle().strokeBorder(Theme.brandGradient.opacity(0.5), lineWidth: 1)
+                } else {
+                    Circle().fill(Color.secondary.opacity(0.12))
+                }
                 Image(systemName: prominent ? "circle.hexagongrid.fill" : "doc.text")
                     .font(prominent ? .title3 : .subheadline)
                     .foregroundStyle(prominent ? Color.accentColor : .secondary)
@@ -243,26 +253,58 @@ struct BrainNodeView: View {
     }
 }
 
-/// An arc completion ring — amber→green by %, mirroring the web brain-node ring. The keeper
-/// signal: "plans with a completion ring read as strong" (Mike, PROJECT_VIEW_PLAN.md).
+/// The completion ring — the app's signature element (the most distinctive thing on screen,
+/// so the 2026-06-26 "fun" pass leans into it). It now: sweeps its fill from 0 to value on
+/// appear (~0.7s); strokes with the brand spectrum (blue→violet→lime) so the *tip* color
+/// reads as "how far along"; and a finished plan gets a celebratory state — a solid lime
+/// ring with a soft glow and a checkmark, so reaching 100% *feels* like something instead of
+/// just changing a number. The keeper signal: "plans with a completion ring read as strong"
+/// (Mike, PROJECT_VIEW_PLAN.md).
 struct CompletionRing: View {
     let pct: Int
     var size: CGFloat = 50
     var line: CGFloat = 4
 
-    private var color: Color {
-        if pct >= 100 { return .green }
-        if pct >= 50 { return Color(red: 0.55, green: 0.78, blue: 0.25) }
-        return .orange
-    }
+    /// Flipped true on appear to drive the sweep + the celebratory pop.
+    @State private var animate = false
+
+    private var complete: Bool { pct >= 100 }
+    private var target: CGFloat { max(0.001, CGFloat(min(pct, 100)) / 100) }
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.secondary.opacity(0.18), lineWidth: line)
-            Circle()
-                .trim(from: 0, to: max(0.001, CGFloat(pct) / 100))
-                .stroke(color, style: StrokeStyle(lineWidth: line, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            // Track — a faint hairline so the unfilled portion still reads as a ring.
+            Circle().stroke(Color.white.opacity(0.10), lineWidth: line)
+
+            if complete {
+                // Celebratory: a full lime ring with a soft glow that blooms as it lands.
+                Circle()
+                    .stroke(Theme.lime, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                    .shadow(color: Theme.lime.opacity(0.6), radius: animate ? 6 : 0)
+            } else {
+                Circle()
+                    .trim(from: 0, to: animate ? target : 0)
+                    .stroke(Theme.ringGradient, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+
+            center
+        }
+        .frame(width: size, height: size)
+        .animation(.easeOut(duration: 0.7), value: animate)
+        .onAppear { animate = true }
+    }
+
+    @ViewBuilder
+    private var center: some View {
+        if complete {
+            // A checkmark instead of "100%" — completion as a state, not a count.
+            Image(systemName: "checkmark")
+                .font(.system(size: size * 0.36, weight: .bold))
+                .foregroundStyle(Theme.lime)
+                .scaleEffect(animate ? 1 : 0.4)
+                .opacity(animate ? 1 : 0)
+        } else {
             // A "%" unit on the number so a bare "63" reads as a percentage, not a count
             // (UI review 2026-06-26). The unit is smaller + muted so the figure still leads.
             HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -274,6 +316,5 @@ struct CompletionRing: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: size, height: size)
     }
 }

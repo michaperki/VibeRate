@@ -6,7 +6,10 @@ struct RootView: View {
     var body: some View {
         switch auth.state {
         case .loading:
-            ProgressView().controlSize(.large)
+            ZStack {
+                Theme.ambient.ignoresSafeArea()
+                ProgressView().controlSize(.large)
+            }
         case .signedOut:
             SignInView()
         case .signedIn(let me):

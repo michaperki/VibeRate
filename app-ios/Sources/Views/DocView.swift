@@ -41,6 +41,7 @@ struct DocView: View {
         }
         .navigationTitle(doc.base)
         .navigationBarTitleDisplayMode(.inline)
+        .screenBackground()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
