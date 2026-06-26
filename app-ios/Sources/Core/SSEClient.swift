@@ -21,6 +21,12 @@ final class SSEClient: NSObject, URLSessionDataDelegate {
     /// distinct from "never connected".
     var onOpen: ((Int) -> Void)?
 
+    /// Fires when a `:` heartbeat comment arrives (the server pings every ~15s between/
+    /// within turns). This is the *only* liveness signal during a quiet stretch — events
+    /// don't flow but pings do — so the view's watchdog uses it to tell "alive but idle"
+    /// from "socket open but silently dead". Fires on the delegate queue.
+    var onHeartbeat: (() -> Void)?
+
     private let url: URL
     private let token: String?
     private var session: URLSession?
@@ -116,7 +122,7 @@ final class SSEClient: NSObject, URLSessionDataDelegate {
             curData = []
             return
         }
-        if line.hasPrefix(":") { return }       // comment / heartbeat
+        if line.hasPrefix(":") { onHeartbeat?(); return }   // comment / heartbeat → liveness signal
         if line.hasPrefix("id:") {
             curId = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
         } else if line.hasPrefix("data:") {

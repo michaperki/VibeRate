@@ -359,20 +359,29 @@ export function mountAgent(app, opts = {}) {
     res.flushHeaders?.();
 
     let unsub;
+    let ping;
+    let closed = false;
+    // Drop a silently-dead subscriber + end the response (see the Claude stream route for
+    // the half-open-socket rationale) so the client's watchdog reconnects instead of freezing.
+    const teardown = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(ping);
+      try { unsub && unsub(); } catch { /* already gone */ }
+      try { res.end(); } catch { /* already ended */ }
+    };
+    const safeWrite = (chunk) => { if (closed) return; try { res.write(chunk); } catch { teardown(); } };
     try {
       unsub = subscribeCodex(req.params.id, (event) => {
-        res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
+        safeWrite(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
       }, after);
     } catch (err) {
       res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
       return res.end();
     }
 
-    const ping = setInterval(() => res.write(': ping\n\n'), 15000);
-    req.on('close', () => {
-      clearInterval(ping);
-      unsub && unsub();
-    });
+    ping = setInterval(() => safeWrite(': ping\n\n'), 15000);
+    req.on('close', teardown);
   });
 
   app.get('/api/agent/sessions/:id', guard, (req, res) => {
@@ -477,9 +486,25 @@ export function mountAgent(app, opts = {}) {
     res.flushHeaders?.();
 
     let unsub;
+    let ping;
+    let closed = false;
+    // Tear down exactly once: stop the heartbeat, drop the subscriber, end the response.
+    // A half-open socket (mobile network / edge drop) throws on `res.write` but may NEVER
+    // fire `req.on('close')`, so without this the dead subscriber lingers in the session's
+    // set forever — and `emit()` swallows the write throw. Ending the response also makes
+    // the *client's* SSE loop terminate, so its reconnect/watchdog kicks in instead of the
+    // transcript freezing until the user manually re-enters.
+    const teardown = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(ping);
+      try { unsub && unsub(); } catch { /* already gone */ }
+      try { res.end(); } catch { /* already ended */ }
+    };
+    const safeWrite = (chunk) => { if (closed) return; try { res.write(chunk); } catch { teardown(); } };
     try {
       unsub = subscribe(req.params.id, (event) => {
-        res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
+        safeWrite(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
       }, after);
     } catch (err) {
       res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
@@ -487,10 +512,7 @@ export function mountAgent(app, opts = {}) {
     }
 
     // Heartbeat so proxies/clients keep the connection open between turns.
-    const ping = setInterval(() => res.write(': ping\n\n'), 15000);
-    req.on('close', () => {
-      clearInterval(ping);
-      unsub && unsub();
-    });
+    ping = setInterval(() => safeWrite(': ping\n\n'), 15000);
+    req.on('close', teardown);
   });
 }

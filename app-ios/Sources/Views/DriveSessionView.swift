@@ -44,6 +44,7 @@ struct DriveSessionView: View {
     @State private var sessionId: String?
     @State private var activeAgentType = "codex"
     @State private var streamTask: Task<Void, Never>?
+    @State private var watchdogTask: Task<Void, Never>?  // reopens a stream that goes silently dead (open socket, no bytes)
     @State private var draft = ""
     @State private var sending = false
     @State private var ready = false                 // initial connect resolved
@@ -139,7 +140,7 @@ struct DriveSessionView: View {
             }
         }
         .task { await connect() }
-        .onDisappear { streamTask?.cancel(); stopDisarmTask?.cancel() }
+        .onDisappear { streamTask?.cancel(); watchdogTask?.cancel(); stopDisarmTask?.cancel() }
         // A backgrounded URLSession SSE socket freezes (matrix #7): on return to the
         // foreground, tear down and reopen from the high-water seq so we don't sit on a
         // dead stream until re-entry. No-op if we never opened one.
@@ -734,11 +735,17 @@ struct DriveSessionView: View {
     /// history), or `lastSeq` on a reconnect (it backfills only the gap, no dupes).
     private func openStream(_ id: String, after: Int = 0) {
         streamTask?.cancel()
+        watchdogTask?.cancel()
         if after == 0 { eventCount = 0; lastSeq = 0; ingestBuffer.reset() }
+        ingestBuffer.lastActivityAt = Date()   // fresh socket — start the liveness clock now
         streamHTTP = nil
         let url = APIConfig.url(streamPath(id: id, after: after))
         let sse = SSEClient(url: url, token: token)
         sse.onOpen = { code in Task { @MainActor in streamHTTP = code } }
+        // A heartbeat is the only proof a quiet stream is still alive — stamp the clock so
+        // the watchdog doesn't reconnect a healthy-but-idle socket. Rare (~15s), so the
+        // per-ping hop to the main actor is cheap.
+        sse.onHeartbeat = { Task { @MainActor in ingestBuffer.lastActivityAt = Date() } }
         streamTask = Task { @MainActor in
             do {
                 // Opening a conversation replays the WHOLE token-by-token history (the server
@@ -768,6 +775,32 @@ struct DriveSessionView: View {
                 await reconnect(id)
             }
         }
+        startWatchdog(id)
+    }
+
+    /// Liveness watchdog. The `reconnect` path only fires when the SSE loop *ends* (the
+    /// server sent a FIN or threw) — but a half-open socket or an edge-buffered HTTP/2
+    /// response leaves the loop suspended forever: the connection looks open yet delivers
+    /// nothing. That's the "I see it start, then it freezes until I leave and come back"
+    /// bug — manual re-entry was the only recovery. The server pings every ~15s, so total
+    /// silence past a generous window means the stream is dead. Reopen from `lastSeq` (no
+    /// dupes), i.e. do the "leave and come back" automatically.
+    private func startWatchdog(_ id: String) {
+        watchdogTask?.cancel()
+        watchdogTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if Task.isCancelled { return }
+                // We moved on (left the view, switched sessions) — let the new stream own it.
+                guard ready, sessionId == id else { return }
+                // A rejected stream (4xx auth/routing) already won't reconnect — don't hot-loop it.
+                if let code = streamHTTP, !(200..<300).contains(code) { return }
+                if Date().timeIntervalSince(ingestBuffer.lastActivityAt) > 25 {
+                    openStream(id, after: lastSeq)   // reopens + starts a fresh watchdog
+                    return
+                }
+            }
+        }
     }
 
     /// Throttle frame ingestion to ≤ one flush per ~50ms. A burst (the open-time backfill)
@@ -790,6 +823,7 @@ struct DriveSessionView: View {
         let batch = ingestBuffer.pending
         ingestBuffer.pending = []
         guard !batch.isEmpty else { return }
+        ingestBuffer.lastActivityAt = Date()   // real frames count as liveness too, not just pings
         eventCount += batch.count
         if ingestBuffer.maxSeq > lastSeq { lastSeq = ingestBuffer.maxSeq }
         if after == 0 { historyLoaded = true }
@@ -1141,6 +1175,11 @@ final class IngestBuffer {
     var pending: [String] = []      // raw SSE `data` payloads awaiting ingest
     var maxSeq = 0                  // highest seq seen in the buffer → committed to lastSeq on flush
     var flushScheduled = false      // a coalescing flush is already queued for this window
+    // Wall-clock of the last byte we heard on the stream — a frame *or* a heartbeat. The
+    // liveness watchdog reads this to detect a socket that's open but silently dead. Kept
+    // off `@State` deliberately (like `pending`): stamping it per chunk must not invalidate
+    // the view. Touched only on the main actor (flush + the dispatched heartbeat hop).
+    var lastActivityAt = Date()
 
-    func reset() { pending = []; maxSeq = 0; flushScheduled = false }
+    func reset() { pending = []; maxSeq = 0; flushScheduled = false; lastActivityAt = Date() }
 }
