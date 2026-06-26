@@ -149,11 +149,51 @@ export async function startClone(slug, { repo, branch, token } = {}) {
   return ws;
 }
 
+// Start a brand-new project with no repo (ONBOARDING.md Fork 2 / Slice 3). Instead of
+// cloning, we `git init` an empty checkout on the volume, seed a minimal brain, and make
+// the first commit — so a user with no GitHub repo can create and Drive a project
+// entirely in-app. Local-first by design: there's no remote yet (a later "Publish to
+// GitHub" step, using the owner's `repo` grant, can add one). Near-instant, so unlike
+// startClone this resolves to `ready` synchronously rather than polling through `cloning`.
+const SCAFFOLD_GITIGNORE = 'node_modules/\n.env\n.env.local\n.DS_Store\n';
+
+function scaffoldClaudeMd(name) {
+  const title = (name && String(name).trim()) || 'New project';
+  return `# ${title}\n\nStarted from scratch in VibeRate. This file is the project's brain — your\nagent reads it on every turn. Describe what you're building, the decisions\nyou make, and how things work as the project takes shape.\n`;
+}
+
+export async function scaffoldWorkspace(slug, { name } = {}) {
+  const cur = getWorkspace(slug);
+  if (!cur) throw new Error('unknown project');
+  if (cur.workspace && cur.workspace.status === 'cloning') throw new Error('a clone is already in progress');
+  const dir = pickWorkspaceDir(slug, name || slug, cur.workspace && cur.workspace.dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  // A git identity for the seed commit — the container has none configured, and a
+  // commit without one fails. Passed per-command (`-c`) so nothing is written globally.
+  const ident = ['-c', 'user.name=VibeRate', '-c', 'user.email=drive@viberate.app'];
+  const opts = { cwd: dir, timeout: 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
+  try {
+    await exec('git', ['init', '-b', 'main'], opts);
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), scaffoldClaudeMd(name));
+    fs.writeFileSync(path.join(dir, '.gitignore'), SCAFFOLD_GITIGNORE);
+    await exec('git', ['add', '-A'], opts);
+    await exec('git', [...ident, 'commit', '-m', 'Initial commit'], opts);
+    return setWorkspace(slug, { repo: null, branch: 'main', dir, status: 'ready', scaffold: true, head: await headSha(dir), error: null });
+  } catch (err) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    return setWorkspace(slug, { status: 'error', error: redact(err && err.message ? err.message : String(err)) });
+  }
+}
+
 // Refresh a ready workspace to the remote tip (fetch + hard reset). Agents can also
 // pull/push themselves; this is the manual "catch up" button.
 export async function syncWorkspace(slug) {
   const cur = getWorkspace(slug);
   if (!cur || !cur.workspace || cur.workspace.status !== 'ready') throw new Error('workspace is not ready');
+  // A scaffolded (local-first) workspace has no remote — there's nothing to fetch, and
+  // attempting it would mark a perfectly good checkout `error`. No-op instead.
+  if (!cur.workspace.repo) return cur.workspace;
   const dir = cur.workspace.dir || workspaceDir(slug);
   const branch = cur.workspace.branch;
   try {

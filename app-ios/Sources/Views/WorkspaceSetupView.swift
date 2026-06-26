@@ -17,6 +17,7 @@ struct WorkspaceSetupView: View {
     @State private var branch = ""
     @State private var phase: Phase = .loading
     @State private var error: String?
+    @State private var scaffolding = false   // the busy `.cloning` phase is a from-scratch init, not a clone
 
     /// `loading` = fetching the prefill/current state, `form` = awaiting the user,
     /// `cloning` = clone in flight (poll until ready/error).
@@ -43,11 +44,24 @@ struct WorkspaceSetupView: View {
                     Text("VibeRate clones this repo onto the host so an agent can drive it. This happens once per project.")
                 }
 
+                // No repo to point at? Start from scratch instead — `git init` an empty,
+                // brain-seeded checkout so the project is driveable without any GitHub repo.
+                if phase != .cloning {
+                    Section {
+                        Button { Task { await scaffold() } } label: {
+                            Label("Start from scratch (no repo)", systemImage: "sparkles")
+                        }
+                        .disabled(phase == .loading)
+                    } footer: {
+                        Text("Creates an empty project your agent builds up from your first message.")
+                    }
+                }
+
                 if phase == .cloning {
                     Section {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("Cloning and installing dependencies… this can take a minute.")
+                            Text(scaffolding ? "Setting up an empty project…" : "Cloning and installing dependencies… this can take a minute.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -96,6 +110,25 @@ struct WorkspaceSetupView: View {
             self.error = apiMessage(error)
         }
         phase = .form
+    }
+
+    /// Start from scratch: `git init` a brain-seeded empty checkout (no repo, no remote).
+    /// Resolves to `ready` synchronously server-side, so there's no polling — hand control
+    /// straight back so the queued first message can start the project's first agent.
+    private func scaffold() async {
+        error = nil
+        scaffolding = true
+        phase = .cloning   // reuse the busy state to lock the form while it runs
+        defer { scaffolding = false }
+        do {
+            let ws = try await client.scaffoldWorkspace(slug: project.slug, name: project.name)
+            if ws.status == "ready" { onReady(); dismiss(); return }
+            error = ws.error ?? "Could not start from scratch."
+            phase = .form
+        } catch {
+            self.error = apiMessage(error)
+            phase = .form
+        }
     }
 
     /// Kick off the clone, then poll the workspace status until it leaves `cloning`.

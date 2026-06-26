@@ -4407,15 +4407,18 @@ function openNewProjectModal() {
         <button class="memo-close" title="Close">✕</button>
       </div>
       <div class="dv-body dv-start">
-        <p class="dim-note">Start a project from one of your Git repositories. We'll set up the
-          code so your agent can start working on it right away.</p>
+        <p class="dim-note">Start a project from one of your Git repositories, or start from
+          scratch — we'll create an empty project your agent can build up from your first message.</p>
         <div id="np-banner" class="dv-banner hidden bad"></div>
         <label for="np-name">Project name <span class="dim-note">(optional)</span></label>
         <input id="np-name" placeholder="My project" />
         <div id="np-repo-area"><div class="dim-note">Loading…</div></div>
         <label for="np-branch">Branch <span class="dim-note">(optional — uses the default branch)</span></label>
         <input id="np-branch" placeholder="main" />
-        <div class="dv-actions"><button id="np-create">Create project</button></div>
+        <div class="dv-actions">
+          <button id="np-create">Create project</button>
+          <button id="np-scratch" class="ghost" title="Create an empty project with no repository">Start from scratch</button>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(wrap);
@@ -4448,6 +4451,30 @@ function openNewProjectModal() {
     } catch (e) {
       const msg = String(e.message) === '401' ? 'please sign in to create a project' : (e.message || 'could not create the project');
       banner(msg);
+      el('#np-create').disabled = false;
+    }
+  });
+  // Start from scratch: create a repo-less project and scaffold an empty checkout
+  // (git init + minimal CLAUDE.md) on the host, then drop straight into Drive — no
+  // GitHub, no terminal (ONBOARDING.md Fork 2 / Slice 3).
+  const scratch = el('#np-scratch');
+  if (scratch) scratch.addEventListener('click', async () => {
+    const name = el('#np-name').value.trim();
+    el('#np-scratch').disabled = true;
+    el('#np-create').disabled = true;
+    try {
+      const { id } = await apiPost('/api/projects/new', { name: name || undefined });
+      // Scaffold now. If the caller can't drive yet, the Drive view's setup card is the
+      // fallback — so swallow that failure rather than blocking creation.
+      try { await drivePost('/workspace/' + encodeURIComponent(id) + '/scaffold', { name: name || undefined }); } catch { /* drive flow handles it */ }
+      close();
+      await loadProjects();
+      await selectProject(id);
+      openDriveForProject(id);
+    } catch (e) {
+      const msg = String(e.message) === '401' ? 'please sign in to create a project' : (e.message || 'could not create the project');
+      banner(msg);
+      el('#np-scratch').disabled = false;
       el('#np-create').disabled = false;
     }
   });

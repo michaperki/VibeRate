@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import { startSession, adoptSession, sendMessage, stopSession, endSession, subscribe, subscribeRoster, getSession, listSessions, registerAsk, resolveAsk, recordReport } from './agent.js';
 import { startCodexSession, sendCodexMessage, stopCodexSession, endCodexSession, subscribeCodex, subscribeCodexRoster, getCodexSession, listCodexSessions } from './codexAgent.js';
 import { harnessReport, invalidateHost } from './harness.js';
-import { startClone, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
+import { startClone, scaffoldWorkspace, syncWorkspace, workspaceStatus, resolveProjectCwd } from './workspaces.js';
 import { listWorkspaceSessions } from './driveIngest.js';
 import { currentUser } from './oauth.js';
 import { bearer, hashToken } from './auth.js';
@@ -261,6 +261,18 @@ export function mountAgent(app, opts = {}) {
       const { repo, branch } = req.body || {};
       const token = githubTokenForProject(req.params.slug); // owner's connected token (Slice 2), or null → instance token
       const ws = await startClone(req.params.slug, { repo, branch, token });
+      res.json(ws);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Start from scratch (ONBOARDING.md Fork 2 / Slice 3): no repo to clone — `git init`
+  // an empty, brain-seeded checkout on the volume so a repo-less project can be driven
+  // entirely in-app. Resolves to `ready` directly (no polling), local-first (no remote).
+  app.post('/api/agent/workspace/:slug/scaffold', guard, async (req, res) => {
+    try {
+      const ws = await scaffoldWorkspace(req.params.slug, { name: req.body && req.body.name });
       res.json(ws);
     } catch (err) {
       fail(res, err);

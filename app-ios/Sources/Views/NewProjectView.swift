@@ -43,7 +43,9 @@ struct NewProjectView: View {
                 } header: {
                     Text("Repository (optional)")
                 } footer: {
-                    Text("The repo an agent will drive. You can add it now or paste it in when you first start a session.")
+                    Text(trimmedRepo.isEmpty
+                         ? "Leave this blank to start from scratch — VibeRate creates an empty project your agent builds up from your first message. No GitHub needed."
+                         : "The repo an agent will drive. It's cloned onto the host the first time you start a session.")
                 }
 
                 if let error {
@@ -66,7 +68,11 @@ struct NewProjectView: View {
                     if creating {
                         ProgressView()
                     } else {
-                        Button("Create") { Task { await create() } }
+                        // The label tells you which path you're on: a blank repo scaffolds
+                        // an empty, immediately-driveable checkout; a repo is cloned later.
+                        Button(trimmedRepo.isEmpty ? "Start from scratch" : "Create") {
+                            Task { await create() }
+                        }
                     }
                 }
             }
@@ -83,6 +89,14 @@ struct NewProjectView: View {
                 name: trimmedName.isEmpty ? nil : trimmedName,
                 repo: trimmedRepo.isEmpty ? nil : trimmedRepo,
                 branch: trimmedBranch.isEmpty ? nil : trimmedBranch)
+            // No repo → start from scratch: `git init` a brain-seeded empty checkout now so
+            // the project is driveable on the very first message (otherwise `POST /sessions`
+            // 409s with "workspace is not set up yet" and there's nothing to clone). Mirrors
+            // the web "Start from scratch" button. A repo project skips this — its checkout is
+            // cloned on first drive by WorkspaceSetupView.
+            if trimmedRepo.isEmpty {
+                _ = try await client.scaffoldWorkspace(slug: reply.id, name: trimmedName.isEmpty ? nil : trimmedName)
+            }
             // The fresh project isn't in the list yet — hand a lightweight stub straight to
             // the caller so it can navigate in immediately (slug == the returned id). The
             // list reload that follows fills in the rest.

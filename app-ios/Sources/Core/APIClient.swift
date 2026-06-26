@@ -200,6 +200,19 @@ struct APIClient {
         try await send(request("/api/agent/workspace/\(slug)"), as: WorkspaceInfo.self)
     }
 
+    /// Start a project from scratch with no repo to clone — `git init`s a brain-seeded
+    /// empty checkout on the host (`POST /api/agent/workspace/:slug/scaffold`) so a
+    /// repo-less project is immediately driveable. Resolves straight to `ready` (no
+    /// polling, no remote), unlike `setupWorkspace`. This is what lets you drive when you
+    /// don't have a GitHub repo at all.
+    @discardableResult
+    func scaffoldWorkspace(slug: String, name: String?) async throws -> WorkspaceState {
+        var payload: [String: String] = [:]
+        if let name, !name.isEmpty { payload["name"] = name }
+        let body = try JSONEncoder().encode(payload)
+        return try await send(request("/api/agent/workspace/\(slug)/scaffold", method: "POST", body: body), as: WorkspaceState.self)
+    }
+
     /// Clone the project's repo onto the host so an agent can drive it. Returns
     /// immediately with `status: cloning`; poll `workspace(slug:)` until it flips to
     /// `ready`/`error` (the clone + dep-install runs in the background server-side).
