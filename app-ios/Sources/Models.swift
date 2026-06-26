@@ -43,6 +43,14 @@ struct Project: Codable, Identifiable, Hashable {
     }
 }
 
+/// The reply from creating a project (`POST /api/projects/new`). `id` is the new
+/// project's slug; `branch` echoes back the optional workspace branch for the clone step.
+struct NewProject: Codable {
+    let id: String
+    let url: String?
+    let branch: String?
+}
+
 /// One captured session in a project's `sessions` list. The native client only needs
 /// the count for the list badge; live Drive streaming uses `/api/agent/sessions`
 /// instead, so the rest is decoded leniently (all optional).

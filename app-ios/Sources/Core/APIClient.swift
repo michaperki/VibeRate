@@ -146,6 +146,21 @@ struct APIClient {
         try await send(request("/api/projects"), as: [Project].self)
     }
 
+    /// Mint a new empty project from scratch — the native counterpart to the dashboard's
+    /// "New project" button (`POST /api/projects/new`). Only creates the project record +
+    /// repo hint; the checkout is cloned later by WorkspaceSetupView on first drive, so a
+    /// repo is optional here (you can paste it into the setup sheet instead). Returns the
+    /// new slug, which is also the project id. `name`/`branch` are echoed back.
+    @discardableResult
+    func createProject(name: String?, repo: String?, branch: String?) async throws -> NewProject {
+        var payload: [String: String] = [:]
+        if let name, !name.isEmpty { payload["name"] = name }
+        if let repo, !repo.isEmpty { payload["repo"] = repo }
+        if let branch, !branch.isEmpty { payload["branch"] = branch }
+        let body = try JSONEncoder().encode(payload)
+        return try await send(request("/api/projects/new", method: "POST", body: body), as: NewProject.self)
+    }
+
     /// The project's brain docs — the `.md` network the agent steers through
     /// (`GET /api/projects/:slug/docs`). Returns the docs array; the graph/rings/role are
     /// computed client-side (see `BrainDoc`), mirroring the web centerpiece. The endpoint

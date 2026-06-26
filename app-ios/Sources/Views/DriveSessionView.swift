@@ -14,7 +14,7 @@ struct DriveSessionView: View {
     /// on-disk transcript — used when the session is no longer live in memory (e.g. after
     /// a redeploy). Ignored when `attachTo` or `forceNew` is set.
     var resumeCid: String? = nil
-    /// Runtime for a live row tap. Fresh sessions default to Codex but can be switched
+    /// Runtime for a live row tap. Fresh sessions default to Claude but can be switched
     /// before the first send.
     var agentType: String? = nil
     /// The roster's last-known status for `attachTo`, so the bar reads right on entry.
@@ -42,7 +42,7 @@ struct DriveSessionView: View {
     @State private var status = "Connecting…"
     @State private var runState: AgentRunState = .idle   // canonical agent state (§1) — Source of truth for `busy`
     @State private var sessionId: String?
-    @State private var activeAgentType = "codex"
+    @State private var activeAgentType = "claude"
     @State private var streamTask: Task<Void, Never>?
     @State private var watchdogTask: Task<Void, Never>?  // reopens a stream that goes silently dead (open socket, no bytes)
     @State private var draft = ""
@@ -530,8 +530,8 @@ struct DriveSessionView: View {
 
     private var agentPicker: some View {
         Picker("Agent", selection: $activeAgentType) {
-            Text("Codex").tag("codex")
             Text("Claude").tag("claude")
+            Text("Codex").tag("codex")
         }
         .pickerStyle(.segmented)
         .accessibilityLabel("Agent")

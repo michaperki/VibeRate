@@ -8,6 +8,7 @@ struct ProjectsView: View {
     @State private var projects: [Project] = []
     @State private var loading = true
     @State private var error: String?
+    @State private var showNew = false   // the "New project" create sheet
     // Observe the push singleton so a tapped notification's `pendingRoute` triggers onChange.
     @State private var push = PushManager.shared
 
@@ -58,7 +59,17 @@ struct ProjectsView: View {
                 if loading && projects.isEmpty {
                     ProgressView()
                 } else if projects.isEmpty && error == nil {
-                    GlyphWatermark(systemName: "square.stack.3d.up").offset(y: 40)
+                    VStack(spacing: 16) {
+                        GlyphWatermark(systemName: "square.stack.3d.up", size: 140)
+                        Text("No projects yet")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Button { showNew = true } label: {
+                            Label("New project", systemImage: "plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .offset(y: 20)
                 }
             }
             .navigationTitle("Projects")
@@ -82,6 +93,12 @@ struct ProjectsView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { showNew = true } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("New project")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         if let email = me.email { Text(email) }
                         Button("Sign out", role: .destructive) {
@@ -92,6 +109,14 @@ struct ProjectsView: View {
                     } label: {
                         Image(systemName: "person.crop.circle")
                     }
+                }
+            }
+            // Create a project from scratch (the dashboard "New project" parity). On success
+            // jump straight into the new project's Cockpit, then refresh the list behind it.
+            .sheet(isPresented: $showNew) {
+                NewProjectView(token: TokenStore.load()) { project in
+                    router.path.append(project)
+                    Task { await load() }
                 }
             }
             .refreshable { await load() }
