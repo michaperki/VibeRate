@@ -77,7 +77,15 @@ struct BrainView: View {
     private var plansSection: some View {
         if !plans.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                sectionLabel(plans.count == 1 ? "1 plan" : "\(plans.count) plans")
+                // The "PLAN_" prefix lives here, in the header — stripped off every tile
+                // below — and the ring legend decodes the bare number ("% of the plan's
+                // checklist done"), so a first-timer isn't left guessing "percent of what".
+                VStack(alignment: .leading, spacing: 4) {
+                    sectionLabel(plans.count == 1 ? "1 plan" : "\(plans.count) plans")
+                    Text("ring = % of checklist done")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
                     ForEach(plans) { node($0) }
                 }
@@ -130,7 +138,7 @@ struct BrainView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     if let c = doc.completion { CompletionRing(pct: c.pct, size: 34) }
-                    Text(doc.base).font(.headline)
+                    Text(doc.displayLabel).font(.headline)
                 }
                 Text(doc.peekText)
                     .font(.caption)
@@ -207,7 +215,9 @@ struct BrainNodeView: View {
                 core
                     .scaleEffect(1 + 0.06 * glow)
             }
-            Text(doc.base)
+            // Stripped of `.md`/`PLAN_` and de-snaked so it wraps on spaces, never
+            // hyphenates mid-word in this narrow tile (UI review 2026-06-26).
+            Text(doc.displayLabel)
                 .font(.caption2.weight(prominent ? .semibold : .regular))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
@@ -253,9 +263,16 @@ struct CompletionRing: View {
                 .trim(from: 0, to: max(0.001, CGFloat(pct) / 100))
                 .stroke(color, style: StrokeStyle(lineWidth: line, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(pct)")
-                .font(.system(size: size * 0.28, weight: .semibold))
-                .foregroundStyle(.secondary)
+            // A "%" unit on the number so a bare "63" reads as a percentage, not a count
+            // (UI review 2026-06-26). The unit is smaller + muted so the figure still leads.
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text("\(pct)")
+                    .font(.system(size: size * 0.28, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("%")
+                    .font(.system(size: size * 0.18, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .frame(width: size, height: size)
     }

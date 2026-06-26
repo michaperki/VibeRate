@@ -154,6 +154,9 @@ struct CockpitView: View {
             // ("1 working · 1 idle") is detail in the footer, not the heading.
             Text(agentCountLabel(store.agents))
         } footer: {
+            // Lead with what an agent IS — "running now" — so it reads in deliberate
+            // contrast to the "Conversations" (paused, past) section below it. The
+            // two-section split looked arbitrary without this (UI review 2026-06-26).
             Text(agentsFooter(store.agents)).font(.caption2)
         }
     }
@@ -192,7 +195,10 @@ struct CockpitView: View {
             Text("Conversations")
         } footer: {
             if !offlineConversations.isEmpty {
-                Text("Tap to resume a past conversation, or + above to start a new agent.").font(.caption2)
+                // "Paused, from before" is the distinction from the live "Agents" above —
+                // both are tappable, so the UI has to say which is running (UI review 2026-06-26).
+                Text("Paused sessions from before. Tap to resume one, or + above to start a new agent.")
+                    .font(.caption2)
             }
         }
     }
@@ -326,7 +332,9 @@ struct CockpitView: View {
         agents.count == 1 ? "Agent" : "\(agents.count) agents"
     }
 
-    /// The status breakdown ("1 working · 1 idle") plus the tap hint, as footer detail.
+    /// The status breakdown ("1 working · 1 idle") plus the distinction-teaching hint, as
+    /// footer detail. "Running now" is the contrast that explains why these are *agents*
+    /// and the section below is *conversations* (paused, resumable).
     private func agentsFooter(_ agents: [RosterAgent]) -> String {
         func count(_ pred: (String?) -> Bool) -> Int { agents.filter { pred($0.status) }.count }
         let working = count { ["working", "running", "starting"].contains($0 ?? "") }
@@ -337,7 +345,8 @@ struct CockpitView: View {
         if waiting > 0 { parts.append("\(waiting) needs input") }
         if idle > 0 { parts.append("\(idle) idle") }
         let mix = parts.joined(separator: " · ")
-        return mix.isEmpty ? "Tap an agent to drive it." : "\(mix) · Tap an agent to drive it."
+        let lead = "Running now — tap to drive."
+        return mix.isEmpty ? lead : "\(mix) · \(lead)"
     }
 }
 
@@ -527,7 +536,10 @@ private struct StatusPill: View {
 }
 
 /// A labeled context-window fill bar (green → orange → red as the window fills). The
-/// label is required — a bare "100%" is meaningless, "Context 100%" is not.
+/// label is required — a bare "100%" is meaningless, "Context 100%" is not. And in the
+/// red zone the meter says "full", so the alarm-color and the number agree on meaning: a
+/// full window is *bad* (the agent's about to compact), not "almost done" (UI review
+/// 2026-06-26 — "the number and the alarm-color point in opposite directions").
 private struct CtxMeter: View {
     var label: String = "Context"
     let pct: Int
@@ -540,9 +552,14 @@ private struct CtxMeter: View {
                 Capsule().fill(Color.secondary.opacity(0.2)).frame(width: width, height: 5)
                 Capsule().fill(color).frame(width: width * CGFloat(min(pct, 100)) / 100, height: 5)
             }
-            Text("\(pct)%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            Text(readout)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(pct >= 85 ? color : .secondary)
         }
     }
+
+    /// In the danger zone, pair the % with "full" so it can't read as "almost done".
+    private var readout: String { pct >= 85 ? "\(pct)% full" : "\(pct)%" }
 
     private var color: Color { pct >= 85 ? .red : pct >= 60 ? .orange : .green }
 }

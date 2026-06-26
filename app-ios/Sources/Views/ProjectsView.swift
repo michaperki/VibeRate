@@ -30,7 +30,14 @@ struct ProjectsView: View {
                                         .foregroundStyle(.green)
                                 }
                                 Text("\(project.sessionCount) conversation\(project.sessionCount == 1 ? "" : "s")")
-                                if let vis = project.visibility { Text(vis) }
+                                // "When did I last touch this?" is the first question on a
+                                // project list — answer it (UI review 2026-06-26).
+                                if let ago = project.updatedAgo { Text("· \(ago)") }
+                                // "private" is on every row and carries no signal until
+                                // something can be public — show only the exception.
+                                if project.visibility == "public" {
+                                    Label("Public", systemImage: "globe")
+                                }
                             }
                             .font(.caption)
                             .foregroundStyle(.secondary)

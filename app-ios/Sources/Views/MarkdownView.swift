@@ -97,8 +97,10 @@ struct MarkdownView: View {
         case .quote(let s):
             HStack(alignment: .top, spacing: 8) {
                 Rectangle().fill(Color.secondary.opacity(0.4)).frame(width: 3)
+                // The accent bar carries the "quote" distinction, so the text itself can be
+                // near-body contrast instead of the hard-to-read mid-gray (UI review 2026-06-26).
                 Text(MarkdownParser.inline(s))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.primary.opacity(0.82))
                     .fixedSize(horizontal: false, vertical: true)
             }
 

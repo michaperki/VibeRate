@@ -23,6 +23,24 @@ struct Project: Codable, Identifiable, Hashable {
 
     var id: String { slug }
     var sessionCount: Int { sessions?.count ?? 0 }
+
+    /// "3h ago" from the ISO `updatedAt` — the list's "when did I last touch this"
+    /// answer (UI review 2026-06-26). nil when the server didn't send a parseable date.
+    var updatedAgo: String? {
+        guard let updatedAt, let date = Self.isoDate(updatedAt) else { return nil }
+        let fmt = RelativeDateTimeFormatter()
+        fmt.unitsStyle = .abbreviated
+        return fmt.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Parse the server's ISO-8601 timestamp, with or without fractional seconds.
+    private static func isoDate(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
+    }
 }
 
 /// One captured session in a project's `sessions` list. The native client only needs
@@ -189,6 +207,19 @@ struct BrainDoc: Codable, Identifiable, Hashable {
 
     /// Display basename — the repo-relative name's last path component.
     var base: String { name.split(separator: "/").last.map(String.init) ?? name }
+
+    /// A clean, scannable node label (UI review 2026-06-26): drop the `.md` extension,
+    /// strip the redundant `PLAN_` prefix (it's on every plan tile, eating the most
+    /// legible space — promoted to the section header instead), and turn the
+    /// SCREAMING_SNAKE name into spaced words so a long label wraps on spaces, never
+    /// hyphenates mid-word ("PLAN_AGEN-T_RUNTIME.md"). "PLAN_AGENT_RUNTIME.md" → "AGENT RUNTIME".
+    var displayLabel: String {
+        var s = base
+        if s.lowercased().hasSuffix(".md") { s = String(s.dropLast(3)) }
+        if s.uppercased().hasPrefix("PLAN_") { s = String(s.dropFirst(5)) }
+        s = s.replacingOccurrences(of: "_", with: " ")
+        return s.isEmpty ? base : s
+    }
 
     /// Checkbox completion — nil when the doc has no checklist (so it isn't a "plan").
     /// Mirrors the web regex `^[ \t>*+-]*\[([ xX])\]` over each line.

@@ -218,7 +218,15 @@ export async function peekClaude(file) {
       }
     }
   }
-  return { cwd, startedAt, userTurns, preview: truncate(firstUserText) };
+  // `firstUser` is the full-ish opening prompt (capped) for the smart-titler; `preview`
+  // stays the short list fallback. Both derive from the same first typed user turn.
+  return {
+    cwd,
+    startedAt,
+    userTurns,
+    preview: truncate(firstUserText),
+    firstUser: firstUserText ? String(firstUserText).slice(0, 1200) : null,
+  };
 }
 
 // ---------- Codex ----------
@@ -359,5 +367,13 @@ export async function peekCodex(file) {
       }
     }
   }
-  return { cwd, startedAt, userTurns, preview: truncate(firstUserText) };
+  // `firstUser` is the full-ish opening prompt (capped) for the smart-titler; `preview`
+  // stays the short list fallback. Both derive from the same first typed user turn.
+  return {
+    cwd,
+    startedAt,
+    userTurns,
+    preview: truncate(firstUserText),
+    firstUser: firstUserText ? String(firstUserText).slice(0, 1200) : null,
+  };
 }

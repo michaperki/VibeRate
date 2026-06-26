@@ -115,7 +115,11 @@ enum MarkdownNS {
                 let para = NSMutableParagraphStyle()
                 para.firstLineHeadIndent = 8
                 para.headIndent = 8
-                let q = NSMutableAttributedString(attributedString: inline(s, font: body, color: secondary))
+                // Quote text was `secondaryLabel` — a mid-gray that read noticeably harder
+                // than the body in the lower half of a doc (UI review 2026-06-26). Bump it
+                // a few steps: a softened label, not a muted gray. The indent stays the cue.
+                let quoteColor = UIColor.label.withAlphaComponent(0.82)
+                let q = NSMutableAttributedString(attributedString: inline(s, font: body, color: quoteColor))
                 q.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: q.length))
                 out.append(q)
 

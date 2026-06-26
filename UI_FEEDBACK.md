@@ -26,6 +26,61 @@ inside). Frame is `PRODUCT_STRATEGY.md`.
 > I'm explicitly not taking*. Still open: #11 *naming* (kept on-brand), #12 (landing
 > copy), #13 (positioning, Mike's call).
 
+---
+
+## 2026-06-26 — native iOS first-contact pass (a third reviewer)
+
+A third external reviewer did first-contact on the **native iOS app** (`app-ios/`),
+not the web — the tell is the labels that only exist there: the cockpit's
+"Agents / Conversations" split, "Resumable", and the top-anchored new-agent composer
+(the flipped newest-first flow, `PLAN_NATIVE_REWRITE.md`). Same headline as the web
+reviews — *the styling is fine; it's labeling and first-time comprehension* — so the
+fixes are again hierarchy, not restyle. Ranked by the reviewer: (1) auto-titled convos,
+(2) label the context %, (3) the ring legend + `PLAN_` strip. **All shipped this pass:**
+
+1. **Auto-titled conversations (the biggest scannability win) — ✅ shipped.** Captured
+   sessions titled by their raw first prompt all open with the same boilerplate
+   ("You're a retrospective agent. As a retrospec…") with the distinguishing content past
+   the truncation. New `src/titler.js` summarizes the opening message into a 2–6-word
+   title with **Haiku** (the same cheap-catalog-model pattern as `classify.js`), cached on
+   disk by the durable `claudeSessionId` so we title a convo once, ever.
+   `listWorkspaceSessions` (`src/driveIngest.js`) now serves the smart title (newest-first
+   gets the synchronous budget, the tail warms in a bounded background pass), falling back
+   to the raw preview on no-key/error. The native `ConversationRow` already renders
+   `session.title`, so it inherits the change with no client edit.
+2. **Context % no longer reads as an error — ✅ shipped.** `CtxMeter` already carried the
+   "Context" label; in the red zone (≥85%) it now reads "**\(pct)% full**" in the alarm
+   color, so the number and the color agree that a full window is *bad* (about to compact),
+   not "almost done" (`CockpitView.swift`).
+3. **Ring legend + `PLAN_` strip + no mid-word hyphenation — ✅ shipped.** The bare ring
+   number gets a `%` unit (so "63" reads as a percentage), and the plans section header now
+   carries the legend *"ring = % of checklist done"* — answering "percent of *what*". A new
+   `BrainDoc.displayLabel` (`Models.swift`) drops the `.md`, strips the redundant `PLAN_`
+   prefix (promoted to the "N plans" header), and de-snakes `SCREAMING_SNAKE` to spaced
+   words so a long tile label wraps on spaces, never hyphenates mid-word
+   ("PLAN_AGEN-T_RUNTIME.md" → "AGENT RUNTIME"). Used in the node tile + the long-press peek.
+4. **Agent ↔ Conversation distinction — ✅ shipped.** The two-section split looked
+   arbitrary because both are tappable. The footers now teach it: Agents = "**Running now**
+   — tap to drive."; Conversations = "**Paused sessions from before.** Tap to resume one, or
+   + above to start a new agent." (`CockpitView.swift`).
+5. **Projects list de-noised — ✅ shipped.** Dropped the "private" badge that repeated on
+   every row (shown only for the *public* exception now) and added a "**· 3h ago**"
+   last-touched timestamp from `updatedAt` — the first question on a project list
+   (`ProjectsView.swift` + `Project.updatedAgo`).
+6. **Markdown reader contrast — ✅ shipped.** Blockquote body text was `secondaryLabel` — a
+   mid-gray that read harder than the white prose above it. Bumped a few steps to a softened
+   `label` (≈0.82) in both render paths (`SelectableText.swift` whole-reply,
+   `MarkdownView.swift` rich); the indent / accent bar stays the "quote" cue.
+7. **New-agent composer placement — ◑ kept top-anchored (deliberate).** The reviewer wanted
+   the composer at the bottom. We *deliberately* flipped the whole Drive flow newest-first
+   with the composer on top (`PLAN_NATIVE_REWRITE.md`, commit 2f4d095) — it's the more robust
+   layout (a streaming bubble grows downward in place; no scroll-to-bottom overshoot). The
+   reviewer's "jarring relocation" concern doesn't apply (it never moves now), and the void
+   is already filled by `newAgentEmptyState` (starter chips + a "what happens when you send"
+   hint) below the composer. Kept the flip; logged the divergence here.
+
+---
+
 ## How to read the priority order
 
 The signal I trust most is **agreement** — where two strangers independently flagged

@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseClaude, peekClaude } from './parsers.js';
 import { claudeConfigDir } from './agent.js';
+import { titlesFor } from './titler.js';
 import { ingestDriveSession, getEvidence, saveEvidence, saveDocs, saveGit, saveDocHistory } from './storage.js';
 import { readEvidence, evidenceDir } from './evidence.js';
 import { extractDocs, brainBasenames } from './docs.js';
@@ -167,14 +168,26 @@ export async function listWorkspaceSessions(cwd) {
     if (!peek || !peek.userTurns) continue; // nothing typed → nothing to resume
     out.push({
       claudeSessionId: f.replace(/\.jsonl$/, ''),
-      title: peek.preview || null,
+      preview: peek.preview || null,
+      firstUser: peek.firstUser || null,
       userTurns: peek.userTurns,
       startedAt: peek.startedAt ? Date.parse(peek.startedAt) || null : null,
       lastAt: Math.round(stat.mtimeMs),
       cwd: peek.cwd || cwd,
     });
   }
-  return out.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  out.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  // Replace the raw first-prompt preview with a short, scannable Haiku title where we
+  // can (cached after the first pass; newest-first gets the synchronous budget, the
+  // tail warms in the background). Falls back to the preview when there's no key/title.
+  const titles = await titlesFor(
+    out.map((s) => ({ id: s.claudeSessionId, firstPrompt: s.firstUser })),
+  );
+  for (const s of out) {
+    s.title = titles[s.claudeSessionId] || s.preview || null;
+    delete s.firstUser;
+  }
+  return out;
 }
 
 // Load the saved transcript for a claude session id, parsed into the normalized

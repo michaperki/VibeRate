@@ -1,5 +1,12 @@
 # PLAN_NATIVE_BRAIN — porting the brain & activity surfaces to native iOS (and what Swift unlocks)
 
+**Legibility pass (2026-06-26):** a first-contact reviewer found the rings "the best
+visual element and the least legible". Shipped on `BrainView`: the bare ring number gets a
+`%` unit, the plans header carries a *"ring = % of checklist done"* legend, and node labels
+now drop `.md` + the redundant `PLAN_` prefix and de-snake to spaced words so they wrap
+cleanly instead of hyphenating mid-word (`BrainDoc.displayLabel`). Doc-reader blockquote
+contrast was bumped too. See `UI_FEEDBACK.md` §"2026-06-26 — native iOS first-contact pass".
+
 **Status:** **Phase 1 + the brain⇄chat live link (B8) shipped** (2026-06-25, client-only —
 backend already served it). The native app can now **show the brain** (doc graph at rest,
 plan completion rings, tap-to-open reader, long-press peek, haptics) **and make it move**:

@@ -8,6 +8,13 @@ canonical native intent); grounded in the web app (`public/app.js`), the native 
 `src/apns.js`, `src/mcpAsk.js`), and the history (`STORY.md` Ch.10–11, `PLAN_COCKPIT.md`,
 `PLAN_AGENT_RUNTIME.md`, `UI_FEEDBACK.md`, git log).
 
+**First-contact pass (2026-06-26):** a third reviewer hit the native app and flagged
+labeling, not styling. Shipped: **auto-titled conversations** (Haiku via `src/titler.js`,
+feeding `ConversationRow`), the **context %** now reads "% full" in the red zone (no longer
+an ambiguous alarm), and the **Agents ↔ Conversations** split is taught in the section
+footers ("Running now" vs "Paused sessions"). Full write-up + the brain/projects/markdown
+fixes in `UI_FEEDBACK.md` §"2026-06-26 — native iOS first-contact pass".
+
 ## ✅ Implementation log (2026-06-25)
 
 Shipped in one batch (client-only — **no backend changes**, the server already supported
