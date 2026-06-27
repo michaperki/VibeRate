@@ -17,6 +17,7 @@ import { mountAuth, currentUser } from './oauth.js';
 import { linkOwner, findUserByOwnerHash } from './accounts.js';
 import { mountAgent } from './agentRoutes.js';
 import { ensureSubscriptionCredentials, ensureGitAuth, setBaseUrl, setIngestHook, setTranscriptLoader, setPushNotifier } from './agent.js';
+import { ensureCodexSubscriptionCredentials } from './codexAgent.js';
 import { notifyAll as notifyPushDevices } from './apns.js';
 import { ingestDriveTurn, loadDriveTranscript } from './driveIngest.js';
 
@@ -159,6 +160,9 @@ export function startServer(port = 4317) {
   // plan), seed it into the config dir before any agent turn spawns. No-ops
   // locally where the env var is unset and ~/.claude already holds the login.
   ensureSubscriptionCredentials();
+  // Same idea for Codex: seed the operator's ChatGPT Codex login into CODEX_HOME
+  // so hosted Codex Drive uses subscription auth instead of OPENAI_API_KEY.
+  ensureCodexSubscriptionCredentials();
   // Configure git so the Drive agent can push the branches it produces using the
   // GITHUB_TOKEN secret. No-op locally / without the token.
   ensureGitAuth();

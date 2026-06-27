@@ -27,6 +27,59 @@ export function ensureCodexHome() {
   try { fs.mkdirSync(codexHome(), { recursive: true }); } catch { /* best effort */ }
 }
 
+function authPath() {
+  return path.join(codexHome(), 'auth.json');
+}
+
+function readDiskAuth() {
+  try {
+    return JSON.parse(fs.readFileSync(authPath(), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function authRefreshTime(parsed) {
+  const t = parsed && parsed.last_refresh;
+  const ms = typeof t === 'string' ? Date.parse(t) : 0;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function hasSubscriptionAuth() {
+  const auth = readDiskAuth();
+  return auth && auth.auth_mode === 'chatgpt' && auth.tokens && auth.tokens.refresh_token;
+}
+
+// Seed a ChatGPT/Codex subscription login into CODEX_HOME for hosted Drive.
+// This mirrors Claude's CLAUDE_CREDENTIALS_JSON path: the operator exports their
+// local ~/.codex/auth.json as CODEX_AUTH_JSON, and the Fly volume keeps refreshed
+// tokens across restarts. A newer on-disk refresh wins over an older secret.
+export function ensureCodexSubscriptionCredentials() {
+  ensureCodexHome();
+  const raw = process.env.CODEX_AUTH_JSON;
+  if (!raw) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.error('[codex-agent] CODEX_AUTH_JSON is not valid JSON; ignoring');
+    return;
+  }
+  if (parsed.auth_mode !== 'chatgpt' || !parsed.tokens || !parsed.tokens.refresh_token) {
+    console.error('[codex-agent] CODEX_AUTH_JSON does not look like a ChatGPT Codex login; ignoring');
+    return;
+  }
+  const disk = readDiskAuth();
+  if (disk && authRefreshTime(parsed) <= authRefreshTime(disk)) return;
+  try {
+    fs.mkdirSync(codexHome(), { recursive: true });
+    fs.writeFileSync(authPath(), raw, { mode: 0o600 });
+    console.log(`[codex-agent] seeded ChatGPT auth into ${authPath()}`);
+  } catch (e) {
+    console.error('[codex-agent] failed to seed Codex auth:', e && e.message);
+  }
+}
+
 function summarizeAction(name, input) {
   const n = String(name || '').toLowerCase();
   let verb = 'read';
@@ -135,6 +188,9 @@ function notifyRosterRemoved(id) {
 
 function childEnv(session) {
   const env = { ...process.env };
+  if (hasSubscriptionAuth()) {
+    delete env.OPENAI_API_KEY;
+  }
   if (session && session.projectSlug) {
     env.VBRT_PROJECT_SLUG = session.projectSlug;
     const origin = process.env.VBRT_PUBLIC_URL;

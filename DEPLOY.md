@@ -65,12 +65,25 @@ fly secrets set CLAUDE_CREDENTIALS_JSON="$(cat ~/.claude/.credentials.json)"
 This is a full-account bearer token — **operator-only**; never collect it from
 other users (multi-user Drive should use per-user API keys).
 
-When the seeded token goes invalid (Drive turns fail with `401 Invalid
-authentication credentials`), re-seed from a fresh `claude login` — just rotate
-the secret:
+Codex Drive uses the same hosted pattern, but seeds the Codex CLI's ChatGPT login
+instead of an API key. Log in locally with `codex login`, confirm `codex login
+status` says `Logged in using ChatGPT`, then seed the auth file:
+
+```bash
+fly secrets set CODEX_AUTH_JSON="$(cat ~/.codex/auth.json)"
+```
+
+`CODEX_HOME=/data/codex` in `fly.toml` keeps the refreshed login on the Fly
+volume. When this secret is present, Codex Drive strips `OPENAI_API_KEY` from the
+spawned Codex process so the ChatGPT subscription login wins over API billing.
+
+When a seeded token goes invalid (Drive turns fail with `401 Invalid
+authentication credentials`), re-seed from a fresh `claude login` and/or
+`codex login` — just rotate the relevant secret:
 
 ```bash
 fly secrets set CLAUDE_CREDENTIALS_JSON="$(cat ~/.claude/.credentials.json)"
+fly secrets set CODEX_AUTH_JSON="$(cat ~/.codex/auth.json)"
 ```
 
 The seed is **self-healing** (`ensureSubscriptionCredentials`): on boot it

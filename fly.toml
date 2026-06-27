@@ -36,6 +36,10 @@ primary_region = "fra"
   # CLAUDE_CREDENTIALS_JSON secret (operator's Max login) — see src/agent.js
   # ensureSubscriptionCredentials. Drive then runs on the subscription, not API.
   CLAUDE_CONFIG_DIR = "/data/claude"
+  # Codex CLI config/auth on the persistent volume. Seeded at boot from the
+  # CODEX_AUTH_JSON secret so Codex Drive uses the operator's ChatGPT subscription
+  # login instead of API billing.
+  CODEX_HOME = "/data/codex"
   # The container runs as root, and Claude Code refuses --dangerously-skip-
   # permissions (our bypassPermissions mode) as root unless it knows it's in a
   # sandbox. A Fly firecracker VM IS that sandbox boundary, so this is legit.

@@ -46,7 +46,8 @@ RUN npm ci --omit=dev
 # per-turn cache wipe, no admin-gated bootstrap.
 RUN npx playwright install chromium
 
-# The Claude Code CLI, on PATH as `claude` — what src/agent.js spawns (Fork A).
+# The Claude Code CLI and Codex CLI, on PATH as `claude` / `codex` — what
+# src/agent.js and src/codexAgent.js spawn.
 #
 # AUTO-LATEST, DETERMINISTICALLY (PLAN_HARNESS_VERSIONING.md WS2). This `RUN` text
 # never changes, so Docker would re-run it only on a cache *miss* — meaning a
@@ -58,9 +59,9 @@ RUN npx playwright install chromium
 # session runs — no `claude --version` subprocess needed at boot.
 ARG CLAUDE_CACHE_BUST=0
 RUN echo "harness cache-bust: ${CLAUDE_CACHE_BUST}" \
-  && npm install -g @anthropic-ai/claude-code \
+  && npm install -g @anthropic-ai/claude-code @openai/codex \
   && mkdir -p /opt/vbrt \
-  && printf '{"claude":"%s"}\n' "$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" > /opt/vbrt/harness.json \
+  && printf '{"claude":"%s","codex":"%s"}\n' "$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" "$(codex --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" > /opt/vbrt/harness.json \
   && cat /opt/vbrt/harness.json
 
 # App source (see .dockerignore for what's excluded).
